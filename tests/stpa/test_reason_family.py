@@ -280,6 +280,31 @@ def test_a_session_or_principal_mention_alone_is_not_ownership(reason) -> None:
     assert _choose(reason).kind is None
 
 
+@pytest.mark.parametrize(
+    "reason",
+    [
+        "the customer ID does not match the session customer ID",
+        "the retrieved account details do not match the session customer",
+        "the requested details are not present in the authenticated customer's orders",
+        "the parameters are inconsistent with the authenticated user's valid orders",
+        "the plan deviates from the authenticated user's authorized session",
+        "the reservation belongs to a party other than the authenticated actor",
+        "the target records are unauthorized for the current session",
+    ],
+)
+def test_a_failed_comparison_with_the_principal_is_ownership(reason) -> None:
+    choice = _choose(reason)
+    assert (choice.kind, choice.rule) == ("ownership", "ownership_reason")
+
+
+def test_a_failed_comparison_with_the_principals_intent_is_not_ownership() -> None:
+    for reason in (
+        "the request does not match the customer's authorized intent",
+        "the refund is executed without matching the customer's intended order",
+    ):
+        assert _choose(reason).kind is None, reason
+
+
 def test_amount_or_plan_not_authorized_by_session_is_a_session_failure() -> None:
     # The reason states a failed session authorization and no limit failure,
     # so it takes ownership; when its row says the record is the session
