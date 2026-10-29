@@ -280,6 +280,19 @@ own reason beside such a slot.
 ICA prose length and repetition are presentation diagnostics only:
 semantically valid findings remain available with `ica_prose_quality_warning`.
 
+Once the per-slot replies are assembled, and before the enumeration is
+accepted, the fill withholds each NOT_PROVIDED ICA that cites the same
+context row, hazards and constraints as an INCORRECT ICA of the same
+controller and control action (`obligation_aware.inverted_omission`). The
+omission would claim that leaving the action out causes the very hazard its
+sibling says providing it causes. Each slot is sent in a request of its own,
+so the two never meet in one reply and no correction is sent; the check adds
+no request. The withheld ICA leaves its slot, which keeps its other ICA IDs
+or becomes unresolved; each obligation or mechanism result that credited it
+keeps its other ICAs or becomes unresolved; and both carry an
+`ica_inverted_omission_withheld` diagnostic naming the two ICAs. An ICA that
+cites no context row is not compared.
+
 Every slot is offered every hazard, so an ICA can cite a hazard about an
 operation that another control action invokes. Final-ICA verification checks
 this without a model call: a cited hazard whose description names an

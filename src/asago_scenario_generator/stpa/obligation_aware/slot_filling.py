@@ -50,6 +50,9 @@ from asago_scenario_generator.stpa.models.ica_enumeration import (
 )
 from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
 from asago_scenario_generator.stpa.obligation_aware.calls import call_evidence
+from asago_scenario_generator.stpa.obligation_aware.inverted_omission import (
+    withhold_inverted_omissions,
+)
 from asago_scenario_generator.stpa.obligation_aware.contracts import (
     DEVIATION_FIELD_BY_UCA_TYPE,
     AnalysisControls,
@@ -797,61 +800,6 @@ def _deviation_style_codes(text: str, action_description: str) -> list[str]:
         ),
     )
     return [code for matched, code in checks if matched]
-
-
-def _inverted_omission_errors(
-    drafts: Sequence[tuple[SlotPlaceholder, SlotIcaDraft]],
-) -> list[str]:
-    """List each NOT_PROVIDED finding that repeats an INCORRECT one of its action.
-
-    The two findings are on the same controller and control action and cite
-    the same context row, hazards and constraints. The NOT_PROVIDED finding
-    then claims that omitting the action in that context causes the hazard
-    that the INCORRECT finding says providing it causes. A prose rule cannot
-    tell which one is right, so the model is asked to settle it.
-    """
-
-    def key(finding: IcaFindingDraft) -> tuple[str | None, frozenset, frozenset]:
-        return (
-            finding.context_row,
-            frozenset(finding.related_hazard_ids),
-            frozenset(finding.related_constraint_ids),
-        )
-
-    def action(slot: SlotPlaceholder) -> tuple[str | None, str]:
-        return (slot.responsibility or slot.coordination_link, slot.control_action)
-
-    provided: dict[tuple, tuple[str, int]] = {}
-    for slot, draft in drafts:
-        if slot.uca_type is UCAType.incorrect and not draft.is_na:
-            for index, finding in enumerate(draft.findings):
-                if finding.context_row is not None:
-                    provided.setdefault(
-                        (action(slot), key(finding)), (slot.slot_id, index)
-                    )
-    errors = []
-    for slot, draft in drafts:
-        if slot.uca_type is not UCAType.not_provided or draft.is_na:
-            continue
-        for index, finding in enumerate(draft.findings):
-            match = provided.get((action(slot), key(finding)))
-            if match is None:
-                continue
-            row, hazards, constraints = key(finding)
-            errors.append(
-                f"{slot.slot_id} finding {index} repeats {match[0]} finding "
-                f"{match[1]}: both cite context row {row}, hazards "
-                f"{', '.join(sorted(hazards))} and constraints "
-                f"{', '.join(sorted(constraints))}. The NOT_PROVIDED finding "
-                "states that omitting the action in that context causes the "
-                "hazard, and the INCORRECT finding that providing it does. If "
-                "providing the action in that context is the hazard, remove the "
-                "NOT_PROVIDED finding (set the slot to N/A when no finding "
-                "remains). Keep it only when the omission itself leads to a "
-                "hazard or constraint the INCORRECT finding does not cite, and "
-                "cite only those."
-            )
-    return errors
 
 
 def _contains_example(text: str) -> bool:
@@ -2439,6 +2387,9 @@ def fill_synthesis_slots(
             call_ref=call_ref,
         )
 
+    withhold_inverted_omissions(
+        state.all_filled, state.all_pairs, state.mechanism_pairs, state.diagnostics
+    )
     ordered_slots = tuple(state.all_filled[key] for key in sorted(state.all_filled))
     enumeration = ICAEnumeration(slots=list(ordered_slots))
     enumeration.validate_against(loss_analysis, control_structure)

@@ -138,7 +138,6 @@ from asago_scenario_generator.stpa.obligation_aware.slot_filling import (
     _draft_considerations,
     _draft_mechanism_considerations,
     _finding_context,
-    _inverted_omission_errors,
     _slot_authority,
     _validate_finding_type,
     compile_slot_provider_entry,
@@ -1477,14 +1476,12 @@ def _slot_payload_errors(payload: _Model, request: SynthesisSlotRequest) -> list
     )
     index = build_stpa_index(request.control_structure)
     errors: list[str] = []
-    drafts: list[tuple[SlotPlaceholder, SlotIcaDraft]] = []
     for value in payload.filled_slots:
         expected = expected_by_id.get(value.slot_id)
         if expected is None:
             errors.append(f"slot response references unknown slot {value.slot_id}")
             continue
         draft = _materialize_slot_draft(value, expected)
-        drafts.append((expected, draft))
         # Resolve owner/action authority before validating findings.  This is
         # the same deterministic source used by the compiler, but does not
         # create an ICA or alter the model's prose.
@@ -1507,7 +1504,6 @@ def _slot_payload_errors(payload: _Model, request: SynthesisSlotRequest) -> list
             message = _consideration_error(result, draft, route_by_pair)
             if message is not None:
                 errors.append(f"{value.slot_id} {result.obligation_handle}: {message}")
-    errors.extend(_inverted_omission_errors(drafts))
     return errors
 
 
