@@ -1,6 +1,8 @@
 template: stage2_call2b_user.j2
 cases:
   neutral-status:
+    forbidden:
+      - These observed operations declare an output
     required:
       - functional outputs
       - internal request/prompt payload is not `model_output`
@@ -35,3 +37,23 @@ cases:
   one-responsibility:
     required:
       - "Governing security constraints:"
+  operation-results:
+    once:
+      - >-
+        These observed operations declare an output, so they return what they
+        report to the responsibility that invokes them:
+        `operation:cancel_order`, `operation:lookup_order`.
+    required:
+      - Decide from the operation's description and the use case what its result tells that responsibility
+      - whether a requested change took effect or which record was returned
+      - the responsibility needs a process-model variable for that information, kept current by a feedback channel
+      - "That channel's `source` is where the reported information originates"
+      - "record or state data is `operation_result`; free text from documents or other authors is `retrieved_content`"
+      - >-
+        A result that only acknowledges that a request was accepted or handed
+        off reports that acknowledgement, not the state of whoever handles the
+        request
+      - When the evidence does not say what a result reports, add no variable or channel for it
+    forbidden:
+      - "`operation:notify_courier`,"
+      - "`operation:notify_courier`."

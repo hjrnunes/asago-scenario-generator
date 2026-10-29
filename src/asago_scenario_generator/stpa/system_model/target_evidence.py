@@ -53,12 +53,19 @@ class EvidenceArgument:
 
 @dataclass(frozen=True)
 class EvidenceOperation:
-    """One observed tool with its arguments and interpreted effect."""
+    """One observed tool with its arguments and interpreted effect.
+
+    ``returns_result`` records whether the tool declares an output, which
+    it returns to the caller that invoked it.  A declared empty schema still
+    declares one; only an absent schema leaves it unestablished.  The flag
+    says nothing about what the output reports or how far it can be trusted.
+    """
 
     name: str
     description: str
     arguments: tuple[EvidenceArgument, ...]
     effect: str | None = None
+    returns_result: bool = False
 
     @property
     def ref(self) -> str:
@@ -226,6 +233,7 @@ def _operations(profile: ExecutionTargetProfile) -> tuple[EvidenceOperation, ...
                 description=(tool.description or "").strip(),
                 arguments=arguments,
                 effect=None if effect in (None, "unknown") else effect,
+                returns_result=tool.output_schema is not None,
             )
         )
     return tuple(sorted(result, key=lambda item: item.name))

@@ -119,8 +119,16 @@ settle it.
 
 Across the sample the pattern is the same: actions that write or notify
 through a tool have no `operation_result` channel for that tool's result.
-That the pattern recurs across use cases and arms suggests a systematic
-omission in how the structure is derived; this was not traced to a cause.
+The likely cause is in how Stage 2 is prompted, not in what its schema
+allows. A feedback channel exists only as the update of a process-model part
+(`FeedbackChannel.updates` is required, and Call 2b derives feedback part by
+part); Call 2a derives the parts before any action exists and is never asked
+what a controller learns from the operations it invokes; and the evidence
+block did not say whether an operation returns a result. Call 2b may still
+declare an `operation_result` channel from a process, and the critic revision
+may add parts and channels, so these explain a tendency to omit the feedback,
+not an impossibility. See
+[Feedback from invoked operations](#feedback-from-invoked-operations).
 
 ### `hazard_without_ica`
 
@@ -169,3 +177,90 @@ none was established as a system deficiency: in every sampled feedback
 finding the target's tool returns a result the structure does not model.
 
 `ica_without_related_constraints` produced no finding to sample.
+
+## Feedback from invoked operations
+
+The Stage 2 evidence block now names the observed operations that declare an
+output and asks the model, in Calls 2a and 2b and in the critic and its
+revision, what each result tells the responsibility that invokes it: a
+process-model variable and a feedback channel only when a later decision
+depends on the result, with the channel's `source` and `source_kind` taken
+from what the result carries (record or state data, or retrieved free text),
+an acknowledgement read as an acknowledgement, and nothing added when the
+evidence does not say what a result reports. Code adds no channel itself: a
+declared output proves only that a payload returns to the caller, not where
+its information originates or how far it can be trusted.
+
+This is a prompt change, so it cannot change saved runs and has no offline
+after-numbers. The sweep now measures what it targets: each finding of the
+two feedback checks lists the `effect_kind` and bound `operation` of the
+actions it names, and `feedback_by_action` in the counts splits those
+findings into `bound_tool_call` (the finding names a `tool_call` bound to an
+observed operation) and `other`.
+
+### Corpus and baseline
+
+The corpus is the 219 run directories matching `stpo7-*` and `stpo7b-*`
+under the orchestrator's runs directory (`RUNS`). The sweep's
+`spec-diagnostics-runs.jsonl` lists each run with its status; for this corpus
+its SHA-256 is
+`03cae258afa65871d7c6aa49e577d7328e2325c2270de68ddca0cc7c4109b59e`.
+
+```bash
+OUT=$(mktemp -d)
+uv run --frozen python scripts/spec_diagnostics_sweep.py --out-dir "$OUT/final" \
+    RUNS/stpo7-* RUNS/stpo7b-*
+uv run --frozen python scripts/spec_diagnostics_sweep.py --stage2-only \
+    --out-dir "$OUT/stage2" RUNS/stpo7-* RUNS/stpo7b-*
+```
+
+| Check | Mode | Runs diagnosed | `bound_tool_call` (runs, findings) | `other` (runs, findings) |
+| --- | --- | ---: | --- | --- |
+| `controlled_process_without_feedback` | final | 63 | 58, 168 | 39, 110 |
+| `controlled_process_unobserved` | final | 63 | 51, 118 | 18, 22 |
+| `controlled_process_without_feedback` | `--stage2-only` | 69 | 63, 178 | 42, 114 |
+| `controlled_process_unobserved` | `--stage2-only` | 69 | 56, 127 | 20, 24 |
+
+`--stage2-only` diagnoses the `loss-analysis.yaml` and
+`control-structure.yaml` Stage 2 published, unpinned and without the ICA
+checks; it adds the 6 runs that published a structure but no synthesis
+manifest. In every run the structure the sweep reads has no bound operation
+the evidence did not list, because evidence binding drops one. The prompt
+reaches only operations that declare an output; in this corpus every tool of
+every run's discovery profile declares one (1823 of 1823 tool rows):
+
+```bash
+uv run --frozen python -c 'import glob, json; tools = [t for p in glob.glob("RUNS/stpo7*/stages/discover/output/execution-target-profile.json") for t in json.load(open(p))["inventory"]["tools"]]; print(len(tools), sum(t.get("output_schema") is not None for t in tools))'
+```
+
+On the `stpo7b-current` arm, the arm the live check repeats,
+`--stage2-only` gives these `controlled_process_without_feedback` findings
+that name a bound tool call: airbnb 12 in 5 runs, klarna 22 in 8, occiai 20
+in 5 (54 in 18 runs).
+
+### Live check
+
+The instruction's effect needs a live Stage 2 run; it was not run.
+
+- Profile `gemma4-oc`, with the profiles file and seed profile the
+  `stpo7b-current` runs recorded.
+- Six runs: `stpo7b-current-{airbnb,klarna,occiai}-d1` and `-d2`, each
+  repeated with its recorded `generate` arguments and new output directories,
+  `--replay-calls` set to the saved run's output directory and
+  `--replay-fill`. Stage 1 and Call 1 render as before and replay; Calls 2a,
+  2b and 3, the critic and the revision render differently and go live.
+- A budget of 16 live requests per run (`--max-live-requests 16`; 96 at
+  most). A Stage 2 needs 4 to 6
+  live requests without corrections: Calls 2a, 2b and 3, the critic, and the
+  revision when the critic reports a gap. The rest covers the bounded
+  corrections and transport retries listed in
+  `docs/architecture/model-reasks.md`. Later stages exhaust the budget and the
+  run stops after Stage 2 has published its structure.
+- Measure with `--stage2-only` on the new output directories and compare
+  `feedback_by_action.controlled_process_without_feedback.bound_tool_call`
+  with the same six saved runs. Also read each new channel sourced from an
+  invoked operation's target: its `source_kind` (retrieved free text must not
+  be `operation_result`), and for acknowledgement-only operations such as
+  escalations, whether the variable claims more than the acknowledgement.
+  Report Stage 2 failures (`stage_errors`) separately; spend comes from
+  `provider-calls.jsonl`.

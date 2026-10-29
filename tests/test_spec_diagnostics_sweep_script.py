@@ -552,3 +552,82 @@ def test_the_sweep_refuses_colliding_run_names_before_writing(tmp_path: Path):
         _script().sweep([tmp_path / "a" / "run", tmp_path / "b" / "run"], out)
 
     assert not out.exists()
+
+
+def test_feedback_findings_are_split_by_the_actions_they_name(tmp_path: Path):
+    """A finding naming a tool call bound to an operation is counted apart."""
+    structure = _structure()
+    resp = structure["responsibilities"][0]
+    resp["control_actions"][1]["operation"] = "op_two"
+    resp["control_actions"].append(
+        {
+            "ca_id": "CA-1-3",
+            "description": "Reply",
+            "target": {"type": "controlled_process", "id": "CP-3"},
+            "effect_kind": "model_output",
+            "temporality": "discrete",
+            "process_model_refs": ["PM-1-1"],
+        }
+    )
+    structure["controlled_processes"].append({"cp_id": "CP-3", "description": "Three"})
+    _run(tmp_path / "runs" / "run-a", structure=structure)
+    out = tmp_path / "out"
+
+    counts = _script().sweep([tmp_path / "runs" / "run-a"], out)
+
+    split = {"runs_with_findings": 1, "findings": 1}
+    assert counts["feedback_by_action"] == {
+        check: {"bound_tool_call": split, "other": split}
+        for check in (
+            "controlled_process_without_feedback",
+            "controlled_process_unobserved",
+        )
+    }
+    rows = [
+        json.loads(line)
+        for line in (out / "spec-diagnostics-findings.jsonl").read_text().splitlines()
+    ]
+    actions = {
+        tuple(row["subject_ids"]): row["actions"]
+        for row in rows
+        if row["check"] == "controlled_process_without_feedback"
+    }
+    assert actions == {
+        ("CP-2", "RESP-1", "CA-1-2"): [
+            {"ca_id": "CA-1-2", "effect_kind": "tool_call", "operation": "op_two"}
+        ],
+        ("CP-3", "RESP-1", "CA-1-3"): [
+            {"ca_id": "CA-1-3", "effect_kind": "model_output", "operation": None}
+        ],
+    }
+    assert all(
+        ("actions" in row) == (row["check"] in counts["feedback_by_action"])
+        for row in rows
+    )
+
+
+def test_stage2_only_diagnoses_the_published_stage2_structure(tmp_path: Path):
+    """A run stopped after Stage 2 is diagnosed on its Stage 2 artifacts."""
+    output = _run(tmp_path / "runs" / "run-a")
+    (output / "synthesis-manifest.yaml").unlink()
+    (output / "target-realization.yaml").unlink()
+    out = tmp_path / "out"
+
+    counts = _script().main(
+        ["--stage2-only", "--out-dir", str(out), str(tmp_path / "runs" / "run-a")]
+    )
+
+    assert counts == 0
+    written = json.loads((out / "spec-diagnostics-counts.json").read_text())
+    assert written["diagnosed"] == 1
+    assert written["checks"]["controlled_process_unobserved"] == {
+        "runs_checked": 1,
+        "runs_with_findings": 1,
+        "findings": 1,
+    }
+    assert written["checks"]["hazard_without_ica"]["runs_checked"] == 0
+    diagnostics = read_spec_diagnostics(out / "run-a" / SPEC_DIAGNOSTICS_FILENAME)
+    reasons = {s.check: s.reason for s in diagnostics.checks}
+    assert "Stage 2" in reasons[SpecCheck.hazard_without_ica]
+    # Without the flag the same run has no final artifacts to diagnose.
+    assert _skip_reason(tmp_path / "runs" / "run-a").startswith("no synthesis manifest")

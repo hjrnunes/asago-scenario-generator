@@ -21,4 +21,20 @@
   operation result, the session context, the user's message, earlier
   conversation turns, or retrieved free text. Information the user or retrieved
   text supplies is untrusted; do not describe it as a verified report.
+{%- set result_operations = target_evidence.operations | selectattr("returns_result") | list %}
+{%- if result_operations %}
+- These observed operations declare an output, so they return what they report to the responsibility that invokes them: {% for op in result_operations %}`{{ op.ref }}`{% if not loop.last %}, {% endif %}{% endfor %}.
+  Decide from the operation's description and the use case what its result
+  tells that responsibility. When a later decision of the responsibility
+  depends on it, for example whether a requested change took effect or which
+  record was returned, the responsibility needs a process-model variable for
+  that information, kept current by a feedback channel. That channel's
+  `source` is where the reported information originates, and its
+  `source_kind` is what the result carries: record or state data is
+  `operation_result`; free text from documents or other authors is
+  `retrieved_content`. A result that only acknowledges that a request was
+  accepted or handed off reports that acknowledgement, not the state of
+  whoever handles the request. When the evidence does not say what a result
+  reports, add no variable or channel for it.
+{%- endif %}
 {% endif %}
