@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -78,10 +79,13 @@ def request_second_correction(
     prior_result: LLMResult | None,
     result_validator: Callable[[BaseModel], BaseModel | None],
     response_parser: Callable[..., BaseModel],
+    response_view: Callable[[Any], Any] | None = None,
 ) -> CallOutcome:
     """Send the last correction: the original prompt, the second reply, its failure.
 
-    The request ends the chain: no length retry and no further correction.
+    The second reply is shown through ``response_view``, as the first
+    correction showed the first. The request ends the chain: no length retry
+    and no further correction.
     """
     return call_with_policy(
         llm_client=llm_client,
@@ -94,6 +98,7 @@ def request_second_correction(
             include_schema=False,
             prior_result=prior_result,
             include_prior_response=True,
+            response_view=response_view,
         ),
         response_format=response_format,
         run_dir=run_dir,

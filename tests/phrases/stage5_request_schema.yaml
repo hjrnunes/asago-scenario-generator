@@ -22,6 +22,19 @@ cases:
         "search_manual", "update_gadget"]}, {"type": "null"}], "title":
         "Requires Prior", "description": "Applies when `kind` is `order`; null
         otherwise."}
+      # failure_call.operation_name
+      - >-
+        "operation_name": {"minLength": 1, "title": "Operation Name", "type":
+        "string", "enum": ["get_gadget", "get_member", "open_ticket",
+        "schedule_service", "search_manual", "update_gadget"]}}, "required":
+        ["kind", "operation_name"], "title": "FailureCall"
+      # observation_criteria[].operation_name, nullable: the string branch
+      # carries the enum.
+      - >-
+        "operation_name": {"anyOf": [{"minLength": 1, "type": "string", "enum":
+        ["get_gadget", "get_member", "open_ticket", "schedule_service",
+        "search_manual", "update_gadget"]}, {"type": "null"}], "default": null,
+        "title": "Operation Name"}, "reason":
     required:
       # The argument operand's operation, on both the left and right operand.
       - >-
@@ -31,7 +44,9 @@ cases:
         "Operation", "description": "Applies when `source` is `argument`; null
         otherwise."}
     forbidden:
-      # No condition operation field is left an open string.
+      # No condition, failure call or criterion operation field is left an
+      # open string. (The safe outcome's operation_name is not closed.)
       - '"operation": {"minLength": 1, "title": "Operation", "type": "string"}'
       - '"operation": {"anyOf": [{"minLength": 1, "type": "string"}, {"type": "null"}]'
       - '"requires_prior": {"anyOf": [{"minLength": 1, "type": "string"}, {"type": "null"}]'
+      - '"operation_name": {"minLength": 1, "title": "Operation Name", "type": "string"}'

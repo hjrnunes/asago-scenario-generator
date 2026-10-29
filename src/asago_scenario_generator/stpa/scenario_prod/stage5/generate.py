@@ -62,6 +62,7 @@ from .sources import (
     _causal_source_choices,
 )
 from .condition_retry import earns_second_correction, request_second_correction
+from .prior_reply import without_unknown_operations
 from .condition_routing import condition_removal, route_without_condition
 from .records import (
     _write_stage5_normalization_record,
@@ -256,9 +257,13 @@ def _generate_semantics(
             observation_contract is not None
             and observation_contract.supports_evidence("tool_call")
         ),
-        condition_operations=tuple(sorted(condition_universe.operations)),
+        operations=tuple(sorted(condition_universe.operations)),
     )
     checks: list[_NormalDraftCheck] = []
+
+    def shown_reply(content: object) -> object:
+        """Show a correction the prior reply without names outside the inventory."""
+        return without_unknown_operations(content, condition_universe.operations)
 
     def validate(value: BaseModel, *, condition_required: bool = True) -> BaseModel:
         check = _validate_normal_provider_payload(
@@ -423,6 +428,7 @@ def _generate_semantics(
             response_parser=lambda value, _cleanup: _parse_context_bdi_result(
                 value, response_format
             ),
+            response_view=shown_reply,
         )
         issues = issues_of(third.failure)
         recovered = recover(third.error, third.result, issues)
@@ -448,6 +454,7 @@ def _generate_semantics(
         temperature=temperature,
         validation_retry_feedback=feedback,
         result_validator=validate,
+        response_view=shown_reply,
     )
     recovered = recover(first.error, first.result, first.issues)
     route = recovered[1] if recovered is not None else None
@@ -516,8 +523,11 @@ def _call_bdi_with_bounded_length_retry(
     slot_id: str | None = None,
     scenario_id: str | None = None,
     result_validator: Callable[[BaseModel], BaseModel | None] | None = None,
+    response_view: Callable[[object], object] | None = None,
 ) -> _BdiCall:
     """Call the closed Stage 5 contract with its one length-only retry.
+
+    A correction shows the prior reply through ``response_view``.
 
     Returns the draft, the error, the provider result of the last attempt
     (``None`` when no response arrived), and the issues the last attempt's
@@ -538,6 +548,7 @@ def _call_bdi_with_bounded_length_retry(
         feedback=validation_retry_feedback,
         include_schema=False,
         include_response=True,
+        response_view=response_view,
     )
 
     def call(
