@@ -879,6 +879,12 @@ CASES: dict[str, Callable[[str], str]] = {
     "unassessed-critic": _system_model(
         **{**FEEDBACK_AUTHORITY_CRITIC, "control_structure": _obligation_structure()}
     ),
+    "operation-results-critic": _system_model(
+        **{
+            **FEEDBACK_AUTHORITY_CRITIC,
+            "target_evidence": OPERATION_RESULTS["target_evidence"],
+        }
+    ),
     "feedback-authority-call3": _system_model(**FEEDBACK_AUTHORITY_CALL3),
     "unassessed-call3": _system_model(
         **{**FEEDBACK_AUTHORITY_CALL3, "control_structure": call3_inputs()[1]}
@@ -892,6 +898,9 @@ CASES: dict[str, Callable[[str], str]] = {
     ),
     "stated-rules": _system_model(stated_rules=True),
     "no-findings": _system_model(**NO_FINDINGS),
+    "operation-results-revision": _system_model(
+        **{**NO_FINDINGS, "target_evidence": OPERATION_RESULTS["target_evidence"]}
+    ),
     "blank-hazard-records": _system_model(
         records=["hazard addition NEW-1", "hazard edit H-2"]
     ),

@@ -549,7 +549,10 @@ revision may model it, but nothing asked for it. With target evidence, the
 Stage 2 evidence block names each observed operation that declares an output
 and asks what its result tells the responsibility that invokes it: a variable
 and channel only where a later decision depends on it, with the channel's
-source and trust taken from what the result carries. Code adds no such
+source and trust taken from what the result carries. An answer or other text
+an operation returns in reply to a question, or the refusal or hand-off it
+returns instead, is retrieved content, and its variable claims no record
+state the text does not carry. Code adds no such
 channel itself, since a declared output does not establish where its
 information originates or whether an adversary can author it.
 

@@ -29,6 +29,10 @@ from asago_scenario_generator.stpa.system_model.control_structure import (
     CoordinationAnalysis,
     _CoordinationProviderEnvelope,
 )
+from asago_scenario_generator.stpa.system_model.critic import (
+    CriticFindings,
+    RevisionDelta,
+)
 from asago_scenario_generator.stpa.system_model.target_evidence import (
     build_target_evidence,
 )
@@ -42,6 +46,21 @@ from tests.stpa.sp1_helpers import (
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "miniocciai-baseline-rev2"
 
 RESULT_INSTRUCTION = "return what they report to the responsibility that invokes them"
+ANSWER_TEXT_INSTRUCTION = (
+    "An answer, summary, or other text that an operation returns in reply to "
+    "a question is `retrieved_content`, not `operation_result`"
+)
+ANSWER_STATE_INSTRUCTION = (
+    "A variable that such a result updates tracks what the text says or "
+    "whether the operation answered, refused, or handed off; it does not "
+    "claim the state of a record"
+)
+EVIDENCE_STEPS = {
+    "call_2a_responsibilities",
+    "call_2b_control_elements",
+    "critic",
+    "revision",
+}
 
 
 def _profile() -> ExecutionTargetProfile:
@@ -117,8 +136,33 @@ _ACK_AND_RETRIEVAL = {
 }
 
 
-def _run(tmp_path: Path, profile: ExecutionTargetProfile):
+# A critic gap the revision answers with no change, so the revision request is
+# rendered too.
+_FEEDBACK_GAP = {
+    "gaps": [
+        {
+            "gap_type": "missing_feedback",
+            "description": "Missing outcome feedback",
+            "related_attack_path": "Attacker exploits an unchecked result",
+            "suggested_remedy": "Add outcome feedback",
+        }
+    ],
+    "checklist_results": {"Outcome verification": "absent_unjustified"},
+    "taxonomy_probe_results": {},
+}
+_NO_CHANGE = {
+    "new_responsibilities": [],
+    "new_controlled_processes": [],
+    "new_coordination_links": [],
+    "modified_responsibilities": [],
+}
+
+
+def _run(tmp_path: Path, profile: ExecutionTargetProfile, *, critic_gap=False):
     client = setup_sp1_mock_client()
+    if critic_gap:
+        client.set_response_for(CriticFindings, _FEEDBACK_GAP)
+        client.set_response_for(RevisionDelta, _NO_CHANGE)
     client.set_response_for(ControlElementSet, _ACK_AND_RETRIEVAL)
     review = valid_empty_coordination_analysis_dict(
         constraint_ids=("SC-1", "SC-2"), action_ids=("CA-1-1", "CA-1-2")
@@ -135,29 +179,55 @@ def _run(tmp_path: Path, profile: ExecutionTargetProfile):
     return result
 
 
+def _evidence_requests(tmp_path: Path) -> dict[str, str]:
+    """The user prompt each Stage 2 step that renders the evidence block sent."""
+    rendered = {
+        entry["step"]: " ".join(entry["user_prompt_text"].split())
+        for entry in read_calls_jsonl(tmp_path)
+        if entry["step"] in EVIDENCE_STEPS
+    }
+    assert set(rendered) == EVIDENCE_STEPS
+    return rendered
+
+
 def test_stage2_requests_name_the_operations_that_return_a_result(
     tmp_path: Path,
 ) -> None:
-    _run(tmp_path, _profile_with_outputs(get_referral=None))
+    _run(tmp_path, _profile_with_outputs(get_referral=None), critic_gap=True)
 
-    rendered = {
-        entry["step"]: entry["user_prompt_text"]
-        for entry in read_calls_jsonl(tmp_path)
-        if entry["step"]
-        in {"call_2a_responsibilities", "call_2b_control_elements", "critic"}
-    }
-    assert set(rendered) == {
-        "call_2a_responsibilities",
-        "call_2b_control_elements",
-        "critic",
-    }
-    for prompt in rendered.values():
-        text = " ".join(prompt.split())
+    for text in _evidence_requests(tmp_path).values():
         assert RESULT_INSTRUCTION in text
         listed = text.split(RESULT_INSTRUCTION, 1)[1].split(".", 1)[0]
         assert "`operation:escalate_to_clinician`" in listed
         assert "`operation:get_education`" in listed
         assert "operation:get_referral" not in listed
+
+
+def test_stage2_requests_read_an_answer_as_retrieved_text_without_record_state(
+    tmp_path: Path,
+) -> None:
+    _run(tmp_path, _profile(), critic_gap=True)
+
+    for step, text in _evidence_requests(tmp_path).items():
+        result_rules = text.split(RESULT_INSTRUCTION, 1)[1]
+        assert ANSWER_TEXT_INSTRUCTION in result_rules, step
+        assert ANSWER_STATE_INSTRUCTION in result_rules, step
+        assert text.count(ANSWER_TEXT_INSTRUCTION) == 1, step
+
+
+def test_stage2_requests_omit_the_answer_rule_without_a_returning_operation(
+    tmp_path: Path,
+) -> None:
+    profile = _profile()
+    _run(
+        tmp_path,
+        _profile_with_outputs(**{tool.name: None for tool in profile.inventory.tools}),
+        critic_gap=True,
+    )
+
+    for step, text in _evidence_requests(tmp_path).items():
+        assert "## Discovered target evidence" in text, step
+        assert ANSWER_TEXT_INSTRUCTION not in text, step
 
 
 def test_code_adds_no_feedback_for_an_acknowledgement_or_a_retrieval(

@@ -186,7 +186,9 @@ revision, what each result tells the responsibility that invokes it: a
 process-model variable and a feedback channel only when a later decision
 depends on the result, with the channel's `source` and `source_kind` taken
 from what the result carries (record or state data, or retrieved free text),
-an acknowledgement read as an acknowledgement, and nothing added when the
+an answer, refusal or hand-off signal returned in reply to a question read as
+retrieved text that claims no record state, an acknowledgement read as an
+acknowledgement, and nothing added when the
 evidence does not say what a result reports. Code adds no channel itself: a
 declared output proves only that a payload returns to the caller, not where
 its information originates or how far it can be trusted.

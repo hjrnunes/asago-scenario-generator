@@ -32,9 +32,17 @@
   `source` is where the reported information originates, and its
   `source_kind` is what the result carries: record or state data is
   `operation_result`; free text from documents or other authors is
-  `retrieved_content`. A result that only acknowledges that a request was
-  accepted or handed off reports that acknowledgement, not the state of
-  whoever handles the request. When the evidence does not say what a result
-  reports, add no variable or channel for it.
+  `retrieved_content`. An answer, summary, or other text that an operation
+  returns in reply to a question is `retrieved_content`, not
+  `operation_result`, even when the operation draws it from approved or
+  curated material; so is a refusal or hand-off signal it returns in place of
+  that text. A variable that such a result updates tracks what the text says
+  or whether the operation answered, refused, or handed off; it does not
+  claim the state of a record, such as whether a record is approved,
+  current, or reviewed, because the text does not carry that state. A result
+  that only acknowledges that a request was accepted or handed off reports
+  that acknowledgement, not the state of whoever handles the request. When
+  the evidence does not say what a result reports, add no variable or
+  channel for it.
 {%- endif %}
 {% endif %}

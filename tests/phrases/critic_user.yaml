@@ -25,3 +25,20 @@ cases:
   unassessed-critic:
     forbidden:
       - authority for update
+  operation-results-critic:
+    once:
+      - >-
+        These observed operations declare an output, so they return what they
+        report to the responsibility that invokes them:
+        `operation:cancel_order`, `operation:lookup_order`.
+    required:
+      - >-
+        An answer, summary, or other text that an operation returns in reply to
+        a question is `retrieved_content`, not `operation_result`, even when the
+        operation draws it from approved or curated material; so is a refusal or
+        hand-off signal it returns in place of that text.
+      - >-
+        A variable that such a result updates tracks what the text says or
+        whether the operation answered, refused, or handed off; it does not
+        claim the state of a record, such as whether a record is approved,
+        current, or reviewed, because the text does not carry that state.
