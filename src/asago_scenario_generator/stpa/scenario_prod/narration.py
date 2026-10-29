@@ -178,13 +178,38 @@ _DENIED = re.compile(
     r"|not\s+because\s+of)|n't)\s+(?:(?:a|an|any|the|its|their)\s+)?$",
     re.IGNORECASE,
 )
-# A rule, policy, logic, criterion, threshold, algorithm or heuristic directly
-# in front of a ``verb`` wording is its subject: "its rule wrongly concludes"
-# describes the faulty decision rule, not a belief of the agent.
-_RULE_SUBJECT = re.compile(
-    r"\b(?:rules?|polic(?:y|ies)|logic|criterion|criteria|thresholds?"
+# A rule noun phrase is the subject of a ``verb`` wording, so that "its rule
+# wrongly concludes" describes the faulty decision rule rather than a belief of
+# the agent, only when it opens its clause and the wording follows it with at
+# most an auxiliary and an adverb between. A clause opens at the start of the
+# text; after a comma, semicolon, colon or dash, optionally followed by a
+# coordinator ("the agent acts, and its rule ..."); after a subordinator that
+# always starts a clause ("because", "when", "although"); or after "that" or
+# "which" followed by a determiner ("that its rule"). The noun phrase is an
+# optional determiner, at most two modifiers from a closed set (a possessive,
+# a hyphenated compound, "decision", "own", or another rule noun), and a rule
+# noun. Anything else, such as a verb or preposition whose object the rule is
+# ("applies its rule then wrongly assumes", "under its policy it wrongly
+# assumes"), a bare coordinator ("applies its threshold and its rule then
+# wrongly assumes") or "that" as a determiner ("applies that rule then"),
+# leaves the agent as the subject: a false positive costs one correction, a
+# bypass publishes a false belief.
+_RULE_NOUN = (
+    r"(?:rules?|polic(?:y|ies)|logic|criterion|criteria|thresholds?"
     r"|algorithms?|heuristics?)"
-    r"\s+(?:(?:is|was|does|did|can|may|might|will|would)\s+)?"
+)
+_DETERMINER = r"(?:the|its|their|this|these|those|each|every|a|an)"
+_RULE_SUBJECT = re.compile(
+    r"(?:"
+    r"(?:^|[,;:\u2013\u2014]\s*(?:(?:and|but|or|yet|so)\s+)?|\s-\s+"
+    r"|\b(?:because|since|when|whenever|while|where|whereas|if|although"
+    r"|though)\s+)"
+    rf"(?:(?:{_DETERMINER}|that)\s+)?"
+    rf"|\b(?:that|which)\s+{_DETERMINER}\s+"
+    r")"
+    rf"(?:(?:own|decision|\w+['\u2019]s|\w+(?:-\w+)+|{_RULE_NOUN})\s+){{0,2}}"
+    rf"{_RULE_NOUN}\s+"
+    r"(?:(?:is|was|does|did|can|may|might|will|would)\s+)?"
     r"(?:(?:\w+ly|also|still|then|always|often)\s+)?$",
     re.IGNORECASE,
 )
@@ -795,8 +820,9 @@ def false_belief_wording(text: str) -> str | None:
 
     Wording that a negation directly in front denies, such as "holds no false
     belief", does not count, and neither does a belief verb whose subject is
-    the rule, such as "its rule wrongly concludes". A false-belief noun phrase
-    counts whatever comes before it: a rule holds no belief.
+    a rule noun phrase that opens its clause, such as "because its rule
+    wrongly concludes". A false-belief noun phrase counts whatever comes
+    before it: a rule holds no belief.
     """
     for match in _FALSE_BELIEF.finditer(text):
         before = text[: match.start()]

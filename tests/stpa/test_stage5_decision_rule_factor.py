@@ -553,6 +553,30 @@ FALSE_BELIEF_REASONS = (
     "The agent acts because the agent, following its rule, wrongly assumes the "
     "batch is approved.",
     "The agent acts because it misjudges the batch as approved.",
+    # A rule that is the object of the agent's verb, or that a preposition
+    # governs, is not the subject of the belief verb.
+    "The agent acts because it applies its rule then wrongly assumes the "
+    "request is approved.",
+    "The agent acts because it follows its rule and wrongly assumes the request "
+    "is approved.",
+    "The agent acts because it uses the threshold and then incorrectly concludes "
+    "the batch is safe.",
+    "The agent acts because under its policy it wrongly assumes the request is "
+    "approved.",
+    "The agent acts because it applies its rule, then wrongly assumes the request "
+    "is approved.",
+    "The agent acts because it checks the rule then mistakenly believes the "
+    "batch is approved.",
+    "The agent acts because, per its policy, it wrongly assumes the batch is approved.",
+    "The agent acts because the agent uses rules then wrongly assumes the batch "
+    "is approved.",
+    "The agent acts because it relies on its logic and misjudges the batch as safe.",
+    "The agent acts because it applies that rule then wrongly assumes the batch "
+    "is approved.",
+    "The agent acts because it applies its threshold and its rule then wrongly "
+    "assumes the batch is approved.",
+    "The agent acts because it uses the limit as its rule then wrongly assumes "
+    "the batch is safe.",
     # A false-belief noun phrase counts whatever its subject: a rule holds no
     # belief.
     "The agent acts because its rule rests on a false assumption that small "
@@ -583,6 +607,23 @@ RULE_REASONS = (
     "The agent acts because its policy logic wrongly infers approval from a low amount.",
     "The agent acts because its threshold wrongly judges small batches safe.",
     "The agent acts because its rule misjudges the risk of small batches.",
+    "The agent releases the batch because it acts, and its rule wrongly assumes "
+    "every small batch is safe.",
+    "The request is released because the decision rule incorrectly assumes "
+    "every flagged request is safe.",
+    "The agent acts because its rule-based logic wrongly infers approval from "
+    "the amount.",
+    "The agent acts because the agent's rule still wrongly concludes that small "
+    "batches are safe.",
+    "Its rule wrongly assumes every small batch is safe, so the agent acts "
+    "because of it.",
+    "The agent acts; its policy wrongly judges small batches safe because of the rule.",
+    "The agent acts because it believes that its rule wrongly assumes nothing "
+    "about approval.",
+    "The agent acts because its own decision rule wrongly assumes small batches "
+    "are safe.",
+    "The agent acts because, when its threshold incorrectly judges a batch safe, "
+    "the batch is released.",
     # A negation that governs the false-belief wording itself denies it.
     "The agent does not wrongly assume anything; it acts because its rule "
     "releases the batch.",
