@@ -8,6 +8,15 @@ cases:
         - "Cover each of these, citing at least one of the listed facts:"
     forbidden:
       - cites the agent belief fact
+      - No agent belief is false
+  narrate-rule-only:
+    required:
+      - >-
+        No agent belief is false in this scenario. The sentence that says why
+        the agent acts ("because ...") explains it by the faulty decision rule
+        and cites the decision rule fact that states it:
+    forbidden:
+      - cites the agent belief fact
   narrate-stated:
     required:
       - >-

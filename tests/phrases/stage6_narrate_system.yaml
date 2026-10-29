@@ -22,3 +22,21 @@ cases:
     forbidden:
       - turns
       - message to send
+      - faulty decision rule
+      - faulty rule
+  narrate-rule-only:
+    required:
+      - '"because it incorrectly believes that" followed by the claim the agent wrongly takes to be true'
+      - >-
+        Here the facts give a decision rule and no agent belief: the agent's
+        belief is correct and the rule it applies is wrong, so write "because"
+        followed by that faulty decision rule instead, and do not attribute a
+        false belief, assumption, or impression to the agent in any wording.
+    ordered:
+      - - 1. The situation in which the agent acts.
+        - 2. The unsafe action and its cause
+        - Here the facts give a decision rule and no agent belief
+        - "3. How that faulty rule comes into play:"
+        - 4. The harm the unsafe action leads to.
+    forbidden:
+      - How that flawed belief arises

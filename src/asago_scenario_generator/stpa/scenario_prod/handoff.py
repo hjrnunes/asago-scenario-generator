@@ -502,10 +502,17 @@ class HandoffProcessModelVariable(HandoffModel):
 
 
 class HandoffCausalFactor(HandoffModel):
-    """One causal factor: the flawed process-model belief and its flaw."""
+    """One causal factor: its flaw and, for a belief flaw, the flawed belief."""
 
     source_id: HandoffText
-    process_model_belief: HandoffText | None
+    process_model_belief: HandoffText | None = Field(
+        description=(
+            "The controller's flawed process-model belief behind the unsafe "
+            "action, or null when the factor states none: a factor that is not "
+            "a belief flaw, such as a faulty decision rule applied to a correct "
+            "belief, or one whose belief was not stated."
+        ),
+    )
     flaw: HandoffText
     process_model_variable: HandoffProcessModelVariable | None = Field(
         default=None,

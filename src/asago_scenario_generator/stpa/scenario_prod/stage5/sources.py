@@ -114,6 +114,16 @@ def _causal_source_choices(
         for item in actions
         if item.action_id.startswith("CA-")
     )
+    # Last, so the handles of the other sources keep their numbers; and only
+    # beside them, so a path with no structural source still gets no request.
+    if candidates:
+        candidates.append(
+            (
+                CausalFactorKind.inadequate_control_algorithm,
+                path.controller.element_id,
+                path.controller.description,
+            )
+        )
     unique = tuple(dict.fromkeys(candidates))
     choices: list[_CausalSourceChoice] = []
     for index, (kind, source_id, description) in enumerate(unique, start=1):

@@ -89,6 +89,10 @@ def reply_for(response_format: type) -> dict[str, Any]:
     reply: dict[str, Any] = {}
     for handle, info in response_format.model_fields.items():
         fields = info.annotation.model_fields
+        if fields["flawed_belief"].annotation is type(None):
+            # A decision-rule factor states no belief.
+            reply[handle] = {"flawed_belief": None}
+            continue
         reply[handle] = (
             {"flawed_belief": BELIEF}
             if "process_model_variable" not in fields

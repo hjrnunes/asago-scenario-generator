@@ -148,6 +148,7 @@ def test_only_the_feedback_source_choices_carry_the_assessment() -> None:
         (CausalFactorKind.feedback_delay, "FB-1-1"): AUTHORITY,
         (CausalFactorKind.sensor_anomaly, "FB-1-1"): AUTHORITY,
         (CausalFactorKind.actuator_anomaly, "CA-1-1"): None,
+        (CausalFactorKind.inadequate_control_algorithm, "RESP-1"): None,
     }
 
 
@@ -456,12 +457,14 @@ def _unassessed_belief(tmp_path: Path) -> tuple[str, str]:
 # with at least one feedback channel.  The values are the SHA-256 of the system
 # and user prompt the code before the field produced for the same inputs.
 # The Stage 5 context system value also carries the later stated-reason
-# paragraph of ``stage5_context_system.j2``.
+# paragraph of ``stage5_context_system.j2``; both Stage 5 context values also
+# carry the later decision-rule source (the controller's handle and the
+# evidence sentence for it).
 _UNASSESSED_REQUESTS = {
     "stage5-context": (
         _unassessed_stage5,
-        "8e98a721daebe63577f518a82fab8da0d3f219e1e5fb8c370b15a8355bc6d9cf",
-        "a3d88b0229ed6adda8a90fbff416d9e22b02e4767017d0ac4a48471937726b79",
+        "f8f8eae6f53835beb0c6d000a89d79a7b8b654e2f0dda7a9357b681cf1ca0c27",
+        "dadc2c76549cc0dcf49254b7ff486b8e9ce8ac10561b0915827e9fe356a3a7fb",
     ),
     "stage5-belief": (
         _unassessed_belief,

@@ -247,6 +247,7 @@ def _validate_context_factor_sources(
         *(item.element_id for item in path.feedback),
         path.control_action.action_id,
         *(item.action_id for item in path.related_control_actions),
+        path.controller.element_id,
     }
     for factor in causal_factors:
         if factor.source_id not in allowed:

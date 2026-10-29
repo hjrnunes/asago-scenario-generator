@@ -34,6 +34,17 @@ class CausalFactorKind(str, Enum):
     feedback_delay = "FEEDBACK_DELAY"
     sensor_anomaly = "SENSOR_ANOMALY"
     actuator_anomaly = "ACTUATOR_ANOMALY"
+    # The controller's belief is right but its decision rule is wrong.
+    inadequate_control_algorithm = "INADEQUATE_CONTROL_ALGORITHM"
+
+
+def is_belief_flaw(kind: CausalFactorKind) -> bool:
+    """Return whether a factor of ``kind`` explains the action by a flawed belief.
+
+    A decision-rule factor explains it by the rule the controller applies to a
+    correct belief, so it states no flawed belief.
+    """
+    return kind is not CausalFactorKind.inadequate_control_algorithm
 
 
 class CausalEvidenceStatus(str, Enum):
@@ -93,18 +104,26 @@ def validate_causal_evidence_shape(
         )
 
 
-# Control-structure identifier prefix that each kind of factor must cite.
-_NAMESPACE_BY_KIND: dict[CausalFactorKind, str] = {
-    CausalFactorKind.process_model_flaw: "PM",
-    CausalFactorKind.feedback_delay: "FB",
-    CausalFactorKind.sensor_anomaly: "FB",
-    CausalFactorKind.actuator_anomaly: "CA",
+# Control-structure identifier prefixes that each kind of factor may cite.  A
+# decision-rule factor cites the selected controller itself: its
+# responsibility, or the coordination link of a coordination slot.
+_NAMESPACES_BY_KIND: dict[CausalFactorKind, tuple[str, ...]] = {
+    CausalFactorKind.process_model_flaw: ("PM",),
+    CausalFactorKind.feedback_delay: ("FB",),
+    CausalFactorKind.sensor_anomaly: ("FB",),
+    CausalFactorKind.actuator_anomaly: ("CA",),
+    CausalFactorKind.inadequate_control_algorithm: ("RESP", "CL"),
 }
 
 
+def namespaces_for(kind: CausalFactorKind) -> tuple[str, ...]:
+    """Return the control-structure namespace prefixes for a factor kind."""
+    return _NAMESPACES_BY_KIND[kind]
+
+
 def namespace_for(kind: CausalFactorKind) -> str:
-    """Return the control-structure namespace prefix for a factor kind."""
-    return _NAMESPACE_BY_KIND[kind]
+    """Name the control-structure namespace of a factor kind, for messages."""
+    return " or ".join(namespaces_for(kind))
 
 
 class ProcessModelVariable(BaseModel):
@@ -134,7 +153,8 @@ class CausalFactor(BaseModel):
 
     ``source_id`` is a stable control-structure identifier (PM-X-Y for
     process-model flaws, FB-X-Y for feedback delays and sensor
-    anomalies, CA-X-Y for actuator anomalies); ``description`` is the
+    anomalies, CA-X-Y for actuator anomalies, and the selected controller's
+    RESP-X or CL-X for a decision-rule factor); ``description`` is the
     Stage 5 evidence text.  ``declared_timing`` carries optional
     declared timing evidence; ``temporal_condition`` carries its typed
     form.
@@ -154,8 +174,9 @@ class CausalFactor(BaseModel):
     # condition leaf.  ``None`` explicitly means
     # that no separately supported temporal constraint was evidenced.
     temporal_condition: SemanticCondition | None = None
-    # Set only by a Stage 5 request that asks for stated flawed beliefs; left
-    # out when unset so earlier specs keep their bytes.
+    # Set only by a Stage 5 request that asks for stated flawed beliefs, and
+    # never for a factor whose kind is not a belief flaw; left out when unset
+    # so earlier specs keep their bytes.
     flawed_belief: str | None = Field(
         default=None, min_length=1, exclude_if=lambda value: value is None
     )
@@ -165,8 +186,8 @@ class CausalFactor(BaseModel):
 
     @model_validator(mode="after")
     def validate_source_namespace(self) -> CausalFactor:
-        expected_prefix = f"{namespace_for(self.kind)}-"
-        if not self.source_id.startswith(expected_prefix):
+        prefixes = tuple(f"{item}-" for item in namespaces_for(self.kind))
+        if not self.source_id.startswith(prefixes):
             raise ValueError(
                 f"CausalFactor {self.kind.value} source_id "
                 f"'{self.source_id}' must use the "
@@ -199,15 +220,18 @@ def collect_source_ids(
     pm_ids: set[str] = set()
     fb_ids: set[str] = set()
     ca_ids: set[str] = set()
+    controller_ids = {link.link_id for link in control_structure.coordination_links}
     for responsibility in control_structure.responsibilities:
         pm_ids.update(pm.pm_id for pm in responsibility.process_model_parts)
         fb_ids.update(fb.fb_id for fb in responsibility.feedback_channels)
         ca_ids.update(ca.ca_id for ca in responsibility.control_actions)
+        controller_ids.add(responsibility.resp_id)
     return {
         CausalFactorKind.process_model_flaw: pm_ids,
         CausalFactorKind.feedback_delay: fb_ids,
         CausalFactorKind.sensor_anomaly: fb_ids,
         CausalFactorKind.actuator_anomaly: ca_ids,
+        CausalFactorKind.inadequate_control_algorithm: controller_ids,
     }
 
 
@@ -240,7 +264,9 @@ __all__ = [
     "CausalFactorKind",
     "ProcessModelVariable",
     "collect_source_ids",
+    "is_belief_flaw",
     "namespace_for",
+    "namespaces_for",
     "validate_causal_evidence_shape",
     "validate_factor_sources",
 ]

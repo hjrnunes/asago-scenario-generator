@@ -498,6 +498,7 @@ def _source_type_explanation(kind: CausalFactorKind) -> str:
         CausalFactorKind.feedback_delay: "a feedback update or timing condition",
         CausalFactorKind.sensor_anomaly: "a feedback observation anomaly",
         CausalFactorKind.actuator_anomaly: "a control-action execution condition",
+        CausalFactorKind.inadequate_control_algorithm: "a controller decision rule",
     }[kind]
 
 
@@ -519,5 +520,11 @@ def _source_selection_guidance(kind: CausalFactorKind) -> str:
         CausalFactorKind.actuator_anomaly: (
             "Select only for failure or distortion while executing the selected "
             "control action."
+        ),
+        CausalFactorKind.inadequate_control_algorithm: (
+            "Select only when the controller's belief about the situation is "
+            "correct and the rule it applies to that belief still selects the "
+            "unsafe action; a wrong, missing, or stale belief belongs to the "
+            "process-model belief instead."
         ),
     }[kind]

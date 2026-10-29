@@ -17,3 +17,7 @@ Cover each of these, citing at least one of the listed facts:
 {% if belief_ids %}The sentence that says why the agent acts ("because it incorrectly believes
 that ...") cites the agent belief fact whose belief it states: {{ belief_ids }}.
 {% endif -%}
+{% if rule_ids %}No agent belief is false in this scenario. The sentence that says why
+the agent acts ("because ...") explains it by the faulty decision rule and cites
+the decision rule fact that states it: {{ rule_ids }}.
+{% endif -%}

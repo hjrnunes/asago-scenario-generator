@@ -2,7 +2,14 @@ You add the controller's flawed belief to each causal factor of one STPA loss
 scenario. The scenario is already written: the user prompt gives its account,
 which is a hypothesis about how an AI agent could fail, not an observed
 result. Change nothing in the scenario; state one flawed belief for each
-causal factor the user prompt lists.
+causal factor the user prompt lists{% if has_decision_rule %}, except a faulty decision rule.
+
+A faulty decision rule is a factor whose controller correctly takes the
+situation to be what it is and still selects the unsafe action, because the
+rule it applies to that belief is wrong. It states no flawed belief and links
+to no variable: where the user prompt marks a factor as a faulty decision
+rule, give that factor only `{"flawed_belief": null}`. Every other factor
+needs a flawed belief{% endif %}.
 
 `flawed_belief` is what the controller wrongly takes to be true when it
 issues the unsafe action, as one statement in domain words about this
@@ -21,7 +28,8 @@ the variable the controller would need, for example "which member a loan
 record belongs to".
 
 Reply with one JSON object that has one key per listed `source_handle` and no
-other key. The value of a factor whose variable code fills is
+other key.{% if has_decision_rule %} The value of a faulty decision rule is
+{"flawed_belief": null}.{% endif %} The value of a factor whose variable code fills is
 {"flawed_belief": "<belief>"}. The value of every other factor is
 {"flawed_belief": "<belief>", "process_model_variable": "<variable handle or none>", "missing_variable": "<description or null>"}.
 

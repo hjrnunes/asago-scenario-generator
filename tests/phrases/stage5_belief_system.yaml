@@ -41,3 +41,27 @@ cases:
       - set `process_model_variable` and `missing_variable` to `null`
       - attacker_bdi
       - evidence_status
+      - faulty decision rule
+      - '{"flawed_belief": null}'
+  decision-rule-beliefs:
+    required:
+      - >-
+        state one flawed belief for each causal factor the user prompt lists,
+        except a faulty decision rule.
+      - >-
+        A faulty decision rule is a factor whose controller correctly takes the
+        situation to be what it is and still selects the unsafe action, because
+        the rule it applies to that belief is wrong.
+      - >-
+        It states no flawed belief and links to no variable: where the user
+        prompt marks a factor as a faulty decision rule, give that factor only
+        `{"flawed_belief": null}`. Every other factor needs a flawed belief.
+      - 'The value of a faulty decision rule is {"flawed_belief": null}.'
+      - '{"flawed_belief": "<belief>"}'
+    once:
+      - Return only the schema-matching JSON object.
+    ordered:
+      - - except a faulty decision rule.
+        - "`flawed_belief` is what the controller wrongly takes to be true"
+        - The value of a faulty decision rule is
+        - The value of a factor whose variable code fills is

@@ -389,7 +389,10 @@ that contributes to this unsafe action. For a process-model flaw, use the
 specific mistaken, missing, or stale belief already described by its supplied
 causal source.
 For feedback or actuator failures, explain the missing, delayed, corrupted or
-incorrect signal/action using the supplied source meaning. Do not put only
+incorrect signal/action using the supplied source meaning. For the selected
+controller's decision rule, state what the controller correctly takes to be
+true and how the rule it applies to that still selects the unsafe action; do
+not attribute a mistaken belief to it. Do not put only
 `structural_failure`, an ID, or a category name in `evidence`. These statements
 are scenario hypotheses, not claims of observed target behaviour.
 

@@ -59,6 +59,10 @@ cases:
         different reason is a different unsafe control action.
       - When the statement gives alternative reasons, test one of them.
       - Select causal factors that explain the stated reason.
+      - >-
+        For the selected controller's decision rule, state what the controller
+        correctly takes to be true and how the rule it applies to that still
+        selects the unsafe action; do not attribute a mistaken belief to it.
     once:
       - A negative or empty feedback result can be valid
       - give the reason the action is unsafe

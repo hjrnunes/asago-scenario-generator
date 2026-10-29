@@ -803,7 +803,11 @@ continue reading `stage_errors`, but successfully repaired SP1 diagnostics that
 were historically misclassified there now appear only in `stage_warnings`.
 
 After Stage 5, each scenario passes through these model steps in order:
-`stage5_belief` states the controller's flawed belief for each causal factor,
+`stage5_belief` states the controller's flawed belief for each causal factor
+that is a belief flaw (a faulty decision rule applied to a correct belief, the
+`INADEQUATE_CONTROL_ALGORITHM` kind that cites the selected controller's
+`RESP-` or `CL-` identifier, states none and publishes
+`process_model_belief: null`),
 `stage5_shape` proposes the attack shape of an adversarial scenario,
 `stage6_narrative` writes the lead paragraph, and `stage6_gherkin` writes the
 Gherkin. Code checks every reply. The belief, narrative, and Gherkin steps

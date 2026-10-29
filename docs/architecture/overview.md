@@ -285,8 +285,12 @@ ICA. It contains only the selected loss, hazard, governing constraint, unsafe
 action, obligation concern, and causal evidence. Stage 5 must retain the
 selected concern and establish at least one causal factor. The model selects
 only request-local causal handles; the deterministic adapter binds each handle
-to its fixed factor kind and exact PM/FB/CA source. Coordination and controller
-IDs remain explained context but cannot be published as causal-factor sources,
+to its fixed factor kind and exact PM/FB/CA source. One more handle names the
+selected controller itself (its `RESP-` responsibility, or the `CL-` link of a
+coordination slot) for a faulty decision rule applied to a correct belief
+(`INADEQUATE_CONTROL_ALGORITHM`); such a factor states no flawed belief and
+publishes `process_model_belief: null`. Other coordination and controller IDs
+remain explained context but cannot be published as causal-factor sources,
 and every attacker intention must cite a handle with a declared factor.
 The contextual provider supplies one causal statement per declared handle.
 Defender-belief annotations are derived from that statement's exact PM source;

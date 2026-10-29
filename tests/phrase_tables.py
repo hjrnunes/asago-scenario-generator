@@ -105,7 +105,7 @@ from asago_scenario_generator.stpa.system_model.control_structure import (
 from asago_scenario_generator.stpa.target_realization.provider import (
     PROMPTS_DIR as TARGET_REALIZATION_PROMPTS_DIR,
 )
-from tests.helpers.belief_step import belief_spec
+from tests.helpers.belief_step import belief_spec, decision_rule_belief_spec
 from tests.helpers.known_mechanism import linked_brief
 from tests.helpers.feedback_authority import (
     authority_belief_spec,
@@ -628,6 +628,25 @@ def _narrate_stated() -> Callable[[str], str]:
     return render
 
 
+def _narrate_rule_only() -> Callable[[str], str]:
+    facts = ScenarioFacts(
+        scenario_id="SCN-001",
+        kind="everyday",
+        facts=(
+            Fact("F1", "situation", "RESP-1 receives a refund request"),
+            Fact("F2", "decision rule", "The rule refunds any request under 50."),
+        ),
+        glossary=(("RESP-1", "Handle customer service inquiries."),),
+        coverage=(("the weak point", ("weak point", "agent belief", "decision rule")),),
+        rule_only=True,
+    )
+
+    def render(template: str) -> str:
+        return dict(zip(_NARRATE_TEMPLATES, render_narration_prompts(facts)))[template]
+
+    return render
+
+
 def _narrate() -> Callable[[str], str]:
     facts = ScenarioFacts(
         scenario_id="SCN-001",
@@ -675,6 +694,18 @@ def _separate_beliefs() -> Callable[[str], str]:
         # Compiling the Stage 5 spec writes its call log into a run directory.
         with tempfile.TemporaryDirectory() as run_dir:
             spec, structure = belief_spec(Path(run_dir))
+        prompts = render_belief_prompts(spec, belief_request(spec, structure))
+        return dict(zip(_BELIEF_TEMPLATES, prompts))[template]
+
+    return render
+
+
+def _decision_rule_beliefs() -> Callable[[str], str]:
+    """Render the belief request of a spec with a PM and a decision-rule factor."""
+
+    def render(template: str) -> str:
+        with tempfile.TemporaryDirectory() as run_dir:
+            spec, structure = decision_rule_belief_spec(Path(run_dir))
         prompts = render_belief_prompts(spec, belief_request(spec, structure))
         return dict(zip(_BELIEF_TEMPLATES, prompts))[template]
 
@@ -813,8 +844,10 @@ CASES: dict[str, Callable[[str], str]] = {
     ),
     "narrate": _narrate(),
     "narrate-stated": _narrate_stated(),
+    "narrate-rule-only": _narrate_rule_only(),
     "gherkin": _gherkin(),
     "separate-beliefs": _separate_beliefs(),
+    "decision-rule-beliefs": _decision_rule_beliefs(),
     "feedback-authority-beliefs": _authority_beliefs(),
     "feedback-authority": _stage5(dict, authority_context),
     "feedback-authority-critic": _system_model(**FEEDBACK_AUTHORITY_CRITIC),
