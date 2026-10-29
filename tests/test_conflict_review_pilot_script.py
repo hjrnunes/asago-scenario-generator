@@ -1724,3 +1724,38 @@ def test_a_transport_retry_is_not_counted_as_a_correction(tmp_path: Path) -> Non
     assert row["correction_changed_class"] is None
     assert summary["metrics"]["corrections"] == 0
     assert summary["metrics"]["cases_corrected"] == 0
+
+
+def test_a_transport_retry_of_a_correction_is_still_one_correction(
+    tmp_path: Path,
+) -> None:
+    from tests.helpers.transport_retry import _status_error
+
+    script = _script()
+    steps: list[Any] = [
+        _reply(_verdict(finding_class="missing_information")),
+        _status_error(502),
+        _reply(_verdict()),
+    ]
+
+    def respond(**kw: Any) -> Any:
+        step = steps.pop(0)
+        if isinstance(step, BaseException):
+            raise step
+        return step
+
+    provider = _Provider(respond)
+    out = tmp_path / "out"
+
+    summary = _run(script, provider, _cases(script, 1), out, budget=5)
+
+    assert len(provider.requests) == 3
+    assert summary["spend"]["records"] == 3
+    assert summary["spend"]["by_source"] == {"live": 3}
+    assert summary["spend"]["transport_retries"] == 1
+    assert summary["spend"]["corrections"] == 1
+    row = summary["rows"][0]
+    assert (row["requests"], row["corrections"]) == (3, 1)
+    assert row["correction_changed_class"] is True
+    assert summary["metrics"]["corrections"] == 1
+    assert "corrections: 1;" in (out / "summary.md").read_text()

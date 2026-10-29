@@ -1640,7 +1640,12 @@ def summary_metrics(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
 
 
 def provider_spend(record_dir: Path) -> dict[str, Any]:
-    """Count the provider records by source, corrections and transport retries."""
+    """Count the provider records by source, transport retries and errors.
+
+    These are raw record counts. A transport retry keeps its request's
+    attempt number, so corrections are not read from the records here;
+    ``summarize`` takes them from the counted correction attempts.
+    """
     path = record_dir / RECORD_FILENAME
     records = (
         [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
@@ -1651,11 +1656,6 @@ def provider_spend(record_dir: Path) -> dict[str, Any]:
     return {
         "records": len(records),
         "by_source": dict(sorted(sources.items())),
-        "corrections": sum(
-            1
-            for record in records
-            if (record.get("identity") or {}).get("attempt_number", 1) > 1
-        ),
         "transport_retries": sum(1 for record in records if "retry_of" in record),
         "errors": sum(1 for record in records if record.get("outcome") == "error"),
     }
@@ -1711,7 +1711,10 @@ def summarize(
         "stop_reason": stop_reason,
         "budget_error": budget_error,
         "fill_summary": dict(fill) if fill else None,
-        "spend": dict(spend),
+        "spend": {
+            **spend,
+            "corrections": sum(result.corrections for result in results),
+        },
         "metrics": summary_metrics(rows),
         "confusion": [
             {"label": label, "model": model, "count": count}
