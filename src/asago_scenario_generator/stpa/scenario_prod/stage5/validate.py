@@ -542,6 +542,11 @@ def _validate_safe_observable_outcome(
                 target_operation=target_operation,
                 target_observations=target_observations,
             ),
+            _operation_input_schemas(
+                outcome.operation_name or "",
+                execution_target_profile=execution_target_profile,
+                target_operation=target_operation,
+            ),
         )
     return _validate_safe_outcome_refs(outcome, target_observations, normalizations)
 
@@ -677,20 +682,26 @@ def _require_supported_safe_evidence(
 
 
 def _validate_safe_call_arguments(
-    outcome: SafeObservableOutcome, universe: ConditionUniverse
+    outcome: SafeObservableOutcome,
+    universe: ConditionUniverse,
+    input_schemas: Sequence[object],
 ) -> None:
     """Require each safe call argument to be supplied, with a supplied value.
 
     The argument must be a parameter of ``operation_name`` in the supplied
     inventory or its input schema; the value must fit the type, ``enum`` and
-    ``const`` the schema declares for it; a string value must be a supplied
+    ``const`` the parameter's schema declares in every supplied input schema
+    of the operation (``input_schemas``); a string value must be a supplied
     value (a fact or record key or value, a value a supplied read passed, or
-    a schema value).
+    a schema value). The parameter schemas are read from the input schemas
+    themselves, not from ``universe``, which leaves out the schemas of an
+    operation whose root it does not read: a parameter with no schema object,
+    or one whose type depends on a composition keyword, cannot be checked,
+    so its value is refused rather than accepted.
     """
 
     operation = outcome.operation_name or ""
     declared = universe.operations.get(operation, frozenset())
-    schemas = universe.argument_schemas.get(operation, {})
     problems = []
     for index, item in enumerate(outcome.call_arguments or ()):
         label = f"call_arguments[{index}] {item.argument!r}"
@@ -700,7 +711,7 @@ def _validate_safe_call_arguments(
                 f"{label} is not a parameter of {operation} (parameters: {listed})"
             )
             continue
-        problem = _safe_call_value_problem(item.value, schemas.get(item.argument, {}))
+        problem = _parameter_value_problem(item.value, item.argument, input_schemas)
         if problem is None and isinstance(item.value, str):
             if item.value not in universe.literal_values:
                 problem = "is not a value the request supplies"
@@ -712,6 +723,53 @@ def _validate_safe_call_arguments(
             "safe observable outcome call_arguments must name parameters of "
             "operation_name with supplied values: " + "; ".join(problems),
         )
+
+
+# Keywords that make a parameter's accepted values depend on other schemas.
+_COMPOSITION_KEYWORDS = frozenset({"$ref", "allOf", "anyOf", "oneOf", "not", "if"})
+
+
+def _operation_input_schemas(
+    operation: str,
+    *,
+    execution_target_profile: ExecutionTargetProfile | None,
+    target_operation: TargetOperationObservation | None,
+) -> list[object]:
+    """Return the input schema of each supplied resource exposing ``operation``."""
+    if execution_target_profile is not None:
+        return [
+            resource.input_schema
+            for resource in execution_target_profile.resources
+            if any(item.operation_id == operation for item in resource.operations)
+        ]
+    if target_operation is not None and target_operation.operation_id == operation:
+        return [target_operation.input_schema]
+    return []
+
+
+def _parameter_value_problem(
+    value: object, argument: str, input_schemas: Sequence[object]
+) -> str | None:
+    """Return why ``value`` does not fit ``argument`` in some input schema."""
+    unverifiable = (
+        "cannot be checked: the supplied input schema declares no checkable "
+        f"schema for {argument}"
+    )
+    if not input_schemas:
+        return unverifiable
+    for input_schema in input_schemas:
+        properties = (
+            input_schema.get("properties")
+            if isinstance(input_schema, Mapping)
+            else None
+        )
+        schema = properties.get(argument) if isinstance(properties, Mapping) else None
+        if not isinstance(schema, Mapping) or _COMPOSITION_KEYWORDS & set(schema):
+            return unverifiable
+        problem = _safe_call_value_problem(value, schema)
+        if problem is not None:
+            return problem
+    return None
 
 
 def _safe_call_value_problem(value: object, schema: Mapping[str, Any]) -> str | None:

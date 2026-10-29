@@ -697,9 +697,11 @@ call, so the call is evaluated as an incomplete capture. Its `record_refs`
 name observations, not records. The call's arguments are those of the safe
 outcome's optional `call_arguments`: the typed values the safe call is made
 with, which Stage 5 states only when the safe behavior is that the agent makes
-that call, and checks against the operation's supplied parameters, its input
-schema and the supplied values (`safe_outcome_call_argument_not_supplied`
-otherwise). Without them the call has no arguments. On that capture a value
+that call, and checks against the operation's supplied parameters, the type,
+`enum` and `const` each parameter declares in the operation's input schema,
+and the supplied values (`safe_outcome_call_argument_not_supplied`
+otherwise; a parameter whose schema it cannot check, with no schema object or
+one built from composition keywords, is refused the same way). Without them the call has no arguments. On that capture a value
 comparison holds when the call's values satisfy it; otherwise it is unknown,
 since another call of that operation may be missing from the capture, and so
 is a comparison on another operation. A

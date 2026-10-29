@@ -110,7 +110,7 @@ def test_analytical_only_clears_the_call_arguments() -> None:
     assert changed["safe_observable_outcome.call_arguments"].normalized is None
 
 
-def _generate(tmp_path, *payloads):
+def _generate(tmp_path, *payloads, target_operation=None):
     client = MockLLMClient()
     client.set_response_queue(list(payloads))
     context = _wrong_timing_context()
@@ -120,7 +120,7 @@ def _generate(tmp_path, *payloads):
         tmp_path,
         observation_contract=default_observation_contract(),
         assembly=_wrong_timing_assembly(context),
-        target_operation=_target_operation(),
+        target_operation=target_operation or _target_operation(),
         target_observations=_nested_observations(),
     )
     return client, result
@@ -201,3 +201,82 @@ def test_an_unsupplied_call_argument_goes_through_the_correction(
     assert [item.value for item in result.safe_observable_outcome.call_arguments] == [
         "ORD-104"
     ]
+
+
+def _operation_with_schema(input_schema: dict) -> object:
+    return _target_operation().model_copy(update={"input_schema": input_schema})
+
+
+# The root keyword is one the condition universe does not read, so it keeps
+# no parameter schema for the operation; the safe call is still checked.
+UNREAD_ROOT = {
+    "type": "object",
+    "minProperties": 1,
+    "properties": {"order_id": {"type": "string"}, "amount": {"type": "number"}},
+}
+
+
+def test_a_wrong_type_under_an_unread_schema_root_is_corrected(tmp_path) -> None:
+    bad = _payload([{"argument": "order_id", "value": 123}])
+    good = _payload([{"argument": "order_id", "value": "ORD-104"}])
+
+    client, (result, error) = _generate(
+        tmp_path, bad, good, target_operation=_operation_with_schema(UNREAD_ROOT)
+    )
+
+    assert error is None
+    assert len(client.calls) == 2
+    retry_prompt = client.calls[1].user_prompt
+    assert f"- {CODE}:" in retry_prompt
+    assert "'order_id' value 123 does not have the declared type string" in (
+        retry_prompt
+    )
+
+
+def test_a_typed_value_under_an_unread_schema_root_is_accepted(tmp_path) -> None:
+    arguments = [
+        {"argument": "order_id", "value": "ORD-104"},
+        {"argument": "amount", "value": 20},
+    ]
+
+    client, (result, error) = _generate(
+        tmp_path,
+        _payload(arguments),
+        target_operation=_operation_with_schema(UNREAD_ROOT),
+    )
+
+    assert error is None
+    assert len(client.calls) == 1
+    dumped = result.model_dump(mode="json")["safe_observable_outcome"]
+    assert dumped["call_arguments"] == arguments
+
+
+@pytest.mark.parametrize(
+    "order_id_schema",
+    [None, {"anyOf": [{"type": "string"}, {"type": "integer"}]}],
+    ids=["no-schema-object", "composed"],
+)
+def test_a_parameter_whose_schema_cannot_be_checked_is_corrected(
+    tmp_path, order_id_schema
+) -> None:
+    properties: dict = {"amount": {"type": "number"}}
+    if order_id_schema is not None:
+        properties["order_id"] = order_id_schema
+    operation = _target_operation().model_copy(
+        update={
+            "input_schema": {"type": "object", "properties": properties},
+            # Declared as a parameter, with or without a schema object.
+            "argument_names": ("order_id", "amount"),
+        }
+    )
+    bad = _payload([{"argument": "order_id", "value": "ORD-104"}])
+    good = _payload([{"argument": "amount", "value": 20}])
+
+    client, (result, error) = _generate(tmp_path, bad, good, target_operation=operation)
+
+    assert error is None
+    assert len(client.calls) == 2
+    assert (
+        "'order_id' value 'ORD-104' cannot be checked: the supplied input "
+        "schema declares no checkable schema for order_id"
+    ) in " ".join(client.calls[1].user_prompt.split())
