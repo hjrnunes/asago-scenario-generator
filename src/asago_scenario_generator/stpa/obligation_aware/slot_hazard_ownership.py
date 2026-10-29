@@ -291,17 +291,15 @@ def _ends_clause(text: str, stop: int) -> bool:
     """Whether the stop at *stop* ends a clause.
 
     A full stop that closes an abbreviation does not: a single-letter initial
-    ("J."), a dotted acronym ("U.S.", "e.g."), or a common short form ("Dr.").
+    ("J."), a dotted acronym of single letters ("U.S.", "e.g."), or a common
+    short form ("Dr.").  Any other dotted token ("report.json", "v1.2") ends
+    the clause.
     """
     if text[stop] != ".":
         return True
-    word = _WORD_BEFORE_STOP.search(text, 0, stop)
-    abbreviation = word.group() if word else ""
-    return not (
-        len(abbreviation) == 1
-        or "." in abbreviation
-        or abbreviation.lower() in _ABBREVIATIONS
-    )
+    word = _TOKEN_BEFORE_STOP.search(text, 0, stop)
+    token = word.group() if word else ""
+    return not (_INITIALS.fullmatch(token) or token.lower() in _ABBREVIATIONS)
 
 
 _IDENTIFIER_LIKE = re.compile(r"[_\d]|[a-z][A-Z]")
@@ -313,7 +311,10 @@ _EXAMPLE = re.compile(
 # A clause ends at a sentence or clause stop, or a closing parenthesis;
 # ``_ends_clause`` keeps an abbreviation's full stop from ending one.
 _CLAUSE_END = re.compile(r"\.(?=\s|$)|[!?;:)]")
-_WORD_BEFORE_STOP = re.compile(r"[A-Za-z.]*\Z")
+# The token a full stop closes, and the shape of an initial or a dotted
+# acronym without its final stop ("J", "U.S", "e.g").
+_TOKEN_BEFORE_STOP = re.compile(r"[\w.]*\Z")
+_INITIALS = re.compile(r"[A-Za-z](?:\.[A-Za-z])*")
 _ABBREVIATIONS = frozenset(
     {"dr", "mr", "mrs", "ms", "prof", "st", "vs", "etc", "inc", "ltd", "no"}
 )

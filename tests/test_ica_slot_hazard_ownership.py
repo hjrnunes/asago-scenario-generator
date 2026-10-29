@@ -793,3 +793,17 @@ def test_a_sentence_end_still_ends_an_example() -> None:
     [mismatch] = _mismatches(_reply_slot(), losses, _structure())
 
     assert mismatch.hazard_operations == ("escalate_trust_safety",)
+
+
+@pytest.mark.parametrize(
+    "token", ["report.json", "example.com", "v1.2"], ids=["file", "domain", "version"]
+)
+def test_a_dotted_name_that_is_no_abbreviation_still_ends_an_example(token) -> None:
+    losses = _hazard_text(
+        f"The assistant performs actions such as writing to {token}. "
+        "It never calls `escalate_trust_safety`."
+    )
+
+    [mismatch] = _mismatches(_reply_slot(), losses, _structure())
+
+    assert mismatch.hazard_operations == ("escalate_trust_safety",)
