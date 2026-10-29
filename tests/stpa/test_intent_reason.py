@@ -893,3 +893,61 @@ def test_common_intent_only_phrasings_are_routed(reason) -> None:
 def test_the_new_phrasings_reopen_no_mixed_ground(reason) -> None:
     for row in (None, _row(ELIGIBLE), _row(INTENT, ELIGIBLE)):
         assert _recognize(reason, row) is None, (reason, row)
+
+
+# --- the cited variable's description must be about intent alignment alone --
+
+
+_VALUE_FORMS = (
+    ("unauthorized payment", "the request is an unauthorized payment"),
+    (
+        "does not match authorized intent",
+        "the request does not match authorized intent",
+    ),
+    ("intent unknown", "intent unknown"),
+)
+
+
+@pytest.mark.parametrize(
+    "description",
+    [
+        # amount and numeric range
+        "Whether the payment amount specified by the user's intent is between 0 "
+        "and 100.",
+        "The refund value the user's intent names.",
+        "Whether the user's intent covers at most 3 payments.",
+        # limit, bound or range
+        "Whether the user's intent stays within the refund limit.",
+        "The range of refunds the user's intent allows.",
+        "Whether the user's intent exceeds the maximum refund.",
+        # currency
+        "Whether the currency of the payment matches the user's intent.",
+        # eligibility
+        "Whether the user's intent concerns an eligible refund.",
+        # status or lifecycle
+        "The order status the user's intent refers to.",
+        "Whether the user's intent is for a shipped order.",
+        # timing
+        "Whether the user's intent is confirmed before the refund is issued.",
+        "The date by which the user's intent must be confirmed.",
+        # ownership, session, actor, identity
+        "Whether the user's intent matches the owner of the order.",
+        "Whether the requested operation matches the intent of the authenticated "
+        "session.",
+        "Whether the actor's intent matches the requested operation.",
+        "The alignment between the requested operation and the intent of the "
+        "customer identity.",
+    ],
+)
+def test_a_description_that_states_another_ground_keeps_stage5(description) -> None:
+    for value, reason in _VALUE_FORMS:
+        variable = _var("PM-1-1", value, description=description)
+        assert _recognize(reason, _row(variable)) is None, (description, value)
+
+
+def test_an_alignment_only_description_still_routes_every_value_form() -> None:
+    for value, reason in _VALUE_FORMS:
+        variable = _var("PM-1-1", value, description=INTENT.description)
+        disposition = _recognize(reason, _row(variable))
+        assert disposition is not None, value
+        assert disposition.basis == "reason_variable"
