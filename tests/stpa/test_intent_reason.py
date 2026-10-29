@@ -113,11 +113,9 @@ def _recognize(
     ("reason", "variable"),
     [
         ("the request does not match authorized intent", INTENT),
-        ("the authorization status is intent unknown", INTENT_UNKNOWN),
-        (
-            "the authorization status is unauthorized transaction",
-            UNAUTHORIZED_TRANSACTION,
-        ),
+        ("the requested operation does not match authorized intent", INTENT),
+        ("intent unknown", INTENT_UNKNOWN),
+        ("the request is an unauthorized transaction", UNAUTHORIZED_TRANSACTION),
     ],
 )
 def test_a_reason_variable_about_intent_without_target_evidence_is_routed(
@@ -137,11 +135,9 @@ def test_a_reason_variable_about_intent_without_target_evidence_is_routed(
     [
         "the request does not match the customer's authorized intent",
         "the requested operation does not match the customer's authorized intent",
-        "the request does not match the customer's authorized intent or "
-        "transaction context",
-        "the refund is executed without matching the customer's authorized "
-        "intent or transaction context",
+        "the refund is executed without matching the customer's authorized intent",
         "the customer's intent does not match the requested payment operation",
+        "the request deviates from the customer's actual intent",
         "the intent is unknown",
         "the request's intent is unknown",
         "the customer's intent is unknown",
@@ -228,6 +224,89 @@ def test_a_reason_with_another_ground_or_no_failed_intent_is_not_routed(
     reason,
 ) -> None:
     assert _recognize(reason) is None
+
+
+@pytest.mark.parametrize(
+    "reason",
+    [
+        # a testable bound, amount, currency or value beside the intent
+        "the request does not match authorized intent and the amount is negative",
+        "the request does not match the customer's authorized intent and the "
+        "currency is different",
+        "the request does not match the customer's authorized intent or the "
+        "refund value is wrong",
+        # a timing or order ground beside the intent
+        "intent unknown before the authorization status is confirmed",
+        "the intent is unknown and the refund is issued before the authorization "
+        "status is confirmed",
+        # a status ground beside the intent
+        "the request does not match the customer's authorized intent and the "
+        "order status is shipped",
+        # a context that is more than the intent
+        "the request does not match the customer's authorized intent or "
+        "transaction context",
+        "the refund is executed without matching the customer's authorized "
+        "intent or transaction context",
+        # a session or a status frame around an intent value
+        "the authorization status is intent unknown",
+        "the authorization status is unauthorized transaction",
+    ],
+)
+def test_a_reason_that_states_more_than_an_intent_ground_is_not_routed(
+    reason,
+) -> None:
+    for row in (None, _row(ELIGIBLE), _row(INTENT, ELIGIBLE)):
+        assert _recognize(reason, row) is None, (reason, row)
+    for variable in (INTENT_UNKNOWN, UNAUTHORIZED_TRANSACTION):
+        assert _recognize(reason, _row(variable)) is None, (reason, variable)
+
+
+@pytest.mark.parametrize(
+    "reason",
+    [
+        # the failure or the unknown applies to the currency, not the intent
+        "the intent matches but currency is different",
+        "the intent is known but currency differs",
+        "the intent is confirmed but the amount is unknown",
+        "the intent does not change but the currency does not match",
+        # the comparison is with something other than the intent
+        "the currency does not match the customer's intent",
+        "the request matches the customer's authorized intent",
+    ],
+)
+def test_the_failure_must_be_predicated_of_the_intent_itself(reason) -> None:
+    assert _recognize(reason) is None
+    assert _recognize(reason, _row(INTENT)) is None
+
+
+def test_a_classifier_output_variable_is_not_the_users_intent() -> None:
+    classified = _var(
+        "PM-1-1",
+        "incorrect",
+        description="The classified intent produced by the classifier",
+    )
+    for reason in (
+        "the classified intent is incorrect",
+        "the intent is incorrect",
+    ):
+        assert _recognize(reason, _row(classified)) is None, reason
+
+
+def test_a_classifier_variable_with_a_failure_value_is_not_routed() -> None:
+    classified = _var(
+        "PM-1-1",
+        "does not match authorized intent",
+        description="The intent classification the classifier assigns to the request",
+    )
+    reason = "the request does not match authorized intent"
+
+    assert _recognize(reason, _row(classified)) is None
+
+
+def test_an_intent_variable_whose_value_states_no_failure_is_not_routed() -> None:
+    matching = _var("PM-1-1", "matches authorized intent", description=INTENT.description)
+
+    assert _recognize("the request matches authorized intent", _row(matching)) is None
 
 
 def test_a_reason_variable_with_target_evidence_is_not_routed() -> None:
@@ -584,3 +663,116 @@ def test_every_candidate_is_accounted_exactly_once(tmp_path: Path) -> None:
     testability = yaml.safe_load((tmp_path / TESTABILITY_FILENAME).read_text())
     summary = testability["summary"]
     assert summary["total"] + summary["not_applicable"] == len(plans) - dropped
+
+
+# --- a circuit break keeps the routed dispositions ---------------------------
+
+
+class LengthFinishReasonError(Exception):
+    """Stands in for the SDK's structured-output length error by name."""
+
+
+def test_a_circuit_break_keeps_each_routed_candidates_disposition(
+    tmp_path: Path,
+) -> None:
+    from asago_scenario_generator.stpa.scenario_prod.stage5.wire import (
+        _ContextScenarioSemanticsPayload,
+    )
+    from tests.stpa.sp1_helpers import MockLLMClient
+
+    routed = _disposition("the intent is unknown")
+    plans = (
+        CandidateFamilyPlan(),
+        CandidateFamilyPlan(not_applicable=routed),
+        CandidateFamilyPlan(),
+    )
+    client = MockLLMClient()
+    client.set_exception_for(
+        _ContextScenarioSemanticsPayload,
+        LengthFinishReasonError("structured response reached its length limit"),
+    )
+
+    result = run_sp3(
+        llm_client=client,
+        enriched_threat_set=_make_ets(num_threats=len(plans)),
+        control_structure=make_cs(),
+        loss_analysis=make_loss_analysis(),
+        run_dir=tmp_path,
+        condition_families=plans,
+    )
+
+    first, second, third = result.candidate_outcomes
+    assert first.status is SP3CandidateStatus.generation_failed
+    assert second.status is SP3CandidateStatus.not_applicable
+    assert second.reason_code == INTENT_REASON_CODE
+    assert second.diagnostics == (routed.reason,)
+    assert third.status is SP3CandidateStatus.skipped
+    assert third.reason_code is None
+    # The testability record agrees with the candidate outcomes.
+    testability = yaml.safe_load((tmp_path / TESTABILITY_FILENAME).read_text())
+    assert [entry["scenario_id"] for entry in testability["not_applicable"]] == [
+        outcome.scenario_id
+        for outcome in result.candidate_outcomes
+        if outcome.status is SP3CandidateStatus.not_applicable
+    ]
+
+
+# --- the obligation accounting boundary --------------------------------------
+
+
+def test_an_obligation_whose_only_finding_is_routed_is_still_generation_failed(
+    tmp_path: Path,
+) -> None:
+    """Pin the current boundary: obligation accounting does not know the route.
+
+    A routed ICA writes no scenario, so an addressed obligation whose only
+    finding it is becomes ``generation_failed`` like any finding no scenario
+    carries. Changing that is a separate accounting decision.
+    """
+    from asago_scenario_generator.pipeline.scenario_realization import (
+        account_generation_failures,
+    )
+    from asago_scenario_generator.stpa.models.enriched_threat_set import (
+        StructuralThreat,
+    )
+    from tests.helpers.sp3_run import threat_set_of
+    from tests.stpa.sp1_helpers import MockLLMClient
+    from tests.test_obligation_generation_failure import _recorded_row, _with_rows
+
+    recorded = _recorded_row()
+    [ica_id] = recorded.ica_ids
+    [slot_id] = recorded.slot_ids
+    threat = StructuralThreat(
+        ica_slot_id=slot_id,
+        ica_id=ica_id,
+        ica_text="The reply is unsafe because the intent is unknown.",
+        hazardous_context="Context",
+        loss_scenario="Loss scenario",
+        related_hazards=["H-1"],
+        related_constraints=["SC-1"],
+    )
+    client = MockLLMClient()
+    result = run_sp3(
+        llm_client=client,
+        enriched_threat_set=threat_set_of([threat]),
+        control_structure=make_cs(),
+        loss_analysis=make_loss_analysis(),
+        run_dir=tmp_path,
+        condition_families=(
+            CandidateFamilyPlan(not_applicable=_disposition("the intent is unknown")),
+        ),
+    )
+
+    assert [o.status for o in result.candidate_outcomes] == [
+        SP3CandidateStatus.not_applicable
+    ]
+    assert _stage5_requests(client) == []
+    accounting = account_generation_failures(
+        _with_rows(recorded),
+        scenario_specs=result.scenario_specs,
+        functional_test_specs=result.functional_test_specs,
+    )
+    [row] = accounting.rows
+    assert row.disposition == "generation_failed"
+    assert row.stop_reason == "scenario_generation_failure"
+    assert row.ica_ids == (ica_id,)
