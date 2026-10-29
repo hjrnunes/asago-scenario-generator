@@ -9,6 +9,7 @@ import copy
 import importlib.util
 import json
 import sys
+from collections import Counter
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -215,8 +216,8 @@ def _dump(path: Path, value: Any) -> None:
     path.write_text(yaml.safe_dump(value, sort_keys=False), encoding="utf-8")
 
 
-def _run_dir(tmp_path: Path) -> Path:
-    run_dir = tmp_path / "run-a"
+def _run_dir(tmp_path: Path, name: str = "run-a") -> Path:
+    run_dir = tmp_path / name
     output = run_dir / "stages" / "generate" / "output"
     _dump(output / "control-structure.yaml", _structure().model_dump(mode="json"))
     _dump(
@@ -427,6 +428,47 @@ def test_select_writes_its_outputs_and_leaves_the_run_unchanged(
     }
 
 
+def test_runs_that_share_a_basename_keep_separate_reports(tmp_path: Path) -> None:
+    script = _script()
+    first = _run_dir(tmp_path / "one")
+    second = _run_dir(tmp_path / "two")
+    other = _run_dir(tmp_path / "two", "run-b")
+    out = tmp_path / "out"
+
+    script.main(
+        ["select", "--run", str(first), "--run", str(second), "--run", str(other)]
+        + ["--out-dir", str(out)]
+    )
+
+    labels = [str(first.resolve()), str(second.resolve()), "run-b"]
+    counts = json.loads((out / "selector-counts.json").read_text())
+    assert list(counts["runs"]) == labels
+    assert [run["run_dir"] for run in counts["runs"].values()] == [
+        str(path.resolve()) for path in (first, second, other)
+    ]
+    assert all(run["pairs"]["union"] == 3 for run in counts["runs"].values())
+    groups = json.loads((out / "candidate-groups.json").read_text())
+    assert list(groups) == labels
+    rows = [
+        json.loads(line)
+        for line in (out / "candidate-pairs.jsonl").read_text().splitlines()
+    ]
+    assert Counter(row["run"] for row in rows) == {label: 4 for label in labels}
+    summary = (out / "selector-summary.md").read_text()
+    assert all(f"| {label} |" in summary for label in labels)
+
+
+def test_a_run_given_twice_is_refused(tmp_path: Path) -> None:
+    script = _script()
+    run_dir = _run_dir(tmp_path)
+
+    with pytest.raises(SystemExit, match="runs repeat"):
+        script.main(
+            ["select", "--run", str(run_dir), "--run", str(run_dir)]
+            + ["--out-dir", str(tmp_path / "out")]
+        )
+
+
 # Fixtures and rendered requests -------------------------------------------
 
 
@@ -439,10 +481,12 @@ def test_the_fixtures_pair_each_safeguard_with_a_request_to_block_and_one_to_all
     assert 12 <= len(fixtures) <= 16
     assert len({item["fixture_id"] for item in fixtures}) == len(fixtures)
     for fixture in fixtures:
-        assert sorted(item["expected"] for item in fixture["requests"]) == [
-            "allow",
-            "block",
-        ]
+        expected = [item["expected"] for item in fixture["requests"]]
+        assert expected.count("allow") == 1
+        assert expected.count("block") == 1
+        assert set(expected) <= {"allow", "block", "escalate"}
+        if "escalate" in expected:
+            assert fixture["expected_class"] == "demonstrated_conflict"
         assert fixture["expected_class"] in script.FINDING_CLASSES
         assert set(fixture["acceptable_classes"]) <= set(script.FINDING_CLASSES)
         assert isinstance(fixture["expected_over_refusal"], bool)
@@ -862,3 +906,32 @@ def test_a_fixture_score_checks_class_and_each_request(tmp_path: Path) -> None:
     assert row["class_correct"] is True
     assert row["requests_judged"]["Q1"]["correct"] is True
     assert row["requests_judged"]["Q2"]["correct"] is False
+
+
+@pytest.mark.parametrize(
+    ("decision", "correct"), [("escalate", True), ("block", True), ("allow", False)]
+)
+def test_a_request_to_escalate_is_met_by_stopping_it(
+    decision: str, correct: bool
+) -> None:
+    script = _script()
+    case = _fixture_case(script)
+    case.labels["expected_requests"]["Q1"] = "escalate"
+    verdict = copy.deepcopy(_verdict())
+    verdict["request_decisions"][0]["decision"] = decision
+    result = script.CaseResult(case_id=case.case_id, source="fixture", verdict=verdict)
+
+    row = script.score_case(case, result)
+
+    assert row["requests_judged"]["Q1"]["correct"] is correct
+
+
+def test_fx_01_keeps_its_conflict_and_pairs_a_truly_permissible_request() -> None:
+    script = _script()
+    (fixture,) = [f for f in script.load_fixtures() if f["fixture_id"] == "FX-01"]
+    requests = {item["expected"]: item["text"] for item in fixture["requests"]}
+
+    assert fixture["expected_class"] == "demonstrated_conflict"
+    assert "critical-result message" in requests["escalate"]
+    assert "potassium" not in requests["allow"]
+    assert "employer" in requests["block"]

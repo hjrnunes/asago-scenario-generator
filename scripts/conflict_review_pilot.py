@@ -250,6 +250,19 @@ def candidate_groups(run: RecordedRun) -> dict[str, dict[str, list[str]]]:
     }
 
 
+def run_labels(runs: Sequence[RecordedRun]) -> list[str]:
+    """Name each run in the reports: its basename, or its resolved path when
+    another run shares that basename. A run given twice is refused."""
+    paths = [str(run.run_dir.resolve()) for run in runs]
+    repeated = sorted({path for path in paths if paths.count(path) > 1})
+    if repeated:
+        raise SystemExit(f"runs repeat: {repeated}")
+    names = Counter(run.label for run in runs)
+    return [
+        run.label if names[run.label] == 1 else path for run, path in zip(runs, paths)
+    ]
+
+
 @dataclass(frozen=True)
 class CandidatePair:
     first: str
@@ -998,6 +1011,8 @@ def score_case(case: ReviewCase, result: CaseResult) -> dict[str, Any]:
             for item in (verdict or {}).get("request_decisions", [])
         }
         requests = {}
+        # ``allow`` is correct only as allow; ``block`` and ``escalate`` are
+        # correct as block or escalate, the ways an agent stops a request.
         for request_id, wanted in labels["expected_requests"].items():
             decision = decisions.get(request_id)
             got = decision["decision"] if decision else None
@@ -1214,13 +1229,14 @@ def _select(args: argparse.Namespace) -> None:
     out_dir: Path = args.out_dir
     out_dir.mkdir(parents=True, exist_ok=True)
     runs = [load_run(path) for path in args.run]
+    labelled = list(zip(run_labels(runs), runs))
     pairs_by_run = {str(run.run_dir.resolve()): candidate_pairs(run) for run in runs}
     hand = list(_yaml(args.hand_manifest)["cases"]) if args.hand_manifest else []
     with (out_dir / "candidate-pairs.jsonl").open("w", encoding="utf-8") as handle:
-        for run in runs:
+        for label, run in labelled:
             for pair in pairs_by_run[str(run.run_dir.resolve())]:
                 row = {
-                    "run": run.label,
+                    "run": label,
                     "pair": [pair.first, pair.second],
                     "shared": {k: list(v) for k, v in pair.shared.items()},
                     "in_union": pair.in_union,
@@ -1228,11 +1244,12 @@ def _select(args: argparse.Namespace) -> None:
                 handle.write(json.dumps(row, ensure_ascii=False) + "\n")
     _write_json(
         out_dir / "candidate-groups.json",
-        {run.label: candidate_groups(run) for run in runs},
+        {label: candidate_groups(run) for label, run in labelled},
     )
     counts = {
         "runs": {
-            run.label: {
+            label: {
+                "run_dir": str(run.run_dir.resolve()),
                 "non_duplicate_scenarios": len(run.non_duplicates()),
                 "with_process_model_context": sum(
                     1
@@ -1245,7 +1262,7 @@ def _select(args: argparse.Namespace) -> None:
                     for name, elements in candidate_groups(run).items()
                 },
             }
-            for run in runs
+            for label, run in labelled
         },
     }
     if hand:
