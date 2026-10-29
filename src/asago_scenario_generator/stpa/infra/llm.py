@@ -345,22 +345,59 @@ def _raise_if_length_without_content(response: Any) -> None:
         raise LengthFinishReasonError(completion=response)
 
 
+_MIN_REDACTED_KEY_LENGTH = 8
+"""Shortest configured key that is redacted by its value.
+
+A shorter value is a placeholder for an endpoint that needs no key (``EMPTY``
+or ``none``, say), not a secret, and replacing it would corrupt ordinary
+words in the error text.  No provider issues keys that short.
+"""
+
+_REDACTED_KEY = "[redacted-key]"
+
+
 def _drop_api_key(error: BaseException, api_key: str) -> None:
     """Replace the client's API key in a provider error's text, in place.
 
     A provider can echo the key it was sent with no label or key-like prefix,
     so the key is found by its value, whatever that value is, before any
-    record or log turns the error into text.
+    record or log turns the error into text.  The errors it was chained from
+    (``__cause__`` and ``__context__``) are scrubbed too, each once.
+
+    This runs while the provider error propagates, and retry decisions read
+    that error's type, so it never raises: an attribute that cannot be set
+    (a read-only ``args`` or ``message``) keeps its text.
     """
-    if not api_key:
+    if not api_key or len(api_key) < _MIN_REDACTED_KEY_LENGTH:
         return
-    error.args = tuple(
-        arg.replace(api_key, "[redacted-key]") if isinstance(arg, str) else arg
-        for arg in error.args
-    )
-    message = getattr(error, "message", None)
-    if isinstance(message, str):
-        error.message = message.replace(api_key, "[redacted-key]")  # type: ignore[attr-defined]
+    seen: set[int] = set()
+    pending: list[BaseException] = [error]
+    while pending:
+        current = pending.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        _drop_api_key_from(current, api_key)
+        for chained in (current.__cause__, current.__context__):
+            if chained is not None:
+                pending.append(chained)
+
+
+def _drop_api_key_from(error: BaseException, api_key: str) -> None:
+    """Redact one error's ``args`` and ``message``; skip what cannot be set."""
+    try:
+        error.args = tuple(
+            arg.replace(api_key, _REDACTED_KEY) if isinstance(arg, str) else arg
+            for arg in error.args
+        )
+    except Exception:  # noqa: BLE001 - keep the provider error propagating
+        pass
+    try:
+        message = getattr(error, "message", None)
+        if isinstance(message, str) and api_key in message:
+            error.message = message.replace(api_key, _REDACTED_KEY)  # type: ignore[attr-defined]
+    except Exception:  # noqa: BLE001 - keep the provider error propagating
+        pass
 
 
 def _locally_parse_response_content(
