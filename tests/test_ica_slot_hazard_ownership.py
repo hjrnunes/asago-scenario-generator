@@ -735,3 +735,35 @@ def test_an_operation_slot_tied_to_another_operations_hazard_is_flagged() -> Non
 
     assert mismatch.slot_operation == "summarize_record"
     assert mismatch.owning_slot_ids == ("RESP-7:CA-7-2:NOT_PROVIDED",)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "The assistant is likely to omit `escalate_trust_safety`.",
+        "The likelihood rises that `escalate_trust_safety` is never called.",
+    ],
+    ids=["likely", "likelihood"],
+)
+def test_a_word_that_starts_with_an_example_marker_is_not_a_marker(text) -> None:
+    [mismatch] = _mismatches(_reply_slot(), _hazard_text(text), _structure())
+
+    assert mismatch.hazard_operations == ("escalate_trust_safety",)
+
+
+def test_an_example_marker_counts_in_any_case() -> None:
+    losses = _hazard_text("Actions (E.g. `escalate_trust_safety`) run without review.")
+
+    assert _mismatches(_reply_slot(), losses, _structure()) == ()
+
+
+@pytest.mark.parametrize("stop", ["!", "?"])
+def test_an_example_ends_at_an_exclamation_or_question_mark(stop) -> None:
+    losses = _hazard_text(
+        f"Actions such as `escalate_trust_safety` run{stop} "
+        "The assistant omits `escalate_trust_safety`."
+    )
+
+    [mismatch] = _mismatches(_reply_slot(), losses, _structure())
+
+    assert mismatch.hazard_operations == ("escalate_trust_safety",)

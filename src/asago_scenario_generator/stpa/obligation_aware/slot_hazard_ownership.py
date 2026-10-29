@@ -283,12 +283,14 @@ def _clause_before(text: str, end: int) -> str:
 
 
 _IDENTIFIER_LIKE = re.compile(r"[_\d]|[a-z][A-Z]")
+# A marker is a whole word or phrase, so "likely" is not "like".
 _EXAMPLE = re.compile(
-    r"\b(?:e\.g\.|for example|for instance|such as|like|including)", re.IGNORECASE
+    r"\b(?:e\.g\.|(?:for example|for instance|such as|like|including)\b)",
+    re.IGNORECASE,
 )
 # A clause ends at a sentence or clause stop, or a closing parenthesis; the
-# full stops inside "e.g." do not end one.
-_CLAUSE_END = re.compile(r"(?<!\be\.g)(?<!\be)\.(?=\s|$)|[;:)]")
+# full stops inside "e.g.", in any case, do not end one.
+_CLAUSE_END = re.compile(r"(?<!\be\.g)(?<!\be)\.(?=\s|$)|[!?;:)]", re.IGNORECASE)
 
 
 def _slot_mismatches(
