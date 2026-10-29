@@ -125,6 +125,39 @@ def _persist_mechanism_accounting(
     )
 
 
+def _persist_spec_diagnostics(
+    output_dir: Path,
+    *,
+    loss_analysis: Any,
+    control_structure: Any,
+    ica_stage: Any,
+    warnings: list[str],
+) -> Path | None:
+    """Publish the report-only specification checks of the final artifacts.
+
+    The retained ICAs are the verified ordinary enumeration; a stopped fill
+    has none, so its ICA checks are recorded as not run.  A finding never
+    blocks: a check that cannot run at all adds a warning and writes nothing.
+    """
+    from asago_scenario_generator.stpa.spec_diagnostics import (
+        diagnose_final_artifacts,
+        write_spec_diagnostics,
+    )
+
+    stopped = getattr(ica_stage, "fill_failure", None) is not None
+    try:
+        diagnostics = diagnose_final_artifacts(
+            loss_analysis=loss_analysis,
+            control_structure=control_structure,
+            ica_enumeration=None if stopped else ica_stage.ica_enumeration,
+            ica_unavailable_reason="the ICA fill stopped before it finished",
+        )
+        return write_spec_diagnostics(output_dir, diagnostics)
+    except Exception as exc:  # noqa: BLE001 - report-only, never blocks the run
+        warnings.append(f"spec diagnostics: not written: {exc}")
+        return None
+
+
 def _persist_target_realization(
     output_dir: Path,
     artifact: Any | None,
@@ -204,12 +237,14 @@ def _artifact_paths(
     ica_merges_path: Path | None = None,
     final_control_path: Path | None = None,
     mechanism_accounting_path: Path | None = None,
+    spec_diagnostics_path: Path | None = None,
 ) -> dict[str, Path]:
     """Add each optional published artifact to the always-written ones."""
     for sidecar in (
         hazard_offers_path,
         ica_merges_path,
         mechanism_accounting_path,
+        spec_diagnostics_path,
         policy_coverage_path,
         final_control_path,
     ):

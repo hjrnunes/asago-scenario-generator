@@ -66,6 +66,7 @@ from asago_scenario_generator.pipeline.synthesis_persist import (
     _persist_prepared_profile,
     _persist_sidecar,
     _persist_slot_hazard_offers,
+    _persist_spec_diagnostics,
     _persist_target_realization,
     _reload_persisted_plan,
     _render_report,
@@ -429,6 +430,15 @@ def _run_synthesis(
         target_realization,
         resolved.persist_target_realization,
     )
+    # Report-only checks of the final structure and retained ICAs; they
+    # change no other artifact and never stop the run.
+    spec_diagnostics_path = _persist_spec_diagnostics(
+        output_dir,
+        loss_analysis=final_loss,
+        control_structure=final_control,
+        ica_stage=ica_enumeration,
+        warnings=stage_warnings,
+    )
     manifest = _build_manifest(
         inputs=inputs,
         capability_profile=capability_profile,
@@ -490,6 +500,7 @@ def _run_synthesis(
         ica_merges_path=ica_merges_path,
         final_control_path=final_control_path,
         mechanism_accounting_path=mechanism_accounting_path,
+        spec_diagnostics_path=spec_diagnostics_path,
     )
 
     return SynthesisResult(
