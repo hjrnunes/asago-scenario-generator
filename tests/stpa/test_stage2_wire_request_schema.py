@@ -268,7 +268,7 @@ class TestRevisionRequest:
             "new_controlled_processes",
             "new_coordination_links",
             "modified_responsibilities",
-            "dismissed_gaps",
+            "gap_dispositions",
         ]
         assert "required" not in schema
 

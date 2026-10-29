@@ -55,6 +55,14 @@ ANSWER_STATE_INSTRUCTION = (
     "whether the operation answered, refused, or handed off; it does not "
     "claim the state of a record"
 )
+STORED_ITEM_INSTRUCTION = (
+    "an operation that stores, submits, or queues an item for another party's "
+    "later action, such as a review or an approval, reports that the item was "
+    "accepted and the status it was stored with, not the outcome of that later "
+    "action. A variable for that outcome needs feedback from where the outcome "
+    "is recorded, for example an operation that reads the record, or it stays "
+    "unknown."
+)
 EVIDENCE_STEPS = {
     "call_2a_responsibilities",
     "call_2b_control_elements",
@@ -215,6 +223,17 @@ def test_stage2_requests_read_an_answer_as_retrieved_text_without_record_state(
         assert text.count(ANSWER_TEXT_INSTRUCTION) == 1, step
 
 
+def test_stage2_requests_read_a_stored_item_result_without_its_later_outcome(
+    tmp_path: Path,
+) -> None:
+    _run(tmp_path, _profile(), critic_gap=True)
+
+    for step, text in _evidence_requests(tmp_path).items():
+        result_rules = text.split(RESULT_INSTRUCTION, 1)[1]
+        assert STORED_ITEM_INSTRUCTION in result_rules, step
+        assert text.count(STORED_ITEM_INSTRUCTION) == 1, step
+
+
 def test_stage2_requests_omit_the_answer_rule_without_a_returning_operation(
     tmp_path: Path,
 ) -> None:
@@ -228,6 +247,7 @@ def test_stage2_requests_omit_the_answer_rule_without_a_returning_operation(
     for step, text in _evidence_requests(tmp_path).items():
         assert "## Discovered target evidence" in text, step
         assert ANSWER_TEXT_INSTRUCTION not in text, step
+        assert STORED_ITEM_INSTRUCTION not in text, step
 
 
 def test_code_adds_no_feedback_for_an_acknowledgement_or_a_retrieval(

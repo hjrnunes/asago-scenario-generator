@@ -17,6 +17,13 @@ cases:
         These observed operations declare an output, so they return what they
         report to the responsibility that invokes them:
         `operation:cancel_order`, `operation:lookup_order`.
+      - >-
+        Likewise, an operation that stores, submits, or queues an item for
+        another party's later action, such as a review or an approval, reports
+        that the item was accepted and the status it was stored with, not the
+        outcome of that later action. A variable for that outcome needs feedback
+        from where the outcome is recorded, for example an operation that reads
+        the record, or it stays unknown.
     required:
       - Decide from the operation's description and the use case what its result tells that responsibility
       - whether a requested change took effect or which record was returned

@@ -281,15 +281,63 @@ def test_a_discarded_revision_is_a_stage_warning_and_a_manifest_record(tmp_path)
     ]
 
 
+def _addressed(reply: dict, *element_ids: str) -> dict:
+    """*reply* with one ``addressed`` disposition for the one critic gap."""
+    disposition = {
+        "gap_id": "G-1",
+        "disposition": "addressed",
+        "element_ids": list(element_ids),
+        "justification": "Adds the intent classification and its feedback.",
+    }
+    return {**reply, "gap_dispositions": [disposition]}
+
+
 def test_an_applied_revision_is_recorded_without_a_warning(tmp_path):
     result, manifest = _sp1_run(
-        tmp_path, _revision_reply({"type": "responsibility", "id": "RESP-1"})
+        tmp_path,
+        _addressed(
+            _revision_reply({"type": "responsibility", "id": "RESP-1"}), "RESP-9"
+        ),
     )
 
     record = manifest["stage_summary"]["stage_2"]["critic_revision"]
-    assert record == {"status": "applied"}
+    # The reply wrote RESP-9; the published structure numbers it by position,
+    # and the claim still names the element it added.
+    assert record == {
+        "status": "applied",
+        "gap_dispositions": {"addressed": 1, "dismissed": 0, "recommendation": 0},
+        "unresolved_gaps": [],
+    }
     assert result.revised is True
     assert not [w for w in result.stage_warnings if w.startswith(_DISCARDED)]
+    assert not [w for w in result.post_revision_warnings if "G-1" in w]
+
+
+def test_an_applied_revision_records_a_claim_it_did_not_make(tmp_path):
+    result, manifest = _sp1_run(
+        tmp_path,
+        _addressed(
+            _revision_reply({"type": "responsibility", "id": "RESP-1"}), "RESP-1"
+        ),
+    )
+
+    record = manifest["stage_summary"]["stage_2"]["critic_revision"]
+    assert record == {
+        "status": "applied",
+        "gap_dispositions": {"addressed": 1, "dismissed": 0, "recommendation": 0},
+        "unresolved_gaps": [
+            {
+                "gap_id": "G-1",
+                "reason": "claimed addressed but did not change RESP-1",
+            }
+        ],
+    }
+    assert (
+        "Revision left critic gap G-1 unresolved: claimed addressed but did "
+        "not change RESP-1."
+    ) in result.post_revision_warnings
+    # Scenario production rewrites the run manifest and keeps the record whole.
+    assert _preserved_stage_keys(tmp_path).critic_revision == record
 
 
 def test_a_run_without_critic_gaps_records_no_revision(tmp_path):

@@ -202,6 +202,7 @@ class TestSanitizationFlow:
             use_case_text="Test",
             control_structure=_make_control_structure(),
             critic_findings=sanitized,
+            gap_ids=["G-1"],
         )
         assert "PM-0" not in user_prompt
 
