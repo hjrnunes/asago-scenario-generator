@@ -769,7 +769,9 @@ class CorrectionPolicy:
     error, and the response schema when ``include_schema``.  ``feedback`` is
     text, or a function from the failure to the text.  ``error_note`` is a
     function from the failure to a note placed right after the exact error;
-    an empty note adds nothing.  Every other failure ends the call.
+    an empty note adds nothing.  ``response_view`` is a function from the
+    prior response's content to the content the correction shows; without
+    it the response is shown as it came.  Every other failure ends the call.
 
     With ``correct_undecodable``, an undecodable body that no ``json_retries``
     repeat covers also earns a validation correction.  That correction shows
@@ -784,6 +786,7 @@ class CorrectionPolicy:
     include_schema: bool = True
     include_response: bool = False
     error_note: Callable[[Exception], str] | None = None
+    response_view: Callable[[Any], Any] | None = None
     correct_undecodable: bool = False
 
     def __post_init__(self) -> None:
@@ -893,11 +896,18 @@ def correction_prompt(
     prior_result: LLMResult | None = None,
     include_prior_response: bool = False,
     error_note: str = "",
+    response_view: Callable[[Any], Any] | None = None,
 ) -> str:
-    """Build a bounded correction prompt with field-specific validation errors."""
+    """Build a bounded correction prompt with field-specific validation errors.
+
+    ``response_view`` maps the prior response's content to the content shown.
+    """
     suffix = feedback or ""
     if include_prior_response and prior_result is not None:
-        prior_response = _stringify_response_content(prior_result.content)
+        content = prior_result.content
+        if response_view is not None:
+            content = response_view(content)
+        prior_response = _stringify_response_content(content)
         if isinstance(error, json.JSONDecodeError):
             # A whitespace runaway would add its whole run to the prompt.
             prior_response = prior_response.rstrip()
@@ -1379,6 +1389,7 @@ def call_with_policy(
                     prior_result=state.result,
                     include_prior_response=policy.include_response,
                     error_note=policy.error_note(exc) if policy.error_note else "",
+                    response_view=policy.response_view,
                 )
                 continue
             return CallOutcome(

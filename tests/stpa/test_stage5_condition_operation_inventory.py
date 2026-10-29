@@ -13,12 +13,16 @@ name an operation of the same inventory and are closed the same way.
 from __future__ import annotations
 
 import copy
+import json
 
 import jsonschema
 import pytest
 import yaml
 
 from asago_scenario_generator.stpa.infra.llm import _json_schema_response_format
+from asago_scenario_generator.stpa.scenario_prod.stage5.prior_reply import (
+    without_unknown_operations,
+)
 from asago_scenario_generator.stpa.scenario_prod.stage5.schema import (
     _scenario_semantics_payload_type,
 )
@@ -171,6 +175,13 @@ def _validator_of(schema: dict, name: str) -> jsonschema.Draft202012Validator:
     )
 
 
+def _shown_reply(prompt: str) -> dict:
+    """The prior reply a correction prompt shows, decoded."""
+    _, after = prompt.split("Prior structured response to correct in place:\n```json\n")
+    shown, _ = after.split("\n```", 1)
+    return json.loads(shown)
+
+
 def _normalizations(tmp_path) -> list[dict]:
     [path] = (tmp_path / "stage5-normalizations").glob("*.yaml")
     return yaml.safe_load(path.read_text(encoding="utf-8"))["normalizations"]
@@ -299,6 +310,16 @@ def test_a_reply_parse_still_accepts_any_operation_for_the_exact_check() -> None
     assert draft.unsafe_outcome.failure_call.operation_name == MALFORMED.strip()
     [criterion] = draft.unsafe_outcome.observation_criteria
     assert criterion.operation_name == MALFORMED
+    # A correction shows the parsed reply without the refused names.
+    shown = without_unknown_operations(draft, ("open_ticket",))["unsafe_outcome"]
+    [comparison] = shown["discriminating_condition"]["comparisons"]
+    assert comparison["operation"] is None
+    assert shown["failure_call"]["operation_name"] is None
+    assert shown["observation_criteria"][0]["operation_name"] is None
+    assert (
+        comparison is not draft.unsafe_outcome.discriminating_condition.comparisons[0]
+    )
+    assert draft.unsafe_outcome.failure_call.operation_name == MALFORMED.strip()
 
 
 def test_without_operations_the_schema_is_unchanged() -> None:
@@ -336,6 +357,16 @@ def test_a_malformed_operation_is_corrected_with_the_exact_inventory_error(
     correction = client.calls[1].user_prompt
     assert f"{CHECK_FAILED}:" in correction
     assert UNKNOWN_OPERATION in correction
+    # The prior reply is shown with the refused name replaced by null, so the
+    # correction cannot copy it; the exact error above still names it.
+    shown = _shown_reply(correction)
+    [comparison] = shown["unsafe_outcome"]["discriminating_condition"]["comparisons"]
+    assert comparison == {"kind": "not_called", "operation": None}
+    expected = _missing_ticket_payload(_condition("open_ticket"))
+    expected["unsafe_outcome"]["discriminating_condition"]["comparisons"][0][
+        "operation"
+    ] = None
+    assert shown == expected
     # The correction is sent with the same closed schema.
     assert _sent_schema(client, 1) == _sent_schema(client, 0)
     assert result.discriminating_condition is not None
@@ -356,6 +387,15 @@ def test_a_malformed_operation_the_corrections_keep_is_a_recorded_failure(
 
     assert error is None
     assert client.call_count == 3
+    # Both corrections show the prior reply without the refused name.
+    for call in client.calls[1:]:
+        shown = _shown_reply(call.user_prompt)
+        comparisons = shown["unsafe_outcome"]["discriminating_condition"]["comparisons"]
+        assert MALFORMED not in json.dumps(shown)
+        assert comparisons[0] == {"kind": "not_called", "operation": None}
+    assert _shown_reply(client.calls[2].user_prompt)["unsafe_outcome"][
+        "discriminating_condition"
+    ]["comparisons"][1] == {"kind": "not_called", "operation": "open_ticket"}
     assert result.discriminating_condition is None
     assert result.condition_omitted_reason.startswith(
         "The discriminating condition failed validation after two corrections "
@@ -391,5 +431,110 @@ def test_a_malformed_outcome_operation_is_corrected_with_the_exact_error(
     assert failure is None
     assert client.call_count == 2
     assert error in client.calls[1].user_prompt
+    shown = _shown_reply(client.calls[1].user_prompt)["unsafe_outcome"]
+    if field == "failure_call":
+        assert shown["failure_call"] == {"kind": "missing_call", "operation_name": None}
+    else:
+        assert shown["observation_criteria"][0]["operation_name"] is None
     assert _sent_schema(client, 1) == _sent_schema(client, 0)
     assert result.discriminating_condition is not None
+
+
+def test_a_reply_inside_the_inventory_is_shown_as_it_came(tmp_path) -> None:
+    # A semantic condition failure: every name is in the inventory.
+    wrong = _missing_ticket_payload(_condition("open_ticket"))
+    wrong["unsafe_outcome"]["discriminating_condition"]["comparisons"] = [
+        {"kind": "order", "operation": "open_ticket", "requires_prior": "open_ticket"}
+    ]
+    client = _client(wrong, _missing_ticket_payload(_condition("open_ticket")))
+
+    _profile_generate(client, tmp_path)
+
+    assert client.call_count == 2
+    assert (
+        "Prior structured response to correct in place:\n```json\n"
+        f"{json.dumps(wrong)}\n```"
+    ) in client.calls[1].user_prompt
+
+
+def test_the_shown_reply_nulls_each_name_outside_the_inventory() -> None:
+    def operand(operation):
+        return {
+            "source": "argument",
+            "operation": operation,
+            "argument": "gadget_id",
+            "path": None,
+            "value": None,
+        }
+
+    reply = {
+        "unsafe_outcome": {
+            "discriminating_condition": {
+                "comparisons": [
+                    {
+                        "kind": "value",
+                        "left": operand("update_gadget"),
+                        "op": "ne",
+                        "right": operand("update_gadget}],"),
+                        "operation": None,
+                        "requires_prior": None,
+                    },
+                    {
+                        "kind": "order",
+                        "operation": "update_gadget",
+                        "requires_prior": " get_gadget",
+                    },
+                    {"kind": "order", "operation": "x", "requires_prior": "y"},
+                ],
+                "record_selection": {
+                    "status": "observed",
+                    "argument_values": [
+                        {"operation": "open_ticket", "argument": "a"},
+                        {"operation": 'open_ticket"}', "argument": "a"},
+                    ],
+                },
+            },
+            "failure_call": {"kind": "incorrect_call", "operation_name": "nope"},
+            "observation_criteria": [
+                {"criterion_id": "c1", "operation_name": None},
+                {"criterion_id": "c2", "operation_name": "get_gadget"},
+                {"criterion_id": "c3", "operation_name": "get_gadget},"},
+            ],
+            "safe_observable_outcome": {"operation_name": "unchecked"},
+        }
+    }
+
+    shown = without_unknown_operations(json.dumps(reply), INVENTORY)
+
+    outcome = shown["unsafe_outcome"]
+    first, second, third = outcome["discriminating_condition"]["comparisons"]
+    assert first["left"]["operation"] == "update_gadget"
+    assert first["right"]["operation"] is None
+    # A name the check accepts once stripped is kept as written.
+    assert second["requires_prior"] == " get_gadget"
+    assert (third["operation"], third["requires_prior"]) == (None, None)
+    values = outcome["discriminating_condition"]["record_selection"]["argument_values"]
+    assert [item["operation"] for item in values] == ["open_ticket", None]
+    assert outcome["failure_call"]["operation_name"] is None
+    assert [item["operation_name"] for item in outcome["observation_criteria"]] == [
+        None,
+        "get_gadget",
+        None,
+    ]
+    assert outcome["safe_observable_outcome"] == {"operation_name": "unchecked"}
+    # The reply itself is left unchanged.
+    assert reply["unsafe_outcome"]["failure_call"]["operation_name"] == "nope"
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        {"unsafe_outcome": {"failure_call": {"operation_name": "open_ticket"}}},
+        '{"unsafe_outcome": {"failure_call": {"operation_name": "open_ticket"}}}',
+        "not json",
+        ["unsafe_outcome"],
+        None,
+    ],
+)
+def test_a_reply_with_nothing_to_null_is_returned_as_it_came(content) -> None:
+    assert without_unknown_operations(content, INVENTORY) is content
