@@ -13,10 +13,15 @@ mapping; the first rule that matches decides:
 
 1. ``timing_slot``: a WRONG_TIMING ICA keeps the first ``prior_read``
    family whatever its reason (applied by the slot type, not here).
-2. ``ownership_reason``: the reason variable is read from a ``session:``
-   reference, or the reason names an owner, identity, actor, session, party,
-   principal or membership term -> ``ownership``. When the operation offers
-   no ownership family the ICA gets no hint; it does not fall through.
+2. ``ownership_reason`` -> ``ownership`` when the reason names an owner,
+   belonging, identity, actor, party, principal or membership term; or when
+   it is about the session (a session or authenticated term, or a reason
+   variable read from a ``session:`` reference) and names no limit term.
+   Precedence: a limit term (amount, balance, limit, exceeds...) wins over
+   session wording, which then only qualifies the limit ("the amount exceeds
+   the session spending limit" goes on to rules 3-4); an ownership or actor
+   term wins over a limit term. When the operation offers no ownership
+   family the ICA gets no hint; it does not fall through.
 3. ``reason_variable_field``: the reason variable is read from a ``state:``
    field that a family of the operation cites -> that family's kind
    (``ownership``, ``flag``, ``bound``, ``state`` in that order).
@@ -27,14 +32,18 @@ mapping; the first rule that matches decides:
    transaction") name no family term and take this path.
 
 Context guard: ``ownership`` is never chosen when another variable of the
-cited row already says the record belongs to the session principal: a
-variable about the record's ownership (read from a ``state:`` field, and
-either also from a ``session:`` reference or with an owner, belonging, party
-or membership term in its description or value) whose value has no negation
-term. An ownership test would contradict the ICA's own context, so the rules
-continue without ownership and the ICA gets what rules 3-5 give, or no hint.
-A variable that only describes the session principal ("authenticated actor
-is the guest", "authorized for target records") does not guard.
+cited row already says the record belongs to the session principal. That
+needs an affirmative ownership statement about a record and the principal:
+the variable is read from a ``state:`` field (the record), its value or
+description names an owner, belonging, party or membership relation, it
+names the principal (a principal term, or a ``session:`` reference), and its
+value is not negated (a negation term, a contracted "n't", or an un-, non-
+or dis- prefix on a participle such as "unowned"). An ownership test would
+contradict the ICA's own context, so the rules continue without ownership
+and the ICA gets what rules 3-5 give, or no hint. Evidence shape alone
+("within limit" read from a session and a state field), or a variable that
+only describes the session principal ("authenticated actor is the guest"),
+does not guard.
 
 The term lists below are the only lexical matching; everything else is exact
 lookup.
@@ -75,8 +84,9 @@ REASON_FAMILY_RULES: tuple[ReasonRule, ...] = (
     ReasonRule(
         "ownership_reason",
         ("ownership",),
-        "The reason variable reads the session, or the reason names an "
-        "ownership, identity, actor, session or party term.",
+        "The reason names an ownership, identity, actor or party term; or it "
+        "is about the session (session term or session-read reason variable) "
+        "and names no limit term, which would win.",
     ),
     ReasonRule(
         "reason_variable_field",
@@ -105,14 +115,30 @@ OWNERSHIP_TERMS = frozenset(
         "identities",
         "actor",
         "actors",
-        "session",
-        "authenticated",
-        "unauthenticated",
         "party",
         "parties",
         "principal",
         "member",
         "membership",
+    }
+)
+# Session wording gives ownership only when the reason names no limit term.
+SESSION_TERMS = frozenset({"session", "sessions", "authenticated", "unauthenticated"})
+# Words naming the principal a record may belong to, read by the guard.
+PRINCIPAL_TERMS = frozenset(
+    {
+        "actor",
+        "actors",
+        "customer",
+        "customers",
+        "user",
+        "users",
+        "principal",
+        "requester",
+        "caller",
+        "guest",
+        "host",
+        *SESSION_TERMS,
     }
 )
 # The subset that names a record's relation to a principal, read by the
@@ -126,6 +152,7 @@ RELATION_TERMS = frozenset(
         "ownership",
         "belong",
         "belongs",
+        "belonged",
         "belonging",
         "party",
         "parties",
@@ -225,11 +252,32 @@ NEGATION_TERMS = frozenset(
         "unowned",
         "foreign",
         "outside",
+        "never",
+    }
+)
+# An un-, non- or dis- prefix on one of these participles negates it.
+_NEGATED_PREFIXES = ("un", "non", "dis")
+_AFFIRMATIVE_STEMS = frozenset(
+    {
+        "owned",
+        "authorized",
+        "authorised",
+        "authenticated",
+        "verified",
+        "related",
+        "linked",
+        "matched",
+        "assigned",
+        "associated",
+        "affiliated",
+        "confirmed",
     }
 )
 _SESSION_PREFIX = "session:"
 _STATE_PREFIX = "state:"
 _WORD = re.compile(r"[a-z0-9]+")
+_CONTRACTED_NOT = re.compile(r"n['\u2019]t\b")
+_CANNOT = re.compile(r"\bcannot\b")
 
 
 @dataclass(frozen=True)
@@ -296,8 +344,13 @@ TIMING_CHOICE = ReasonFamilyChoice(kind="prior_read", rule="timing_slot")
 
 
 def reason_terms(text: str) -> tuple[str, ...]:
-    """Return the lower-case words of ``text``, in order."""
-    return tuple(_WORD.findall(text.lower()))
+    """Return the lower-case words of ``text``, in order.
+
+    A contracted "n't" and "cannot" read as "not", so "doesn't" gives
+    ``("does", "not")``.
+    """
+    text = _CANNOT.sub("can not", _CONTRACTED_NOT.sub(" not", text.lower()))
+    return tuple(_WORD.findall(text))
 
 
 def reason_variable(reason: str, row: CitedContextRow | None) -> ContextVariable | None:
@@ -325,7 +378,9 @@ def choose_reason_family(
     guard = _row_says_session_owns(reason.row, variable)
     guarded = False
 
-    if _reads_session(variable) or terms & OWNERSHIP_TERMS:
+    about_session = _reads_session(variable) or bool(terms & SESSION_TERMS)
+    names_limit = bool(terms & _LIMIT_TERMS)
+    if terms & OWNERSHIP_TERMS or (about_session and not names_limit):
         if not guard:
             return ReasonFamilyChoice(
                 "ownership", "ownership_reason", pm_id, False, labels
@@ -347,6 +402,9 @@ def choose_reason_family(
     return ReasonFamilyChoice(None, "no_match", pm_id, guarded, labels)
 
 
+_LIMIT_TERMS = dict(_KIND_TERMS)["bound"]
+
+
 def hinted_families(
     choice: ReasonFamilyChoice, families: Iterable[ConditionFamily]
 ) -> list[ConditionFamily]:
@@ -362,20 +420,21 @@ def hinted_families(
 def ica_reasons(enumeration: Any, control_structure: Any) -> dict[str, IcaReason]:
     """Return each ICA's reason and cited row, keyed by ICA ID.
 
-    The reason is the ICA's ``deviation``, else its ICA text. The row's
-    values are the ICA's ``process_model_context``, else the row its
-    ``context_row`` names in its control action's context table; each
-    variable's description and evidence come from the controller's process
-    model. An ICA that cites no row, or a row that table does not hold, has
-    no row.
+    The reason is the ICA's ``deviation``, else its ICA text. An ICA with a
+    ``context_row`` has a row: its values are the ICA's
+    ``process_model_context``, else that row of its control action's context
+    table; each variable's description and evidence come from the
+    controller's process model. An ICA that cites no row ID (even one with a
+    process-model context), or a row that table does not hold, has no row.
     """
     reasons: dict[str, IcaReason] = {}
     for slot in enumeration.slots:
         parts = _process_model_parts(control_structure, slot.control_action)
         rows: dict[str, tuple[tuple[str, str], ...]] | None = None
         for ica in slot.icas:
+            # A process-model context alone cites no row.
             assignments: tuple[tuple[str, str], ...] | None = None
-            if ica.process_model_context:
+            if ica.context_row is not None and ica.process_model_context:
                 assignments = _ordered(ica.process_model_context, parts)
             elif ica.context_row is not None:
                 if rows is None:
@@ -460,18 +519,31 @@ def _row_says_session_owns(
             continue
         words = frozenset(reason_terms(variable.value))
         about = words | frozenset(reason_terms(variable.description or ""))
-        shaped = _field_labels(variable) != () and (
-            _reads_session(variable) or bool(about & RELATION_TERMS)
+        states_ownership = (
+            _field_labels(variable) != ()
+            and bool(about & RELATION_TERMS)
+            and (_reads_session(variable) or bool(about & PRINCIPAL_TERMS))
         )
-        if shaped and not words & NEGATION_TERMS:
+        if states_ownership and not _negated(words):
             return True
     return False
+
+
+def _negated(words: frozenset[str]) -> bool:
+    """Return whether a value's words negate it."""
+    return bool(words & NEGATION_TERMS) or any(
+        word.startswith(prefix) and word[len(prefix) :] in _AFFIRMATIVE_STEMS
+        for word in words
+        for prefix in _NEGATED_PREFIXES
+    )
 
 
 __all__ = [
     "NEGATION_TERMS",
     "OWNERSHIP_TERMS",
+    "PRINCIPAL_TERMS",
     "RELATION_TERMS",
+    "SESSION_TERMS",
     "REASON_FAMILY_RULES",
     "TIMING_CHOICE",
     "CitedContextRow",
