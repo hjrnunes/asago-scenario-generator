@@ -122,6 +122,9 @@ from asago_scenario_generator.stpa.system_model.critic import (
     discarded_revision_reason,
     strip_empty_responsibilities,
 )
+from asago_scenario_generator.stpa.system_model.revision_dispositions import (
+    DISPOSITION_KINDS,
+)
 from asago_scenario_generator.stpa.system_model.publication import (
     CONTROL_STRUCTURE_FILENAME,
     REFUSED_CONTROL_STRUCTURE_FILENAME,
@@ -269,6 +272,7 @@ class AddedField:
 
 
 _CRITIC_REVISION_STATUSES = ("applied", "unchanged", "discarded")
+_GAP_REVIEW_KEYS = frozenset({"gap_dispositions", "unresolved_gaps"})
 _EVIDENCE_BOUND_VERSION = "control-structure-evidence-bound.yaml"
 _NONE_REVISION_REASON = f"{REVISION_FAILED}unexpected None response"
 
@@ -290,7 +294,8 @@ def _critic_revision_problem(
 ) -> str | None:
     """Check a replayed Stage 2 critic-revision record against its own run.
 
-    The record says ``status: applied`` or ``unchanged`` and nothing else, or
+    The record says ``status: applied`` or ``unchanged``, optionally with
+    its gap review (``gap_dispositions`` and ``unresolved_gaps``), or
     ``status: discarded`` with the ``reason`` warning that kept the reviewed
     structure.  That reason is the one :func:`discarded_revision_reason`
     finds in the run's post-revision warnings, and an applied or unchanged
@@ -331,11 +336,19 @@ def _critic_revision_shape_problem(value: Any) -> str | None:
             f"{', '.join(_CRITIC_REVISION_STATUSES)}"
         )
     keys = {"status", "reason"} if status == "discarded" else {"status"}
+    if status != "discarded" and _GAP_REVIEW_KEYS <= set(value):
+        keys |= _GAP_REVIEW_KEYS
     if set(value) != keys:
         return (
             f"a {status} critic revision record holds {sorted(keys)}, "
             f"not {sorted(value)}"
         )
+    if keys >= _GAP_REVIEW_KEYS:
+        problem = _gap_review_shape_problem(
+            value["gap_dispositions"], value["unresolved_gaps"]
+        )
+        if problem:
+            return problem
     reason = value.get("reason")
     if status == "discarded" and (
         not isinstance(reason, str) or discarded_revision_reason([reason]) != reason
@@ -343,6 +356,33 @@ def _critic_revision_shape_problem(value: Any) -> str | None:
         return (
             f"discarded critic revision reason {_short(reason)} is not a "
             "revision failure or merge degradation warning"
+        )
+    return None
+
+
+def _gap_review_shape_problem(counts: Any, unresolved: Any) -> str | None:
+    """Check the gap review an applied or unchanged revision record holds."""
+    if (
+        not isinstance(counts, dict)
+        or set(counts) != set(DISPOSITION_KINDS)
+        or not all(
+            isinstance(count, int) and not isinstance(count, bool) and count >= 0
+            for count in counts.values()
+        )
+    ):
+        return (
+            f"critic revision gap_dispositions {_short(counts)} is not a count "
+            f"for each of {', '.join(DISPOSITION_KINDS)}"
+        )
+    if not isinstance(unresolved, list) or not all(
+        isinstance(item, dict)
+        and set(item) == {"gap_id", "reason"}
+        and all(isinstance(text, str) and text for text in item.values())
+        for item in unresolved
+    ):
+        return (
+            f"critic revision unresolved_gaps {_short(unresolved)} is not a list "
+            "of gap_id and reason entries"
         )
     return None
 
@@ -612,6 +652,18 @@ ADDED_FIELDS: tuple[AddedField, ...] = (
         "whether the Stage 2 critic revision was applied, changed nothing, or "
         "was discarded, and why",
         check=_critic_revision_problem,
+    ),
+    AddedField(
+        "run-manifest.yaml",
+        "stage_summary.stage_2.critic_revision.gap_dispositions",
+        "how many Stage 2 critic gaps the revision reply addressed, dismissed, "
+        "or kept as a design recommendation",
+    ),
+    AddedField(
+        "run-manifest.yaml",
+        "stage_summary.stage_2.critic_revision.unresolved_gaps",
+        "the Stage 2 critic gaps the revision reply neither changed nor set "
+        "aside, each with its reason",
     ),
 )
 

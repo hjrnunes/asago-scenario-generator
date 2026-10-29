@@ -3,14 +3,48 @@ cases:
   no-findings:
     required:
       - add the missing element(s)
-      - dismiss it with a one-sentence justification
-      - dismissed_gaps
+      - dismiss it with a one-sentence justification in its gap disposition
+      - "## Gap dispositions"
+      - >-
+        Each gap above starts with its gap ID (`G-1`, `G-2`, ...). Give exactly
+        one entry in `gap_dispositions` for each gap ID, with these fields:
+      - "`gap_id`: the gap ID exactly as shown above."
+      - >-
+        `disposition`: `addressed` when this reply adds or changes elements for
+        the gap; `dismissed` when you judge the gap a false positive or already
+        covered; `recommendation` when the gap is a requirement-backed
+        safeguard that the supplied sources do not establish as a current
+        function, kept as a proposed design recommendation rather than added to
+        the structure.
+      - >-
+        `element_ids`: for `addressed`, the IDs of the elements this reply adds
+        or changes for the gap, as written in this reply (responsibility,
+        constraint, process-model part, control action, feedback channel,
+        controlled process, coordination link, or mechanism IDs). For
+        `dismissed` or `recommendation`, the IDs of existing elements the
+        justification relies on, or `[]`.
+      - >-
+        `justification`: one sentence saying what the change does for the gap,
+        why the gap is dismissed, or what the recommendation proposes.
+      - >-
+        A `dismissed` or `recommendation` disposition is only for a gap this
+        reply leaves unchanged.
+      - >-
+        An `addressed` gap must appear as added or modified elements whose IDs
+        its `element_ids` list: in `new_responsibilities`,
+        `new_controlled_processes`, `new_coordination_links`, or
+        `modified_responsibilities`.
+      - >-
+        Describing a change in the justification does not make it; to change an
+        existing responsibility, even one feedback channel or variable, restate
+        that responsibility in `modified_responsibilities`.
       - distinguish values the source legitimately sets
       - values the system must establish independently
       - "Cite `Use case: ...` or an exact target-evidence `ref`"
       - state the scope in domain words rather than restating the source kind
     forbidden:
       - You MUST add at least one element for EACH finding
+      - dismissed_gaps
   operation-results-revision:
     once:
       - >-

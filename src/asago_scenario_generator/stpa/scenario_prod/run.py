@@ -16,6 +16,7 @@ coverage gaps, input hashes, and prompt hashes.
 
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
@@ -1747,7 +1748,7 @@ class _PreservedStageKeys:
     stage_1a: dict[str, Any] = field(default_factory=dict)
     post_review_loss_analysis_digest: str | None = None
     uncited_security_constraints: list[str] | None = None
-    critic_revision: dict[str, str] | None = None
+    critic_revision: dict[str, Any] | None = None
     loss_analysis_input_hash: str | None = None
 
 
@@ -1785,7 +1786,7 @@ def _preserved_stage_keys(run_dir: Path) -> _PreservedStageKeys:
             [str(item) for item in uncited] if isinstance(uncited, list) else None
         ),
         critic_revision=(
-            {str(key): str(value) for key, value in critic_revision.items()}
+            {str(key): copy.deepcopy(value) for key, value in critic_revision.items()}
             if isinstance(critic_revision, dict)
             else None
         ),
