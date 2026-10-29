@@ -134,11 +134,12 @@ _STRUCTURAL_ID = re.compile(
 )
 _FACT_ID = re.compile(r"\bF\d+\b")
 # Wording that attributes a false belief, assumption or impression to the
-# agent, in any of its forms: a false-belief noun phrase ("a mistaken
-# assumption"), a belief verb qualified as wrong ("wrongly assumes", "believes,
-# wrongly,"), being under an impression, a mis- verb of judgement ("misreads"),
-# or a noun for a false belief ("misconception"). Verbs of acting or deciding,
-# such as "wrongly treats", describe a decision rule and stay allowed.
+# agent. ``noun`` names a false belief: a false-belief noun phrase ("a mistaken
+# assumption") or a noun such as "misconception". ``verb`` says someone holds
+# one: a belief verb qualified as wrong ("wrongly assumes", "believes,
+# wrongly,"), being under an impression or mistaken, or a mis- verb of
+# judgement ("misreads"). Verbs of acting or deciding, such as "wrongly
+# treats", describe a decision rule and stay allowed.
 _FALSE_ADJECTIVE = (
     r"(?:false|wrong|mistaken|incorrect|erroneous|flawed|faulty|inaccurate"
     r"|misguided|misplaced|untrue)"
@@ -156,21 +157,35 @@ _BELIEF_VERB = (
     r"|perceiv\w*|infer\w*|judg\w*|understand\w*|understood|imagin\w*)"
 )
 _FALSE_BELIEF = re.compile(
-    rf"\b{_FALSE_ADJECTIVE}\s+(?:\w+\s+)?{_BELIEF_NOUN}\b"
-    rf"|\b{_FALSE_ADVERB}\s+(?:\w+\s+)?{_BELIEF_VERB}\b"
+    rf"(?P<noun>\b{_FALSE_ADJECTIVE}\s+(?:\w+\s+)?{_BELIEF_NOUN}\b"
+    r"|\b(?:misconceptions?|misapprehensions?|delusions?|illusions?)\b)"
+    rf"|(?P<verb>\b{_FALSE_ADVERB}\s+(?:\w+\s+)?{_BELIEF_VERB}\b"
     rf"|\b{_BELIEF_VERB},?\s+{_FALSE_ADVERB}\b"
-    r"|\bunder\s+(?:the|a|an)\s+(?:\w+\s+)?"
+    r"|\bunder\s+(?:the|a|an|any)\s+(?:\w+\s+)?"
     r"(?:impression|illusion|misapprehension|belief|assumption)\b"
     r"|\b(?:is|was|being)\s+mistaken\b"
     r"|\bmis(?:believ|judg|read|interpret|understand|understood|perceiv"
-    r"|conceiv|apprehend|took|takes)\w*"
-    r"|\b(?:misconceptions?|misapprehensions?|delusions?|illusions?)\b",
+    r"|conceiv|apprehend|took|takes)\w*)",
     re.IGNORECASE,
 )
-# A negation just before the wording denies the false belief instead of
-# attributing it: "holds no false belief", "rather than a mistaken assumption".
-_NEGATED = re.compile(
-    r"\b(?:no|not|never|without|nor|rather\s+than|instead\s+of)\b|n't\b",
+# A negation directly in front of the wording, with at most a determiner
+# between, denies the false belief: "holds no false belief", "not a mistaken
+# assumption", "rather than a false belief", "does not wrongly assume". A
+# negation of another verb or clause ("does not question its false belief",
+# "without checking, it wrongly assumes") denies nothing.
+_DENIED = re.compile(
+    r"(?:\b(?:no|not|never|without|nor|rather\s+than|instead\s+of"
+    r"|not\s+because\s+of)|n't)\s+(?:(?:a|an|any|the|its|their)\s+)?$",
+    re.IGNORECASE,
+)
+# A rule, policy, logic, criterion, threshold, algorithm or heuristic directly
+# in front of a ``verb`` wording is its subject: "its rule wrongly concludes"
+# describes the faulty decision rule, not a belief of the agent.
+_RULE_SUBJECT = re.compile(
+    r"\b(?:rules?|polic(?:y|ies)|logic|criterion|criteria|thresholds?"
+    r"|algorithms?|heuristics?)"
+    r"\s+(?:(?:is|was|does|did|can|may|might|will|would)\s+)?"
+    r"(?:(?:\w+ly|also|still|then|always|often)\s+)?$",
     re.IGNORECASE,
 )
 _IDENTIFIER = re.compile(r"\b[A-Za-z][A-Za-z0-9]*_[A-Za-z0-9_]+\b|\b[A-Z]{2,}-?\d+\b")
@@ -778,13 +793,18 @@ def _rule_reason_failures(reply: NarrationReply, facts: ScenarioFacts) -> list[s
 def false_belief_wording(text: str) -> str | None:
     """Return the first wording that attributes a false belief to the agent.
 
-    Wording that a negation in the four words before it denies, such as "holds
-    no false belief", does not count.
+    Wording that a negation directly in front denies, such as "holds no false
+    belief", does not count, and neither does a belief verb whose subject is
+    the rule, such as "its rule wrongly concludes". A false-belief noun phrase
+    counts whatever comes before it: a rule holds no belief.
     """
     for match in _FALSE_BELIEF.finditer(text):
-        before = re.findall(r"[\w']+", text[: match.start()])[-4:]
-        if not _NEGATED.search(" ".join(before)):
-            return match.group(0)
+        before = text[: match.start()]
+        if _DENIED.search(before):
+            continue
+        if match.group("verb") and _RULE_SUBJECT.search(before):
+            continue
+        return match.group(0)
     return None
 
 
