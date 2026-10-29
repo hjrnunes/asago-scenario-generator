@@ -154,6 +154,67 @@ def test_provider_failure_is_recorded_with_a_redacted_error(tmp_path: Path) -> N
     assert "fake-endpoint" not in record["error"]["message"]
 
 
+# A configured API key that is an ordinary word, with no key-like prefix.
+PLAIN_KEY = "bluebird"
+
+
+ECHOED = f"Incorrect API key provided: {PLAIN_KEY}. Check {PLAIN_KEY}"
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        lambda: RuntimeError(ECHOED),
+        lambda: openai.AuthenticationError(
+            ECHOED, response=_http_response(401), body=None
+        ),
+    ],
+    ids=["plain", "provider"],
+)
+def test_a_plain_word_api_key_is_redacted_from_every_record(
+    tmp_path: Path, error
+) -> None:
+    def fail(**kwargs: Any) -> ChatCompletion:
+        raise error()
+
+    with provider_call_session(record_dir=tmp_path) as session:
+        outcome = call_with_policy(
+            llm_client=_client(_Provider(fail), session=session, api_key=PLAIN_KEY),
+            system_prompt="s",
+            user_prompt="u",
+            response_format=_Answer,
+            run_dir=tmp_path,
+            stage="stage_x",
+            step="call_answer",
+            policy=CorrectionPolicy(),
+        )
+
+    (record,) = _records(tmp_path)
+    assert record["error"]["message"] == (
+        "Incorrect API key provided: [redacted-key]. Check [redacted-key]"
+    )
+    assert outcome.error is not None and PLAIN_KEY not in outcome.error
+    for path in tmp_path.iterdir():
+        assert PLAIN_KEY not in path.read_text(), path.name
+
+
+def test_a_plain_word_api_key_is_never_recorded_with_a_request(tmp_path: Path) -> None:
+    with provider_call_session(record_dir=tmp_path) as session:
+        call_with_policy(
+            llm_client=_client(_Provider(_answer), session=session, api_key=PLAIN_KEY),
+            system_prompt="s",
+            user_prompt="u",
+            response_format=_Answer,
+            run_dir=tmp_path,
+            stage="stage_x",
+            step="call_answer",
+            policy=CorrectionPolicy(),
+        )
+
+    for path in tmp_path.iterdir():
+        assert PLAIN_KEY not in path.read_text(), path.name
+
+
 def test_a_response_the_client_rejects_is_recorded_with_the_rejection(
     tmp_path: Path,
 ) -> None:
