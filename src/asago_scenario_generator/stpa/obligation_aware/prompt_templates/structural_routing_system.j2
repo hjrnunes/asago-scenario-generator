@@ -35,9 +35,18 @@ For each obligation, make two independent decisions before choosing its structur
    structure provides, not whether the system description mentions or describes the
    attack. A system that accepts free text can be prompt-injected although its description
    never says so. Choose `absent_from_system` only when the structure lacks that surface.
-2. `risk_alignment`: whether that mechanism would realize the reviewed risk's subject,
-   operation, affected object, and consequence: `supported`, `mismatch`, or
-   `insufficient_evidence`.
+2. `risk_alignment`: whether that mechanism would realize the reviewed risk's class in
+   this system: its subject, operation, affected object, and consequence: `supported`,
+   `mismatch`, or `insufficient_evidence`.
+
+Each question's `reviewed_risk` holds the risk's `risk_id` and short `name`, its
+`description`, and, when known, its `threat`, `consequence`, and `impact`. The
+`description` is the risk class, and it sets what `risk_alignment` judges. The `threat`,
+`consequence`, and `impact` are the source policy's example of that class, written in the
+policy's own setting with that setting's actors and assets. They illustrate the class; they
+do not define it. A mechanism that realizes the class in this system supports alignment
+even when its actor, data, or setting differs from the policy example, and resemblance to
+the example alone is not alignment evidence.
 
 Supply a short rationale for each decision. The mapping-strength label, when shown in
 the read-only question context, is discovery metadata and must not be returned or copied.

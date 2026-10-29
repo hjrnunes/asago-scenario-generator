@@ -467,7 +467,8 @@ def _build_coverage_source_excerpts(
             add(
                 card.risk_id,
                 card.consequence,
-                f"Exact supplied risk-card consequence for {card.risk_id}.",
+                f"Exact supplied risk-card consequence for {card.risk_id}: the "
+                "source policy's example of the risk class, not the class itself.",
                 risk_card_id=card.risk_id,
             )
     for loss in loss_analysis.risk_card_losses + loss_analysis.use_case_losses:

@@ -11,6 +11,17 @@
 {% if risk_card_evidence is defined and risk_card_evidence %}
 The following is a compact evidence view. Risk IDs are exact and must be
 copied into `source_risk_cards`; omitted prose is not additional evidence.
+Each risk gives its ID and name, then these labelled fields:
+
+- `class description`: the risk class. Derive the risk's losses from it.
+- `in-boundary system action` and `in-boundary affected stakeholder`, when
+  present: the action of this system through which the class could arise and
+  the stakeholder it would affect, as an earlier review of this system stated
+  them. A risk without them falls back to its class description.
+- `policy example consequence`, when present: the source policy's example of
+  the class, written in the policy's own setting. It illustrates the class; it
+  is not the loss to derive.
+
 {% for evidence in risk_card_evidence %}
 - {{ evidence }}
 {% endfor %}

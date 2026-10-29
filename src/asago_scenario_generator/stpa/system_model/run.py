@@ -168,9 +168,11 @@ def run_sp1(
     Before a derived Stage 1a, one bounded classification records the scope
     of every risk card's class (``risk-actionability.yaml``).  Scope is not a
     filter: every card feeds loss derivation, its gates, and the coverage
-    review, and obligation accounting carries the scope.  Discovered target evidence, when supplied, grounds the Stage 1a
-    hazards and constraints and every Stage 2 call; losses stay derived from
-    risk cards.
+    review, and obligation accounting carries the scope.  Loss derivation
+    shows each actionable card's in-boundary restatement next to its class.
+    Discovered target evidence, when supplied, grounds the Stage 1a hazards
+    and constraints and every Stage 2 call; losses stay derived from risk
+    cards.
 
     Args:
         llm_client: LLM client for making completion calls.
@@ -274,6 +276,7 @@ def run_sp1(
             capability_profile,
             target_evidence,
             derivation_sent,
+            risk_actionability,
         )
 
     # --- Stage 1a advisory risk-coverage review ---
@@ -374,6 +377,7 @@ def _run_derived_stage_1a(
     capability_profile: CapabilityProfile | None,
     target_evidence: TargetEvidence | None,
     derivation_sent: RequestTally,
+    risk_actionability: RiskActionabilityRecord | None = None,
 ) -> tuple[
     LossAnalysis | None,
     dict | None,
@@ -385,7 +389,8 @@ def _run_derived_stage_1a(
     Returns the gated analysis, the gate record, the repair record, and the
     stated-rule coverage artifact; the last two entries stay ``None`` when
     derivation produced no analysis.  ``derivation_sent`` collects the
-    requests the derivation sent, its repairs included.
+    requests the derivation sent, its repairs included.  The derivation shows
+    each card's in-boundary restatement from ``risk_actionability``.
     """
     with count_requests(derivation_sent):
         (
@@ -403,6 +408,7 @@ def _run_derived_stage_1a(
             capability_profile,
             stage_warnings,
             target_evidence=target_evidence,
+            risk_actionability=risk_actionability,
         )
     if loss_analysis is None:
         return None, None, repair_record, None
@@ -491,6 +497,7 @@ def _try_derive_loss_analysis(
     stage_warnings: list[str] | None = None,
     *,
     target_evidence: TargetEvidence | None = None,
+    risk_actionability: RiskActionabilityRecord | None = None,
 ) -> tuple[LossAnalysis | None, list[str], RepairRecord]:
     """Run Stage 1a (two calls), recording errors on failure.
 
@@ -512,6 +519,7 @@ def _try_derive_loss_analysis(
             normalization_warnings=normalization_warnings,
             repair_record=repair_record,
             target_evidence=target_evidence,
+            risk_actionability=risk_actionability,
         )
         # Deterministic code owns the direction-authority stamp: entries on
         # a derived graph are proposals until a human reviews them.
