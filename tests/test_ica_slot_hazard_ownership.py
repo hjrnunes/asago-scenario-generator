@@ -8,6 +8,8 @@ the verification batch, and names the slot that owns the operation.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from asago_scenario_generator.stpa.models.control_structure import (
     ControlAction,
     ControlStructure,
@@ -26,12 +28,23 @@ from asago_scenario_generator.stpa.models.loss_analysis import (
     LossProvenance,
     SecurityConstraint,
 )
+from asago_scenario_generator.pipeline.synthesis_scenarios import (
+    _run_ica_verification,
+)
+from asago_scenario_generator.pipeline.synthesis_types import SynthesisAdapters
+from asago_scenario_generator.stpa.obligation_aware.contracts import (
+    SynthesisSlotFillResult,
+)
 from asago_scenario_generator.stpa.obligation_aware.ica_verification import (
     verify_final_ica_batch,
+)
+from asago_scenario_generator.stpa.obligation_aware.slot_filling import (
+    SlotFillRunResult,
 )
 from asago_scenario_generator.stpa.obligation_aware.slot_hazard_ownership import (
     SLOT_HAZARD_MISMATCH_CODE,
     SlotHazardMismatch,
+    declared_operation_names,
     find_slot_hazard_mismatches,
     flag_slot_hazard_mismatches,
 )
@@ -291,14 +304,108 @@ def test_the_mismatch_records_the_slot_operation_and_the_owner() -> None:
     assert "the owning slot is RESP-7:CA-7-2:NOT_PROVIDED" in mismatch.reason
 
 
-def test_a_structure_without_operations_flags_nothing() -> None:
+def _unowned_structure() -> ControlStructure:
+    """The structure with no control action invoking `escalate_trust_safety`."""
     structure = _structure()
     structure.responsibilities[0].control_actions[0].operation = None
+    return structure
 
+
+def test_a_declared_operation_no_action_invokes_is_flagged_as_unowned() -> None:
+    [mismatch] = find_slot_hazard_mismatches(
+        ICAEnumeration(slots=[_slot("RESP-8", "CA-8-1", "H-3", "SC-1")]),
+        _losses(),
+        _unowned_structure(),
+        operation_inventory=("escalate_trust_safety",),
+    )
+
+    assert mismatch.owning_slot_ids == ()
+    assert mismatch.unowned_operations == ("escalate_trust_safety",)
+    assert mismatch.reason.endswith(
+        "no slot owns `escalate_trust_safety`: no control action invokes it"
+    )
+
+
+def test_an_unowned_operation_is_flagged_by_the_verification() -> None:
+    filtered, batch = verify_final_ica_batch(
+        _Supporting(),
+        ICAEnumeration(slots=[_slot("RESP-8", "CA-8-1", "H-3", "SC-1")]),
+        loss_analysis=_losses(),
+        control_structure=_unowned_structure(),
+        operation_inventory=("escalate_trust_safety",),
+    )
+
+    [flag] = _flags(batch)
+    assert "no slot owns `escalate_trust_safety`" in flag.detail
+    [warning] = _icas(filtered)["RESP-8:CA-8-1:NOT_PROVIDED:1"].quality_warnings
+    assert "no slot owns `escalate_trust_safety`" in warning
+
+
+def test_a_hazard_naming_an_owned_and_an_unowned_operation_names_both() -> None:
+    losses = _hazard_text(
+        "A concern reaches neither `escalate_trust_safety` nor `notify_staff`."
+    )
+
+    [mismatch] = find_slot_hazard_mismatches(
+        ICAEnumeration(slots=[_slot("RESP-8", "CA-8-1", "H-3", "SC-1")]),
+        losses,
+        _structure(),
+        operation_inventory=("escalate_trust_safety", "notify_staff"),
+    )
+
+    assert mismatch.hazard_operations == ("escalate_trust_safety", "notify_staff")
+    assert mismatch.owning_slot_ids == ("RESP-7:CA-7-2:NOT_PROVIDED",)
+    assert mismatch.unowned_operations == ("notify_staff",)
+    assert "the owning slot is RESP-7:CA-7-2:NOT_PROVIDED" in mismatch.reason
+    assert "no slot owns `notify_staff`" in mismatch.reason
+
+
+def test_a_name_in_neither_the_inventory_nor_an_action_is_not_an_operation() -> None:
     assert (
-        _mismatches(_slot("RESP-8", "CA-8-1", "H-3", "SC-1"), _losses(), structure)
+        _mismatches(
+            _slot("RESP-8", "CA-8-1", "H-3", "SC-1"), _losses(), _unowned_structure()
+        )
         == ()
     )
+
+
+def test_synthesis_checks_against_the_target_profiles_operations() -> None:
+    enumeration = ICAEnumeration(slots=[_slot("RESP-8", "CA-8-1", "H-3", "SC-1")])
+    profile = SimpleNamespace(
+        resources=[
+            SimpleNamespace(
+                operations=[SimpleNamespace(operation_id="escalate_trust_safety")]
+            )
+        ]
+    )
+
+    verified = _run_ica_verification(
+        SlotFillRunResult(result=SynthesisSlotFillResult(ica_enumeration=enumeration)),
+        adapters=SynthesisAdapters(obligation_adapter=_Supporting()),
+        loss_analysis=_losses(),
+        control_structure=_unowned_structure(),
+        inputs=SimpleNamespace(execution_target_profile=profile),
+    )
+
+    [flag] = _flags(verified.ica_hazard_verification)
+    assert "no slot owns `escalate_trust_safety`" in flag.detail
+
+
+def test_declared_operation_names_reads_every_resource_operation() -> None:
+    profile = SimpleNamespace(
+        resources=[
+            SimpleNamespace(operations=[SimpleNamespace(operation_id="a")]),
+            SimpleNamespace(
+                operations=[
+                    SimpleNamespace(operation_id="b"),
+                    SimpleNamespace(operation_id="c"),
+                ]
+            ),
+        ]
+    )
+
+    assert declared_operation_names(profile) == ("a", "b", "c")
+    assert declared_operation_names(None) == ()
 
 
 def test_flagging_twice_adds_each_warning_once() -> None:

@@ -8,7 +8,7 @@ and execution material never cross this boundary.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from typing import Any, ClassVar, Literal, Sequence, TypeVar
 
@@ -1472,6 +1472,7 @@ def verify_final_ica_batch(
     loss_analysis: LossAnalysis,
     control_structure: ControlStructure,
     batch_id: str = "ica-hazard-verification",
+    operation_inventory: Collection[str] = (),
 ) -> tuple[ICAEnumeration, IcaHazardVerificationBatch]:
     """Verify final ICAs and keep only those with a supported verdict.
 
@@ -1482,14 +1483,15 @@ def verify_final_ica_batch(
     ICA when no verifier was supplied.
     A correction failure cannot rehabilitate a previously rejected finding.
     Each final ICA whose hazard depends on another action's operation is
-    flagged, on the ICA and in the batch diagnostics, and kept in its slot.
+    flagged, on the ICA and in the batch diagnostics, and kept in its slot;
+    *operation_inventory* names the target's declared operations for it.
     """
     requests, incomplete_ica_ids, diagnostics = _build_verification_requests(
         enumeration, loss_analysis, control_structure
     )
     if not requests:
         enumeration, flags = _flag_slot_hazards(
-            enumeration, loss_analysis, control_structure
+            enumeration, loss_analysis, control_structure, operation_inventory
         )
         batch = IcaHazardVerificationBatch(
             batch_id=batch_id,
@@ -1500,7 +1502,7 @@ def verify_final_ica_batch(
     method = _verification_method(adapter)
     if method is None:
         enumeration, flags = _flag_slot_hazards(
-            enumeration, loss_analysis, control_structure
+            enumeration, loss_analysis, control_structure, operation_inventory
         )
         batch = _failed_batch(
             batch_id,
@@ -1537,6 +1539,7 @@ def verify_final_ica_batch(
         _apply_corrected_requests(enumeration, records),
         loss_analysis,
         control_structure,
+        operation_inventory,
     )
     batch = IcaHazardVerificationBatch(
         batch_id=batch_id,
@@ -1552,13 +1555,17 @@ def _flag_slot_hazards(
     enumeration: ICAEnumeration,
     loss_analysis: LossAnalysis,
     control_structure: ControlStructure,
+    operation_inventory: Collection[str] = (),
 ) -> tuple[ICAEnumeration, tuple[ConsiderationDiagnostic, ...]]:
     """Flag every ICA whose hazard depends on another action's operation."""
     # Without both artifacts no request was built, and there is nothing to check.
     if loss_analysis is None or control_structure is None:
         return enumeration, ()
     mismatches = find_slot_hazard_mismatches(
-        enumeration, loss_analysis, control_structure
+        enumeration,
+        loss_analysis,
+        control_structure,
+        operation_inventory=operation_inventory,
     )
     return (
         flag_slot_hazard_mismatches(enumeration, mismatches),

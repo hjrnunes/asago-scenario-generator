@@ -147,6 +147,9 @@ def _run_ica_verification(
         filter_mechanism_considerations,
         verify_final_ica_batch,
     )
+    from asago_scenario_generator.stpa.obligation_aware.slot_hazard_ownership import (
+        declared_operation_names,
+    )
 
     ordinary = result.ica_enumeration
     verifier = adapters.obligation_adapter
@@ -156,6 +159,9 @@ def _run_ica_verification(
         loss_analysis=loss_analysis,
         control_structure=control_structure,
         batch_id="synthesis-ica-hazard-verification",
+        operation_inventory=declared_operation_names(
+            getattr(inputs, "execution_target_profile", None)
+        ),
     )
 
     pairs = _ica_considerations(result)

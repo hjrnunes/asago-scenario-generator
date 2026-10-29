@@ -8,11 +8,14 @@ the slot then follows the slot's action, while the hazard points at the
 other one.
 
 The check is deterministic.  A hazard depends on an operation when its
-description names, as a whole identifier, the ``operation`` of some control
-action in the final structure.  A hazard that names no such operation is
-not checked.  For each hazard an ICA cites, at least one named operation
-must be the operation of the slot's own control action; otherwise the ICA
-is flagged with the slots that own the named operations.
+description names, as a whole identifier, an operation of the target's
+declared inventory (the execution target profile's operations, which Stage 5
+checks conditions against) or the ``operation`` of some control action in
+the final structure.  A hazard that names no such operation is not checked.
+For each hazard an ICA cites, at least one named operation must be the
+operation of the slot's own control action; otherwise the ICA is flagged
+with the slots that own the named operations, and with the named operations
+that no control action invokes, which no slot owns.
 
 A mismatch is flagged, never moved.  The ICA's deviation, context, and loss
 were written for the slot's own action, so moving it to the owning slot
@@ -27,8 +30,9 @@ judgement to the reader.
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from typing import Any
 
 from asago_scenario_generator.models.obligation_consideration import (
     ConsiderationDiagnostic,
@@ -49,6 +53,7 @@ class SlotHazardMismatch:
 
     ``owning_slot_ids`` are the same-category slots of every control action
     that invokes one of ``hazard_operations``, in structure order.
+    ``unowned_operations`` are the named operations no control action invokes.
     """
 
     ica_id: str
@@ -58,6 +63,7 @@ class SlotHazardMismatch:
     hazard_id: str
     hazard_operations: tuple[str, ...]
     owning_slot_ids: tuple[str, ...]
+    unowned_operations: tuple[str, ...] = ()
 
     @property
     def reason(self) -> str:
@@ -68,14 +74,21 @@ class SlotHazardMismatch:
             else "invokes no operation"
         )
         operations = ", ".join(f"`{name}`" for name in self.hazard_operations)
+        owners: list[str] = []
         if len(self.owning_slot_ids) == 1:
-            owner = f"the owning slot is {self.owning_slot_ids[0]}"
-        else:
-            owner = "the owning slots are " + ", ".join(self.owning_slot_ids)
+            owners.append(f"the owning slot is {self.owning_slot_ids[0]}")
+        elif self.owning_slot_ids:
+            owners.append("the owning slots are " + ", ".join(self.owning_slot_ids))
+        if self.unowned_operations:
+            unowned = ", ".join(f"`{name}`" for name in self.unowned_operations)
+            pronoun = "it" if len(self.unowned_operations) == 1 else "them"
+            owners.append(
+                f"no slot owns {unowned}: no control action invokes {pronoun}"
+            )
         return (
             f"hazard {self.hazard_id} depends on {operations}, but control "
             f"action {self.control_action_id} of slot {self.slot_id} {invoked}; "
-            f"{owner}"
+            + "; ".join(owners)
         )
 
 
@@ -83,13 +96,20 @@ def find_slot_hazard_mismatches(
     enumeration: ICAEnumeration,
     loss_analysis: LossAnalysis,
     control_structure: ControlStructure,
+    *,
+    operation_inventory: Collection[str] = (),
 ) -> tuple[SlotHazardMismatch, ...]:
-    """Return every cited hazard whose operations lie outside the ICA's slot."""
+    """Return every cited hazard whose operations lie outside the ICA's slot.
+
+    *operation_inventory* holds the target's declared operation names; an
+    operation can be named whether or not a control action invokes it.
+    """
     owners = _operation_owners(control_structure)
-    if not owners:
+    operations = {*owners, *(name for name in operation_inventory if name)}
+    if not operations:
         return ()
     hazard_operations = {
-        hazard.hazard_id: _named_operations(hazard.description, owners)
+        hazard.hazard_id: _named_operations(hazard.description, operations)
         for hazard in loss_analysis.hazards
     }
     slot_operations = _slot_operations(control_structure)
@@ -126,7 +146,18 @@ def _slot_operations(control_structure: ControlStructure) -> dict[tuple[str, str
     }
 
 
-def _named_operations(text: str, operations: Mapping[str, object]) -> tuple[str, ...]:
+def declared_operation_names(execution_target_profile: Any) -> tuple[str, ...]:
+    """Return the profile's declared operation IDs, none without a profile."""
+    if execution_target_profile is None:
+        return ()
+    return tuple(
+        operation.operation_id
+        for resource in execution_target_profile.resources
+        for operation in resource.operations
+    )
+
+
+def _named_operations(text: str, operations: Iterable[str]) -> tuple[str, ...]:
     """Return the operations *text* names as whole identifiers, sorted."""
     return tuple(
         sorted(
@@ -160,6 +191,9 @@ def _slot_mismatches(
                     hazard_id=hazard_id,
                     hazard_operations=named,
                     owning_slot_ids=_owning_slot_ids(slot, named, owners),
+                    unowned_operations=tuple(
+                        name for name in named if name not in owners
+                    ),
                 )
             )
     return mismatches
@@ -172,7 +206,7 @@ def _owning_slot_ids(
 ) -> tuple[str, ...]:
     slot_ids: list[str] = []
     for name in operations:
-        for resp_id, ca_id in owners[name]:
+        for resp_id, ca_id in owners.get(name, ()):
             slot_id = f"{resp_id}:{ca_id}:{slot.uca_type.value}"
             if slot_id not in slot_ids:
                 slot_ids.append(slot_id)
@@ -232,6 +266,7 @@ def flag_slot_hazard_mismatches(
 __all__ = [
     "SLOT_HAZARD_MISMATCH_CODE",
     "SlotHazardMismatch",
+    "declared_operation_names",
     "find_slot_hazard_mismatches",
     "flag_slot_hazard_mismatches",
     "slot_hazard_diagnostics",

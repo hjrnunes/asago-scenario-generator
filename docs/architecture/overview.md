@@ -282,13 +282,16 @@ semantically valid findings remain available with `ica_prose_quality_warning`.
 
 Every slot is offered every hazard, so an ICA can cite a hazard about an
 operation that another control action invokes. Final-ICA verification checks
-this without a model call: a cited hazard whose description names the
-`operation` of some control action must name the operation of the slot's own
-action. An ICA that fails the check keeps its slot and is flagged with
+this without a model call: a cited hazard whose description names an
+operation must name the operation of the slot's own action. An operation is a
+name in the execution target profile's operations (the inventory Stage 5
+checks conditions against) or the `operation` of some control action. An ICA
+that fails the check keeps its slot and is flagged with
 `ica_hazard_operation_outside_slot`, in its `quality_warnings` and in the
 verification batch diagnostics, naming the slot or slots whose action owns the
-operation. It is not moved: its text describes its own action, and the owner
-is often not unique.
+operation, or saying that no slot owns it when no control action invokes it.
+It is not moved: its text describes its own action, and the owner is often
+not unique.
 
 Scenario generation receives one immutable `ScenarioGenerationContext` per
 ICA. It contains only the selected loss, hazard, governing constraint, unsafe
