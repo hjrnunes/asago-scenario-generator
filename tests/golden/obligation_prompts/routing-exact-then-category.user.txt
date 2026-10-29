@@ -50,6 +50,7 @@ Compact obligation questions:
   obligation_handle: ob:v1:a62b3e4ad2fd3bc2db998fbbb1c050b3f890ee715343784bc3111d6f57f3257e
   reviewed_risk:
     consequence: null
+    description: A reviewed risk used by planner tests.
     impact: null
     name: Risk risk-a
     risk_id: risk-a

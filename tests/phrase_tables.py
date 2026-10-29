@@ -106,6 +106,9 @@ from asago_scenario_generator.stpa.system_model.control_structure import (
     DuplicateControlledProcess,
     UnknownReference,
 )
+from asago_scenario_generator.stpa.system_model.loss_analysis import (
+    _compact_risk_card_evidence,
+)
 from asago_scenario_generator.stpa.system_model.target_evidence import (
     EvidenceOperation,
     TargetEvidence,
@@ -228,6 +231,31 @@ ACTIONABILITY_RISKS = {
             consequence="The records reach the outside tool's provider.",
         )
     ],
+}
+
+# The risk-derivation request renders the compact evidence code builds,
+# here for the one card above with no scope record.
+RISK_CARD_EVIDENCE = {
+    **ACTIONABILITY_RISKS,
+    "risk_card_evidence": _compact_risk_card_evidence(
+        ACTIONABILITY_RISKS["risk_cards"]
+    ),
+}
+
+# The disposition repair shows the card above as one selected card.
+DISPOSITION_REPAIR_CARDS = {
+    "use_case_text": ACTIONABILITY_RISKS["use_case_text"],
+    "declared_losses": [],
+    "selected_cards": [
+        {
+            "risk_id": card.risk_id,
+            "risk_name": card.risk_name,
+            "risk_description": card.risk_description,
+            "consequence": card.consequence,
+        }
+        for card in ACTIONABILITY_RISKS["risk_cards"]
+    ],
+    "reasons": [],
 }
 
 NEUTRAL_STATUS = {
@@ -1010,6 +1038,8 @@ CASES: dict[str, Callable[[str], str]] = {
     "no-stated-rules": _system_model(stated_rules=False),
     "records-service": _system_model(**RECORDS_SERVICE),
     "actionability-risks": _system_model(**ACTIONABILITY_RISKS),
+    "risk-card-evidence": _system_model(**RISK_CARD_EVIDENCE),
+    "disposition-repair-cards": _system_model(**DISPOSITION_REPAIR_CARDS),
     "neutral-status": _system_model(**NEUTRAL_STATUS),
     "one-responsibility": _system_model(**ONE_RESPONSIBILITY),
     "operation-results": _system_model(**OPERATION_RESULTS),

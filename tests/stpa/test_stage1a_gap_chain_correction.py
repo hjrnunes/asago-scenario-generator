@@ -297,10 +297,11 @@ def test_other_chain_failures_still_get_no_correction(tmp_path, gap_reply):
 
 
 # Request digests at producer f704e000, before the correction existed.  The
-# risk system digest follows later edits of that prompt, which this
-# correction does not touch.
-_RISK_SYSTEM_DIGEST = "215d6d8b8f96327b589d2ab2d03718d3abc6ee3b0374500cf07719ddc10efecd"
-_RISK_USER_DIGEST = "ee6f683a5c3af1cc3dadf9657cd75ab4a5616a612c7a37e7d2f10f349db6791c"
+# risk digests follow later edits of that request, which this correction does
+# not touch: the latest labelled each card's class description and its
+# consequence as the source policy's example.
+_RISK_SYSTEM_DIGEST = "e270c01abff77354f3c78c3744509ab109f137d3ee1b068cb2502bae572205c8"
+_RISK_USER_DIGEST = "ed9b1356f521a2be2113a7229a46855a294edf9c567826e1ebe2dc1c2de5e70f"
 _GAP_SYSTEM_DIGEST = "a9f69e438586a6902c2d5ec174ca421e407e1fe5f65db4d767c62aa6ba7c97cd"
 _GAP_USER_DIGEST = "df41179e9d22db69444b21756396ed73ddb795575a50e31d408184db30eb53a5"
 
@@ -480,7 +481,8 @@ def test_damaged_chain_correction_beside_a_bad_span_stops_after_three_requests(
 
 
 # Digests taken at producer e21ba7cf, before the correction salvaged a reply.
-_CLEAN_REQUEST_DIGESTS = ["ee6f683a5c3a", "df41179e9d22", "efd41690cddc"]
+# The risk request's digest follows the later labelling of its card evidence.
+_CLEAN_REQUEST_DIGESTS = ["ed9b1356f521", "df41179e9d22", "efd41690cddc"]
 _CLEAN_DRAFT_DIGEST = "d02c95d73dc4a4db"
 _CLEAN_RECORD_DIGEST = "7143840bc55237c1"
 

@@ -11,6 +11,21 @@ cases:
       - 'Not a hazard: "the temperature sensor fails"'
       - "### Loss specificity"
       - concrete consequences
+      - not restatements of the risk's generic description
+      - "### Risk class and policy example"
+      - >-
+        Derive each risk's losses from its risk class within this system's
+        boundary: the harm the class would cause through this system's own
+        functions, data, and stakeholders.
+      - >-
+        Where a risk gives an in-boundary system action and affected
+        stakeholder, they state how the class could arise in this system;
+        otherwise start from the class description.
+      - >-
+        A risk's policy example consequence describes the class in the source
+        policy's own setting, with that setting's actors and assets. Use it to
+        understand the class. Do not restate it as a loss, and do not carry its
+        actors or assets into a loss unless the use case describes them.
       - "### Acronym expansion"
       - Personally Identifiable Information (PII)
       - short form alone is acceptable

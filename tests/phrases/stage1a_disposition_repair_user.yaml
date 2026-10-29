@@ -1,0 +1,11 @@
+template: stage1a_disposition_repair_user.j2
+cases:
+  disposition-repair-cards:
+    required:
+      - >-
+        A card's description is its risk class; its policy example consequence
+        is the source policy's example of that class, written in the policy's
+        own setting. Judge the accounting against the class.
+      - "- **Policy example consequence:**"
+    forbidden:
+      - "- **Consequence:**"

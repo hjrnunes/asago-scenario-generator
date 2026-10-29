@@ -222,6 +222,11 @@ and the hashes of every obligation-aware template, included partial, and
 Each structural route carries independent typed mechanism-plausibility and
 reviewed-risk-alignment decisions plus a plain mapping-strength label derived
 from the exact mapping path. The raw mapping path never enters the prompt.
+Each question's reviewed risk carries the risk card's class description next
+to its threat, consequence, and impact. Routing judges `risk_alignment`
+against the class; the threat, consequence, and impact are the source
+policy's example of that class. Slot filling's view of the question leaves
+the class description out.
 A routing batch holds up to `max_batch_size` (default 8) questions, and each
 question states its own `attack_pattern_id` and `attack_pattern_name`; the
 concern glossary describes each pattern once. Each provider route echoes its
@@ -903,6 +908,15 @@ failure criterion, or safe alternative. Analytical-only scenarios are excluded
 from compilation. The consumer never defaults an internal agent channel,
 indirect carrier, target action, state store, external action, or real clock
 to ordinary chat.
+
+Stage 1a's risk derivation shows each risk card's class description, the
+in-boundary system action and affected stakeholder that the scope
+classification recorded for an actionable card, and the card's consequence
+labelled as the source policy's example of the class. Losses come from the
+class within the system boundary. A card with no recorded restatement falls
+back to its class description, and every card is shown whatever its scope.
+The disposition repair and the risk-coverage review label the consequence the
+same way.
 
 Tolerant SP1 response graphs remain raw until deterministic ID/reference
 normalization produces valid typed artifacts; invalid intermediate Pydantic

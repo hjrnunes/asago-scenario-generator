@@ -497,7 +497,9 @@ def _digest(value: object) -> str:
 
 
 # Digests taken at producer e21ba7cf, before the correction salvaged a reply.
-_CLEAN_REQUEST_DIGESTS = ["fe6b34546277", "3d0d67e8ed2d", "e012f7f0fe48"]
+# The risk request and its correction follow the later labelling of the card
+# evidence; the gap request, the draft and the record are unchanged.
+_CLEAN_REQUEST_DIGESTS = ["20a4fc93c0bd", "af63ccd21898", "e012f7f0fe48"]
 _CLEAN_DRAFT_DIGEST = "9a06ccbe22a79f92"
 _CLEAN_RECORD_DIGEST = "ecbb3e315958b957"
 

@@ -49,8 +49,31 @@ cases:
         Complete targeted example (the handle and `attack_pattern_id` are only
         schema-valid fixtures; copy the actual supplied values unchanged):
       - '"attack_pattern_id":"AP-T90-01"'
+      - >-
+        `risk_alignment`: whether that mechanism would realize the reviewed
+        risk's class in this system: its subject, operation, affected object,
+        and consequence
+      - >-
+        Each question's `reviewed_risk` holds the risk's `risk_id` and short
+        `name`, its `description`, and, when known, its `threat`,
+        `consequence`, and `impact`.
+      - >-
+        The `description` is the risk class, and it sets what `risk_alignment`
+        judges.
+      - >-
+        The `threat`, `consequence`, and `impact` are the source policy's
+        example of that class, written in the policy's own setting with that
+        setting's actors and assets. They illustrate the class; they do not
+        define it.
+      - >-
+        A mechanism that realizes the class in this system supports alignment
+        even when its actor, data, or setting differs from the policy example,
+        and resemblance to the example alone is not alignment evidence.
     forbidden:
       - known_mechanism_refs
+      - >-
+        whether that mechanism would realize the reviewed risk's subject,
+        operation, affected object, and consequence
       - known mechanism glossary
       - unauthenticated access or authentication rejection is not poisoned
       - neither establishes semantic separation

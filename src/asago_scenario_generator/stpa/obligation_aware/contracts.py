@@ -447,10 +447,19 @@ class ProviderKnownConcern(_Model):
 
 
 class ProviderReviewedRisk(_Model):
-    """Only risk meaning useful to routing; audit metadata stays out of band."""
+    """Only risk meaning useful to routing; audit metadata stays out of band.
+
+    ``description`` is the risk class, which structural routing judges
+    alignment against; the threat, consequence and impact are the source
+    policy's example of that class.  Only the routing view fills it, so the
+    slot-filling view leaves the key out.
+    """
 
     risk_id: str = Field(min_length=1)
     name: str = Field(min_length=1)
+    description: str | None = Field(
+        default=None, min_length=1, exclude_if=lambda value: value is None
+    )
     threat: str | None = None
     consequence: str | None = None
     impact: str | None = None
