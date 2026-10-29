@@ -164,6 +164,7 @@ def test_the_rules_cover_every_family_kind_and_end_in_no_match() -> None:
         "the request is not authorized for the session",
         "the booking belongs to another guest",
         "the caller is not a party to the reservation",
+        "the order does not match the authenticated customer",
     ],
 )
 def test_ownership_identity_actor_and_session_reasons_get_ownership(reason) -> None:
@@ -290,11 +291,52 @@ def test_a_negated_ownership_value_does_not_guard(value) -> None:
     assert choice.kind == "ownership"
 
 
-def test_a_party_value_without_session_evidence_guards() -> None:
-    party = _var("PM-1-2", "actor is guest", "state:widgets.owner_id")
+def test_a_membership_variable_without_session_evidence_guards() -> None:
+    party = _var(
+        "PM-1-2",
+        "guest of the booking",
+        "state:widgets.owner_id",
+        description="Booking membership",
+    )
     choice = _choose("the session token is stale", _row(party))
     assert choice.ownership_guarded is True
     assert choice.kind is None
+
+
+@pytest.mark.parametrize(
+    "variable",
+    [
+        _var(
+            "PM-1-2",
+            "authenticated actor is the guest",
+            "session:authenticated_owner_id",
+            description="The identity of the authenticated actor",
+        ),
+        _var(
+            "PM-1-2",
+            "authorized for target records",
+            "session:authenticated_owner_id",
+            description="Current session authorization scope",
+        ),
+        _var(
+            "PM-1-2",
+            "matches account owner",
+            "session:authenticated_owner_id",
+            description="Authenticated customer identity",
+        ),
+        _var("PM-1-2", "ownership verified", description="Ownership check status"),
+        _var(
+            "PM-1-2",
+            "actor is unrelated",
+            "session:authenticated_owner_id",
+            "state:widgets.owner_id",
+        ),
+    ],
+)
+def test_a_value_that_only_identifies_the_session_does_not_guard(variable) -> None:
+    choice = _choose("the actor is not a party to the booking", _row(variable))
+    assert choice.ownership_guarded is False
+    assert choice.kind == "ownership"
 
 
 def test_the_reason_variable_itself_never_guards() -> None:

@@ -45,6 +45,7 @@ from asago_scenario_generator.stpa.models.scenario_spec import ScenarioSpec
 
 from .._constants import PROMPTS_DIR
 from ..condition_family import ConditionFamily
+from ..reason_family import CitedContextRow
 from ..condition_check import (
     ConditionCheckOutcome,
     ConditionUniverse,
@@ -132,6 +133,7 @@ def generate_bdi_for_context(
     condition_family: ConditionFamily | None = None,
     *,
     assembly: ScenarioAssembly,
+    context_row: CitedContextRow | None = None,
 ) -> tuple[ScenarioSpec | None, str | None]:
     """Generate one Stage 5 ScenarioSpec, or the error that prevented it.
 
@@ -139,7 +141,8 @@ def generate_bdi_for_context(
     scenario handoff carries no stimulus, route, or executable condition, so
     no artifact-feasibility gate runs. ``condition_family`` is an optional
     code-derived hint rendered with the discriminating-condition
-    instructions; it never enters the context. ``assembly`` is the
+    instructions; it never enters the context. ``context_row`` is the row
+    the ICA cites, rendered as its exact values. ``assembly`` is the
     deterministic authority the compiled reply is assembled against.
 
     Raises:
@@ -174,6 +177,7 @@ def generate_bdi_for_context(
         content_surface=content_surface,
         observation_contract=observation_contract,
         condition_family=condition_family,
+        context_row=context_row,
         assembly=assembly,
     )
 
@@ -222,6 +226,7 @@ def _generate_semantics(
     observation_contract: ObservationContract | None,
     condition_family: ConditionFamily | None,
     assembly: ScenarioAssembly,
+    context_row: CitedContextRow | None = None,
 ) -> tuple[ScenarioSpec | None, str | None]:
     """Request, validate, and compile scenario semantics and evidence only.
 
@@ -244,6 +249,7 @@ def _generate_semantics(
         observation_contract=observation_contract,
         condition_family=condition_family,
         condition_universe=condition_universe,
+        context_row=context_row,
     )
     response_format = _scenario_semantics_payload_type(
         len(choices),

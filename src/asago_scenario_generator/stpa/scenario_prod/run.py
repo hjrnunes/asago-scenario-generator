@@ -70,6 +70,7 @@ from .condition_family import (
     family_honoured,
 )
 from .content_surface import ContentSurfaceFacts, content_surface_facts
+from .reason_family import CitedContextRow
 from .deduplication import (
     ScenarioDeduplication,
     build_channel_splits,
@@ -311,9 +312,11 @@ def run_sp3(
             records alone.
         condition_families: Optional family plans aligned with
             ``enriched_threat_set.structural_threats``. Each plan's family is
-            rendered as a Stage 5 condition hint, and the run writes
+            rendered as a Stage 5 condition hint and its cited context row
+            as the request's row section, and the run writes
             ``condition-families.yaml`` with the hint, the capped-out
-            families, and whether the published condition honoured the hint.
+            families, whether the published condition honoured the hint,
+            the reason rule that chose it, and the cited row's ID.
         shape_config: Switches for the shape step that runs after Stage 5
             compiles each adversarial spec. The default keeps the
             forged-transcript channel out of the shape request.
@@ -816,6 +819,12 @@ def _write_condition_families(
                 "binding": family.binding if family is not None else None,
                 "capped_out": [item.as_log() for item in plan.capped_out],
                 "honoured": honoured,
+                "reason_hint": (
+                    plan.reason.as_log() if plan.reason is not None else None
+                ),
+                "context_row": (
+                    plan.context_row.row_id if plan.context_row is not None else None
+                ),
             }
         )
     (run_dir / CONDITION_FAMILIES_FILENAME).write_text(
@@ -900,6 +909,7 @@ def _run_stage5_candidate(
     candidate_builders: list[_CandidateOutcomeBuilder] | None = None,
     content_surface: ContentSurfaceFacts | None = None,
     condition_family: ConditionFamily | None = None,
+    context_row: CitedContextRow | None = None,
 ) -> _Stage5ThreatResult:
     """Run one isolated Stage 5 candidate and record its outcome evidence."""
     prior_error_count = len(stage_errors)
@@ -922,6 +932,7 @@ def _run_stage5_candidate(
             observation_contract=observation_contract,
             content_surface=content_surface,
             condition_family=condition_family,
+            context_row=context_row,
         )
     except Exception as exc:  # noqa: BLE001 - isolate one candidate
         stage_errors.append(f"Stage 5 candidate failed for SCN-{index + 1:03d}: {exc}")
@@ -979,6 +990,7 @@ def _collect_stage5_specs(
             candidate_builders=candidate_builders,
             content_surface=content_surface,
             condition_family=plan.family if plan is not None else None,
+            context_row=plan.context_row if plan is not None else None,
         )
         if result.scenario_spec is not None:
             specs.append(result.scenario_spec)
@@ -1355,6 +1367,7 @@ def _run_stage5_for_threat(
     observation_contract: ObservationContract | None = None,
     content_surface: ContentSurfaceFacts | None = None,
     condition_family: ConditionFamily | None = None,
+    context_row: CitedContextRow | None = None,
 ) -> _Stage5ThreatResult:
     """Run Stage 5 BDI generation for a single threat."""
     slot_parts = parse_ica_slot_id(threat.ica_slot_id)
@@ -1394,6 +1407,7 @@ def _run_stage5_for_threat(
         observation_contract=observation_contract,
         content_surface=content_surface,
         condition_family=condition_family,
+        context_row=context_row,
     )
     if failure is not None:
         return failure
@@ -1440,6 +1454,7 @@ def _stage5_bdi(
     observation_contract: ObservationContract | None,
     content_surface: ContentSurfaceFacts | None = None,
     condition_family: ConditionFamily | None = None,
+    context_row: CitedContextRow | None = None,
 ) -> tuple[ScenarioSpec | None, _Stage5ThreatResult | None]:
     """Generate one assembled ScenarioSpec or one typed local failure."""
     try:
@@ -1455,6 +1470,7 @@ def _stage5_bdi(
             observation_contract=observation_contract,
             content_surface=content_surface,
             condition_family=condition_family,
+            context_row=context_row,
             assembly=assembly,
         )
     except ScenarioAssemblyError as exc:

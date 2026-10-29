@@ -24,6 +24,7 @@ from asago_scenario_generator.stpa.models.scenario_context import (
     ScenarioGenerationContext,
 )
 from ..condition_family import ConditionFamily, family_prompt_view
+from ..reason_family import CitedContextRow
 from ..condition_check import (
     ConditionUniverse,
     build_condition_universe,
@@ -55,12 +56,15 @@ def build_context_bdi_prompts(
     observation_contract: ObservationContract | None = None,
     condition_family: ConditionFamily | None = None,
     condition_universe: ConditionUniverse | None = None,
+    context_row: CitedContextRow | None = None,
 ) -> tuple[str, str]:
     """Render Stage 5 from only the immutable context and output contract.
 
     The prompt requests scenario semantics and causal evidence only and
     carries no stimulus, delivery or executable-condition demands. A
     ``condition_family`` hint renders only where the condition is requested.
+    ``context_row``, the row the ICA cites, renders its exact values after
+    the context; an ICA that cites no row gets no row section.
     """
     scenario_context_yaml = _yaml_dump(
         _stage5_prompt_context(scenario_context),
@@ -154,6 +158,11 @@ def build_context_bdi_prompts(
             condition_family=(
                 family_prompt_view(condition_family)
                 if has_condition_references
+                else None
+            ),
+            context_row_yaml=(
+                _yaml_dump(context_row.prompt_view())
+                if context_row is not None and context_row.variables
                 else None
             ),
         ),

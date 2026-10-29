@@ -12,7 +12,25 @@ pattern names, concerns, and rationales explain why STPA considered this
 unsafe action; they do not establish an attacker mechanism or access path.
 
 {{ scenario_context_yaml }}
+{% if context_row_yaml %}
+## Cited context row
 
+The unsafe control action above was stated for one row of its control
+action's context table. Each entry gives one process-model variable and the
+value it holds in that row; together they describe the context the unsafe
+control action assumes. The value the unsafe control action's reason states is
+what makes the action unsafe; the other values describe the setting in which it
+does. `evidence_refs` name where a value is read from:
+`state:<collection>.<field>` is that field of the TARGET-STATE records,
+`session:<name>` a session fact, and `argument:<operation>.<name>` an argument
+of that operation. An empty list means no supplied fact carries the value.
+{%- if has_condition_references %} When `record_selection` names a record,
+select a record whose facts agree with every row value they show; do not select
+a record whose facts contradict the row.{% endif %}
+
+```yaml
+{{ context_row_yaml }}```
+{% endif %}
 
 ## Observation contract
 
