@@ -92,6 +92,11 @@ version with new vectors, made here first; no repository redefines the
 semantics in its own prose or tests.
 
 The contract directory holds two versions side by side, pinned by one lock.
+`VERSIONING.md` states what each version means, how a consumer cites one, and
+how to vendor a copy; `scripts/sync_tool_call_condition.py --check` verifies
+the consumer's, MiDojo's and Garak's byte copies against the lock, and
+`--write` refreshes one. Each copy carries the lock, which names the version
+and every digest, so it references the contract without another producer file.
 `tool-call-condition-v1` is what Garak's detector implemented at the revision
 its vector files name, and its files never change; Garak's detector now
 implements `tool-call-condition-v2`. `tool-call-condition-v2` changes three evaluation rules: an
