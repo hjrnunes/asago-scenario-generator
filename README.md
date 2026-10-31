@@ -127,6 +127,14 @@ failure criterion, safe alternatives, supported causal hypotheses, and the
 semantics-only `scenario-handoff-v5`. The producer does not publish concrete
 messages, setup instructions, detector expressions, or harness bindings.
 
+The producer also publishes the `tool-call-condition` contract.
+[`data/contracts/tool-call-condition/`](data/contracts/tool-call-condition/)
+holds version 2's schema, its validate and evaluate vectors, the versioning
+rules and a `CONTRACT.lock` of every digest. Every implementation must agree
+on every vector, and the consumer, MiDojo and the Garak fork each keep a byte
+copy. `scripts/sync_tool_call_condition.py --check` compares a copy with this
+directory, and `--write` refreshes it.
+
 The consumer owns executable-artifact design through its target-free `generate`
 command. `check` validates a frozen package against supplied evidence. The
 runtime owns frozen delivery, pre-dispatch dependency checks, command/reply
