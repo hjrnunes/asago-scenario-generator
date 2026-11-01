@@ -27,6 +27,8 @@ coverage.lcov
 # Generated project output
 output/
 tmp/
+acceptance/
+runs/
 
 # Secrets and local configuration
 .env

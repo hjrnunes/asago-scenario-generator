@@ -1343,10 +1343,6 @@ def valid_payloads(shaped: dict[str, dict]) -> dict[str, dict]:
     return dict(sorted(payloads.items()))
 
 
-def _first_step(payload: dict) -> dict:
-    return payload["procedure"][0]
-
-
 V5_CASES = {
     "v5-uca-missing": drop("uca"),
     "v5-uca-not-object": put("uca", "RESP-1 updates an item"),
