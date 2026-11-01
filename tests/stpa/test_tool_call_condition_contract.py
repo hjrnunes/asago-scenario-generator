@@ -213,6 +213,44 @@ def test_each_version_names_the_garak_revision_that_computed_it() -> None:
             }
 
 
+def test_versioning_states_each_version_and_the_lock() -> None:
+    text = (CONTRACT_ROOT / "VERSIONING.md").read_text(encoding="utf-8")
+
+    assert "tool-call-condition-v1" in text
+    assert "tool-call-condition-v2" in text
+    assert "CONTRACT.lock" in text
+    assert GENERATOR.REVISION in text
+
+
+def test_v2_readme_states_how_to_vendor_and_verify_a_copy() -> None:
+    text = (KIT_V2 / "README.md").read_text(encoding="utf-8")
+
+    assert "Vendor" in text
+    assert "CONTRACT.lock" in text
+    assert "sync_tool_call_condition.py" in text
+    assert GENERATOR.REVISION in text
+
+
+def test_the_v2_directory_alone_validates_every_vector(tmp_path: Path) -> None:
+    vendored = tmp_path / "tool-call-condition-v2"
+    shutil.copytree(KIT_V2, vendored)
+    assert sorted(path.name for path in vendored.iterdir()) == [
+        "README.md",
+        "schema.json",
+        "vectors",
+    ]
+
+    validator = Draft202012Validator(_load(vendored / "schema.json"))
+    for name in ("validate", "evaluate"):
+        vectors = _load(vendored / f"vectors/{name}.json")["vectors"]
+        for vector in vectors:
+            errors = list(validator.iter_errors(vector["condition"]))
+            if name == "validate":
+                assert (not errors) == vector["valid"], vector["id"]
+            else:
+                assert errors == [], vector["id"]
+
+
 def test_v2_evaluate_vectors_start_with_every_v1_input() -> None:
     inputs = ("id", "condition", "calls", "complete")
     assert [{key: vector[key] for key in inputs} for vector in EVALUATE] == [
