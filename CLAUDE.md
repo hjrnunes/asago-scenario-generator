@@ -14,6 +14,25 @@ own documents.
 - Preserve unrelated changes and generated evidence. Stage only your own work;
   commit or push when requested.
 
+## Key concepts
+
+- **STPA controller** — the STPA role that issues control actions over a
+  controlled process. Unqualified "controller" belongs to STPA material only.
+- **Control action** — an action a controller issues; the scenario names the
+  unsafe one and the context that makes it unsafe.
+- **Scenario** (`scenario-handoff-v5`) — the frozen handoff: narrative, attack
+  tree, Gherkin, failure criterion, safe alternative and metadata.
+- **Party** — one of `third_party`, `counterparty`, `operator_insider` or
+  `unknown`, from `ItemController`.
+- **Controlling party** — the party the scenario assumes controls the planted
+  item; `PartyRelation.controller` states it.
+- **Planted item** — the data item an indirect attack carries, with its carrier
+  operation and record (`PlantedItem`).
+- **Attack channel** — how the attack reaches the agent: direct, indirect or
+  forged transcript.
+- **Turn shape** — the planned user turns; `TurnShape` holds them and pairs the
+  count with the plan.
+
 ## Ownership
 
 - The producer owns STPA analysis and scenario meaning: narrative, attack tree,
