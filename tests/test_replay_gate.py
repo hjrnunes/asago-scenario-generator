@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -4806,3 +4807,20 @@ def test_the_budget_states_its_reason() -> None:
     assert change.replayed_pair_code in lost.excluded_pair_codes
     assert change.companion_pair_codes == {lost.replayed_pair_code}
     assert change.replayed_reason == "prompt_budget_exceeded"
+
+
+def test_replay_check_names_a_missing_corpus_root(tmp_path: Path) -> None:
+    missing = tmp_path / "no-such-corpus"
+    script = Path(__file__).resolve().parents[1] / "scripts" / "replay-check.sh"
+    environment = {**os.environ, "ASAGO_REPLAY_" + "CORPUS": str(missing)}
+
+    for arguments in ([], [str(missing / "producer" / "*" / "output")]):
+        completed = subprocess.run(
+            ["bash", str(script), *arguments],
+            capture_output=True,
+            text=True,
+            env=environment,
+        )
+
+        assert completed.returncode != 0
+        assert str(missing) in completed.stderr + completed.stdout
