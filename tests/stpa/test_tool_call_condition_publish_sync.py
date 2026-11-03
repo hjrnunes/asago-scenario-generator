@@ -144,14 +144,14 @@ def test_check_fails_when_the_reference_names_another_version(
     midojo = _checkout(tmp_path, "midojo")
     lock = midojo / SYNC.COPIES["midojo"] / "CONTRACT.lock"
     document = json.loads(lock.read_text(encoding="utf-8"))
-    document["version"] = "tool-call-condition-v1"
+    document["version"] = "tool-call-condition-v9"
     lock.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
 
     assert _main("--check", "--midojo", str(midojo)) == 1
 
     out = capsys.readouterr().out
     assert "midojo copy" in out
-    assert "reference names tool-call-condition-v1" in out
+    assert "reference names tool-call-condition-v9" in out
     assert V2 in out
 
 

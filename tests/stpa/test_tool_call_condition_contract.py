@@ -1,11 +1,12 @@
 """Tests for the producer-owned ``tool-call-condition`` contract.
 
-The vectors of each version hold the results of Garak's ``validate_condition``
-and ``evaluate_condition`` at the revision the vector files name; Garak's own
-tests run them against the code. These tests check what the producer can check
-offline: the lock, each schema against the validate vectors, the shape of the
-vectors, the generator's reference evaluator against both versions, and that
-every condition the binder produces satisfies both schemas.
+The vectors of the current version hold the results of Garak's
+``validate_condition`` and ``evaluate_condition`` at the revision the vector
+files name; Garak's own tests run them against the code. These tests check what
+the producer can check offline: the lock, the schema against the validate
+vectors, the shape of the vectors, the generator's reference evaluator against
+the committed vectors, and that every condition the binder produces satisfies
+the schema.
 """
 
 from __future__ import annotations
@@ -34,8 +35,7 @@ from asago_scenario_generator.stpa.scenario_prod.tool_call_binding import (
 
 DATA = Path(__file__).resolve().parents[2] / "data/contracts"
 CONTRACT_ROOT = DATA / "tool-call-condition"
-KIT = CONTRACT_ROOT / "tool-call-condition-v1"
-KIT_V2 = CONTRACT_ROOT / "tool-call-condition-v2"
+KIT = CONTRACT_ROOT / "tool-call-condition-v2"
 HANDOFF_VALID = DATA / "scenario-handoff/handoff-v5/valid"
 
 VALUE_OPS = ("eq", "ne", "gt", "ge", "lt", "le", "in", "not_in")
@@ -54,33 +54,19 @@ SCHEMA = _load(KIT / "schema.json")
 VALIDATOR = Draft202012Validator(SCHEMA)
 VALIDATE = _load(KIT / "vectors/validate.json")["vectors"]
 EVALUATE = _load(KIT / "vectors/evaluate.json")["vectors"]
-SCHEMA_V2 = _load(KIT_V2 / "schema.json")
-VALIDATOR_V2 = Draft202012Validator(SCHEMA_V2)
-CALL_VALIDATOR_V2 = Draft202012Validator(SCHEMA_V2["$defs"]["call"])
-VALIDATE_V2 = _load(KIT_V2 / "vectors/validate.json")["vectors"]
-EVALUATE_V2 = _load(KIT_V2 / "vectors/evaluate.json")["vectors"]
+# The current kit is the only kit; the aliases keep the v2-flavoured names
+# used by the vectors and the generator tests.
+SCHEMA_V2 = SCHEMA
+VALIDATOR_V2 = VALIDATOR
+CALL_VALIDATOR_V2 = Draft202012Validator(SCHEMA["$defs"]["call"])
+VALIDATE_V2 = VALIDATE
+EVALUATE_V2 = EVALUATE
 
-# The v1 vectors whose v2 result differs, each by one of the three changes.
+# The v2 vectors whose result differs from v1, each by one of the three changes.
 CHANGED_IN_V2 = {
     "completeness.order-clean.complete-false",
     "order.same-argument-bool-int",
     "order.same-argument-null-both-missing-on-prior",
-}
-
-# Existing handoffs reference v1: these digests must never change.
-V1_DIGESTS = {
-    "tool-call-condition-v1/README.md": (
-        "4115e3ad395497227a5523c5a641060451c0a8ca1131516ca76b770279cefdac"
-    ),
-    "tool-call-condition-v1/schema.json": (
-        "68fcc125d7ed0df81a0c5496f7f95718c8b3957bc492490c6ee43a27dff30493"
-    ),
-    "tool-call-condition-v1/vectors/evaluate.json": (
-        "8c9674bf6dd53364859bb9a67c7564844d65b17b706ececf43d07848e9cbb710"
-    ),
-    "tool-call-condition-v1/vectors/validate.json": (
-        "d91e7964a0333460c34b1a22cde0a1132d707b8eb9aa0a9983deb06ceddc4d63"
-    ),
 }
 
 
@@ -137,25 +123,6 @@ def test_evaluate_vector_conditions_satisfy_the_schema() -> None:
     assert rejected == []
 
 
-def test_evaluate_vector_results_are_well_formed() -> None:
-    malformed = []
-    for vector in EVALUATE:
-        calls = vector["calls"]
-        matched = vector["matched_calls"]
-        good = (
-            OUTCOME_REASONS.get(vector["outcome"]) == vector["reason"]
-            and isinstance(vector["complete"], bool)
-            and all(set(call) == {"name", "arguments"} for call in calls)
-            and all(
-                isinstance(index, int) and 0 <= index < len(calls) for index in matched
-            )
-            and len(set(matched)) == len(matched)
-        )
-        if not good:
-            malformed.append(vector["id"])
-    assert malformed == []
-
-
 def test_evaluate_vectors_cover_every_outcome_with_and_without_completeness() -> None:
     seen = {(vector["outcome"], vector["complete"]) for vector in EVALUATE}
     assert seen == {
@@ -170,60 +137,42 @@ def test_evaluate_vectors_cover_every_outcome_with_and_without_completeness() ->
     assert ops == set(VALUE_OPS)
 
 
-def test_v1_kit_files_keep_their_digests() -> None:
+def test_the_contract_publishes_only_the_current_version() -> None:
     lock = _load(CONTRACT_ROOT / "CONTRACT.lock")
-    v1 = {path: digest for path, digest in lock["files"].items() if "-v1/" in path}
-    assert v1 == V1_DIGESTS
+
+    assert lock["version"] == "tool-call-condition-v2"
+    assert not any("-v1/" in path for path in lock["files"])
+    assert not (CONTRACT_ROOT / "tool-call-condition-v1").exists()
 
 
 def test_v2_schema_is_a_valid_draft_2020_12_schema() -> None:
     Draft202012Validator.check_schema(SCHEMA_V2)
 
 
-def test_v2_schema_accepts_the_same_conditions_as_v1() -> None:
-    def condition_part(schema: dict[str, Any]) -> dict[str, Any]:
-        defs = {name: rule for name, rule in schema["$defs"].items() if name != "call"}
-        rest = {k: v for k, v in schema.items() if k not in ("title", "description")}
-        return {**rest, "$defs": defs}
-
-    assert condition_part(SCHEMA_V2) == condition_part(SCHEMA)
-
-
-def test_v2_validate_vectors_are_the_v1_validate_vectors() -> None:
-    assert VALIDATE_V2 == VALIDATE
-    v2 = _load(KIT_V2 / "vectors/validate.json")
-    assert v2["version"] == "tool-call-condition-v2"
-    v1_implementation = _load(KIT / "vectors/validate.json")["implementation"]
-    assert v2["implementation"] == {
-        **v1_implementation,
-        "revision": GENERATOR.REVISION,
-    }
-    assert v1_implementation["revision"] == GENERATOR.V1_REVISION
+def test_each_vector_file_names_the_garak_revision_that_computed_it() -> None:
+    for name in ("validate", "evaluate"):
+        document = _load(KIT / f"vectors/{name}.json")
+        assert document["version"] == "tool-call-condition-v2"
+        assert document["implementation"] == {
+            "repository": "garak",
+            "revision": GENERATOR.REVISION,
+            "module": "garak/detectors/toolcall.py",
+            "function": f"{name}_condition",
+        }
 
 
-def test_each_version_names_the_garak_revision_that_computed_it() -> None:
-    for kit, revision in ((KIT, GENERATOR.V1_REVISION), (KIT_V2, GENERATOR.REVISION)):
-        for name in ("validate", "evaluate"):
-            implementation = _load(kit / f"vectors/{name}.json")["implementation"]
-            assert implementation == {
-                "repository": "garak",
-                "revision": revision,
-                "module": "garak/detectors/toolcall.py",
-                "function": f"{name}_condition",
-            }
-
-
-def test_versioning_states_each_version_and_the_lock() -> None:
+def test_versioning_states_the_current_version_and_the_v1_retirement() -> None:
     text = (CONTRACT_ROOT / "VERSIONING.md").read_text(encoding="utf-8")
 
-    assert "tool-call-condition-v1" in text
     assert "tool-call-condition-v2" in text
+    assert "tool-call-condition-v1" in text
+    assert "retired" in text
     assert "CONTRACT.lock" in text
     assert GENERATOR.REVISION in text
 
 
 def test_v2_readme_states_how_to_vendor_and_verify_a_copy() -> None:
-    text = (KIT_V2 / "README.md").read_text(encoding="utf-8")
+    text = (KIT / "README.md").read_text(encoding="utf-8")
 
     assert "Vendor" in text
     assert "CONTRACT.lock" in text
@@ -233,7 +182,7 @@ def test_v2_readme_states_how_to_vendor_and_verify_a_copy() -> None:
 
 def test_the_v2_directory_alone_validates_every_vector(tmp_path: Path) -> None:
     vendored = tmp_path / "tool-call-condition-v2"
-    shutil.copytree(KIT_V2, vendored)
+    shutil.copytree(KIT, vendored)
     assert sorted(path.name for path in vendored.iterdir()) == [
         "README.md",
         "schema.json",
@@ -249,13 +198,6 @@ def test_the_v2_directory_alone_validates_every_vector(tmp_path: Path) -> None:
                 assert (not errors) == vector["valid"], vector["id"]
             else:
                 assert errors == [], vector["id"]
-
-
-def test_v2_evaluate_vectors_start_with_every_v1_input() -> None:
-    inputs = ("id", "condition", "calls", "complete")
-    assert [{key: vector[key] for key in inputs} for vector in EVALUATE] == [
-        {key: vector[key] for key in inputs} for vector in EVALUATE_V2[: len(EVALUATE)]
-    ]
 
 
 @pytest.mark.parametrize(
@@ -505,7 +447,7 @@ def test_generator_inputs_are_the_committed_vector_inputs() -> None:
     ]
     evaluate = [
         {"id": vector_id, "condition": condition, "calls": calls, "complete": complete}
-        for vector_id, condition, calls, complete in GENERATOR.evaluate_inputs()
+        for vector_id, condition, calls, complete in GENERATOR.evaluate_inputs_v2()
     ]
     assert evaluate == [
         {key: vector[key] for key in ("id", "condition", "calls", "complete")}
@@ -513,26 +455,9 @@ def test_generator_inputs_are_the_committed_vector_inputs() -> None:
     ]
 
 
-def test_generator_v2_inputs_are_the_committed_v2_vector_inputs() -> None:
-    evaluate = [
-        {"id": vector_id, "condition": condition, "calls": calls, "complete": complete}
-        for vector_id, condition, calls, complete in GENERATOR.evaluate_inputs_v2()
-    ]
-    assert evaluate == [
-        {key: vector[key] for key in ("id", "condition", "calls", "complete")}
-        for vector in EVALUATE_V2
-    ]
-
-
-def test_generator_names_the_vectors_that_v2_changes() -> None:
-    assert GENERATOR.CHANGED_IN_V2 == CHANGED_IN_V2
-
-
-@pytest.mark.parametrize(
-    "path", sorted({**GENERATOR.VECTOR_FILES, **GENERATOR.V1_FILES})
-)
+@pytest.mark.parametrize("path", sorted(GENERATOR.VECTOR_FILES))
 def test_generator_formats_the_committed_vector_bytes(path: str) -> None:
-    files = {**GENERATOR.VECTOR_FILES, **GENERATOR.V1_FILES}
+    files = GENERATOR.VECTOR_FILES
     version, _, implementation = files[path]
     text = (CONTRACT_ROOT / path).read_text(encoding="utf-8")
     vectors = _load(CONTRACT_ROOT / path)["vectors"]
@@ -547,25 +472,12 @@ def test_reference_evaluator_reproduces_every_v2_vector(vector: dict) -> None:
     assert result == (vector["outcome"], vector["reason"], vector["matched_calls"])
 
 
-def test_reference_evaluator_differs_from_v1_only_where_v2_changes_it() -> None:
-    differs = {
-        vector["id"]
-        for vector in EVALUATE
-        if GENERATOR.evaluate_condition_v2(
-            vector["condition"], vector["calls"], vector["complete"]
-        )
-        != (vector["outcome"], vector["reason"], vector["matched_calls"])
-    }
-    assert differs == CHANGED_IN_V2
-
-
 def test_v2_changes_reach_the_stated_outcomes() -> None:
-    v1 = {vector["id"]: vector["outcome"] for vector in EVALUATE}
     v2 = {vector["id"]: vector["outcome"] for vector in EVALUATE_V2}
-    assert {id_: (v1[id_], v2[id_]) for id_ in CHANGED_IN_V2} == {
-        "completeness.order-clean.complete-false": ("detected", "inconclusive"),
-        "order.same-argument-bool-int": ("not_detected", "detected"),
-        "order.same-argument-null-both-missing-on-prior": ("not_detected", "detected"),
+    assert {id_: v2[id_] for id_ in CHANGED_IN_V2} == {
+        "completeness.order-clean.complete-false": "inconclusive",
+        "order.same-argument-bool-int": "detected",
+        "order.same-argument-null-both-missing-on-prior": "detected",
     }
     assert v2["completeness.order-violated.complete-false"] == "inconclusive"
     assert v2["order.same-argument-prior-int-main-bool"] == "detected"
@@ -601,35 +513,17 @@ def test_generator_check_passes_on_the_committed_files(contract_copy: Path) -> N
 def test_generator_check_fails_on_an_edited_expected_value(
     contract_copy: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    path = contract_copy / "tool-call-condition-v1/vectors/evaluate.json"
+    path = contract_copy / "tool-call-condition-v2/vectors/evaluate.json"
     edited = path.read_text(encoding="utf-8").replace(
         '"outcome": "detected"', '"outcome": "x"', 1
     )
     path.write_text(edited, encoding="utf-8")
     argv = ["--garak-checkout", "x", "--garak-python", "y", "--check"]
     assert GENERATOR.main(argv) == 1
-    assert (
-        "DIFFERS tool-call-condition-v1/vectors/evaluate.json"
-        in capsys.readouterr().out
-    )
-    assert path.read_text(encoding="utf-8") == edited, "check mode writes nothing"
-
-
-def test_generator_check_fails_on_an_edited_v2_expected_value(
-    contract_copy: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    path = contract_copy / "tool-call-condition-v2/vectors/evaluate.json"
-    path.write_text(
-        path.read_text(encoding="utf-8").replace(
-            '"outcome": "detected"', '"outcome": "x"', 1
-        ),
-        encoding="utf-8",
-    )
-    argv = ["--garak-checkout", "x", "--garak-python", "y", "--check"]
-    assert GENERATOR.main(argv) == 1
     out = capsys.readouterr().out
     assert "DIFFERS tool-call-condition-v2/vectors/evaluate.json" in out
-    assert "1 of 5 files differ" in out
+    assert "1 of 3 files differ" in out
+    assert path.read_text(encoding="utf-8") == edited, "check mode writes nothing"
 
 
 def _garak_results(**changes: tuple[str, str, list[int]]) -> dict[str, Any]:
@@ -650,68 +544,22 @@ def _garak_results(**changes: tuple[str, str, list[int]]) -> dict[str, Any]:
     return {**_computed_from_committed(), "evaluate": evaluate}
 
 
-def _v1_result(vector_id: str) -> tuple[str, str, list[int]]:
-    vector = next(vector for vector in EVALUATE if vector["id"] == vector_id)
-    return vector["outcome"], vector["reason"], vector["matched_calls"]
-
-
-def test_generator_check_reproduces_v1_except_the_v2_changes() -> None:
-    assert GENERATOR.v1_differences(CONTRACT_ROOT, _computed_from_committed()) == []
-
-
-def test_generator_check_fails_when_garak_differs_on_an_unchanged_v1_vector(
+def test_generator_check_fails_when_garak_differs_on_a_vector(
     contract_copy: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     vector_id = EVALUATE[0]["id"]
-    assert vector_id not in CHANGED_IN_V2
     computed = _garak_results(**{vector_id: ("x", "y", [])})
-    assert GENERATOR.v1_differences(contract_copy, computed) == [
-        contract_copy / "tool-call-condition-v1/vectors/evaluate.json"
-    ]
     # past the reference cross-check, which would stop the run first
     monkeypatch.setattr(GENERATOR, "reference_disagreements", lambda evaluate: [])
     monkeypatch.setattr(GENERATOR, "run_garak", lambda python, checkout: computed)
     argv = ["--garak-checkout", "x", "--garak-python", "y", "--check"]
     assert GENERATOR.main(argv) == 1
     assert (
-        "DIFFERS tool-call-condition-v1/vectors/evaluate.json"
+        "DIFFERS tool-call-condition-v2/vectors/evaluate.json"
         in capsys.readouterr().out
     )
-
-
-def test_generator_check_fails_when_garak_gives_a_changed_vector_its_v1_result(
-    contract_copy: Path,
-) -> None:
-    vector_id = "order.same-argument-bool-int"
-    computed = _garak_results(**{vector_id: _v1_result(vector_id)})
-    assert GENERATOR.v1_differences(contract_copy, computed) == [
-        contract_copy / "tool-call-condition-v1/vectors/evaluate.json"
-    ]
-
-
-def test_generator_check_fails_when_garak_differs_on_a_v1_validate_vector(
-    contract_copy: Path,
-) -> None:
-    validate = [{**VALIDATE[0], "valid": False, "error": "x"}, *VALIDATE[1:]]
-    computed = {**_computed_from_committed(), "validate": validate}
-    assert GENERATOR.v1_differences(contract_copy, computed) == [
-        contract_copy / "tool-call-condition-v1/vectors/validate.json"
-    ]
-
-
-def test_generator_write_mode_never_writes_a_v1_file(
-    contract_copy: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    v1 = contract_copy / "tool-call-condition-v1/vectors/validate.json"
-    v1.write_text("{}\n", encoding="utf-8")
-    v2 = contract_copy / "tool-call-condition-v2/vectors/validate.json"
-    v2.write_text("{}\n", encoding="utf-8")
-    assert GENERATOR.main(["--garak-checkout", "x", "--garak-python", "y"]) == 1
-    assert "(v1 files are never written)" in capsys.readouterr().out
-    assert v1.read_text(encoding="utf-8") == "{}\n"
-    assert v2.read_text(encoding="utf-8") == "{}\n", "nothing is written"
 
 
 def test_generator_stops_when_the_reference_evaluator_disagrees(
@@ -725,7 +573,7 @@ def test_generator_stops_when_the_reference_evaluator_disagrees(
 
 
 def test_generator_check_fails_on_a_stale_lock(contract_copy: Path) -> None:
-    readme = contract_copy / "tool-call-condition-v1/README.md"
+    readme = contract_copy / "tool-call-condition-v2/README.md"
     readme.write_text(readme.read_text(encoding="utf-8") + "\nedit\n", encoding="utf-8")
     argv = ["--garak-checkout", "x", "--garak-python", "y", "--check"]
     assert GENERATOR.main(argv) == 1
