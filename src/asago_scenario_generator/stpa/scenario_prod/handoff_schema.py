@@ -25,7 +25,9 @@ from asago_scenario_generator.stpa.scenario_prod.handoff import ScenarioHandoffV
 
 #: The safe-outcome rules JSON Schema can state.  ``SafeObservableOutcome``
 #: enforces the same rules for a Pydantic reader; the published schema carries
-#: these blocks so a schema-only reader reaches the same verdict.
+#: these blocks so a schema-only reader reaches the same verdict.  An empty
+#: ``call_arguments`` list states no value and the model turns it into an
+#: absent field, so each rule treats an empty list as absent.
 _SAFE_OUTCOME_SCHEMA_RULES: list[dict[str, Any]] = [
     {
         "if": {
@@ -55,7 +57,7 @@ _SAFE_OUTCOME_SCHEMA_RULES: list[dict[str, Any]] = [
                 "evidence": {"type": "null"},
                 "operation_name": {"type": "null"},
                 "call_made": {"type": "null"},
-                "call_arguments": {"type": "null"},
+                "call_arguments": {"maxItems": 0},
                 "record_refs": {"maxItems": 0},
                 "fact_refs": {"maxItems": 0},
             }
@@ -67,22 +69,24 @@ _SAFE_OUTCOME_SCHEMA_RULES: list[dict[str, Any]] = [
             "required": ["call_made"],
         },
         "then": {
+            "required": ["claim_level", "operation_name"],
             "properties": {
                 "claim_level": {"const": "command_attempt"},
                 "operation_name": {"type": "string"},
-            }
+            },
         },
     },
     {
         "if": {
-            "properties": {"call_arguments": {"type": "array"}},
+            "properties": {"call_arguments": {"minItems": 1}},
             "required": ["call_arguments"],
         },
         "then": {
+            "required": ["claim_level", "operation_name"],
             "properties": {
                 "claim_level": {"const": "command_attempt"},
                 "operation_name": {"type": "string"},
-            }
+            },
         },
     },
     {
@@ -90,7 +94,7 @@ _SAFE_OUTCOME_SCHEMA_RULES: list[dict[str, Any]] = [
             "properties": {"call_made": {"const": False}},
             "required": ["call_made"],
         },
-        "then": {"properties": {"call_arguments": {"type": "null"}}},
+        "then": {"properties": {"call_arguments": {"maxItems": 0}}},
     },
     {
         "properties": {

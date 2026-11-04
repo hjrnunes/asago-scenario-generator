@@ -17,8 +17,10 @@ from pathlib import Path
 
 import pytest
 from jsonschema import Draft202012Validator
+from pydantic import ValidationError
 
 from asago_scenario_generator.models.canonical import canonical_json_bytes
+from asago_scenario_generator.stpa.observation_contract import SafeObservableOutcome
 from asago_scenario_generator.stpa.scenario_prod.handoff import (
     HANDOFF_SCHEMA_VERSION_V5,
     HandoffGherkin,
@@ -345,6 +347,29 @@ def test_the_schema_states_the_taxonomy_reference_uniqueness_rule() -> None:
     references.append(dict(references[0]))
 
     assert list(Draft202012Validator(_schema()).iter_errors(payload))
+
+
+def test_the_schema_treats_an_empty_call_argument_list_as_absent() -> None:
+    """The model turns an empty list into an absent field; the schema agrees."""
+
+    payload = json.loads((KIT / "valid/safe-call-arguments.json").read_text("utf-8"))
+    outcome = payload["safe_observable_outcome"]
+    outcome["call_arguments"] = []
+
+    assert not list(Draft202012Validator(_schema()).iter_errors(payload))
+    SafeObservableOutcome.model_validate(outcome)
+
+
+def test_the_schema_requires_the_operation_a_call_names() -> None:
+    """A call stays bound to its operation; the schema and the model both refuse."""
+
+    payload = json.loads((KIT / "valid/safe-call-arguments.json").read_text("utf-8"))
+    outcome = payload["safe_observable_outcome"]
+    del outcome["operation_name"]
+
+    assert list(Draft202012Validator(_schema()).iter_errors(payload))
+    with pytest.raises(ValidationError):
+        SafeObservableOutcome.model_validate(outcome)
 
 
 def test_each_schema_case_is_rejected_with_its_recorded_codes() -> None:
