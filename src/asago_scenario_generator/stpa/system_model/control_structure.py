@@ -15,6 +15,7 @@ import re
 from collections.abc import Callable, Sequence
 from contextlib import ExitStack
 from dataclasses import dataclass, field
+from functools import partial
 from pathlib import Path
 from typing import Annotated, Any, Literal, TypeVar
 
@@ -82,6 +83,11 @@ from asago_scenario_generator.stpa.models.loss_analysis import (
     compose_constraint_description,
 )
 from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
+from asago_scenario_generator.stpa.system_model.control_structure_review import (
+    ReviewCorrection,
+    ReviewOutcome,
+    publish_review_outcome,
+)
 from asago_scenario_generator.stpa.system_model.feedback_authority import (
     FeedbackAuthorityError,
     feedback_authority_defect,
@@ -1941,15 +1947,7 @@ def derive_control_structure(
     template_loader: TemplateLoader | None = None,
     temperature: float = DEFAULT_TEMPERATURE,
     post_review_density_check: (
-        Callable[
-            [
-                LossAnalysis,
-                Callable[..., LossAnalysis],
-                Callable[[], tuple[frozenset[str], frozenset[str]]],
-            ],
-            object,
-        ]
-        | None
+        Callable[[ReviewOutcome, ReviewCorrection], ReviewOutcome] | None
     ) = None,
     target_evidence: TargetEvidence | None = None,
     versions: VersionChain | None = None,
@@ -1976,12 +1974,12 @@ def derive_control_structure(
         temperature: LLM temperature (default 0.4).
         post_review_density_check: Optional offline gate re-applied to the
             reviewed loss graph after Call 3 and before it replaces the
-            canonical artifact.  It receives the reviewed graph, a
-            correction callable that re-runs Call 3 once for the scoped
-            records named by failing checks, and a callable returning the
-            hazard and constraint IDs the review in force marks unresolved.
-            Raising here fails the derivation closed instead of persisting a
-            regressed graph.
+            canonical artifact.  It receives the review outcome in force and
+            a correction callable that re-runs Call 3 once for the scoped
+            records named by failing checks; it returns the outcome holding
+            the graph in force and its verdict.  The derivation publishes
+            that outcome before it raises a failed verdict, so the canonical
+            graph and the failure evidence always agree.
         target_evidence: Optional discovered target evidence rendered into
             every Stage 2 call.  Control actions may then name the observed
             operation they invoke; unknown names are dropped with a warning.
@@ -2032,7 +2030,9 @@ def _derive_control_structure(
     run_dir: Path,
     loader: TemplateLoader,
     temperature: float,
-    post_review_density_check: Callable[..., object] | None,
+    post_review_density_check: (
+        Callable[[ReviewOutcome, ReviewCorrection], ReviewOutcome] | None
+    ),
     target_evidence: TargetEvidence | None,
     loss_versions: VersionChain,
     structure_versions: VersionChain,
@@ -2127,83 +2127,42 @@ def _derive_control_structure(
     # internally consistent run: the gates artifact names the still-failing
     # checks and the canonical artifact holds that same graph, instead of a
     # stale pre-review graph that silently keeps an edge the gate rejected.
-    loss_versions.add(reviewed_loss_analysis, "loss-analysis-reviewed.yaml")
+    outcome = ReviewOutcome(
+        result=semantic_result,
+        review=coordination_analysis.semantic_review,
+    )
+    loss_versions.add(outcome.loss_analysis, "loss-analysis-reviewed.yaml")
 
     # Fail closed before completing the stage: the semantic review may reword
     # hazards or constraints, or replace constraint hazard edges, and could
     # silently undo the Phase 1 density gates that the Stage 1a artifact
     # recorded as passed.  The offline re-check records its second report in
-    # the gates artifact and raises when the reviewed graph regresses.
-    try:
-        if post_review_density_check is not None:
-            review_in_force = coordination_analysis.semantic_review
-
-            def correct_review(
-                failing_checks: tuple[str, ...],
-                hazard_ids: tuple[str, ...],
-                constraint_ids: tuple[str, ...],
-            ) -> LossAnalysis:
-                # One more Call 3 with the exact failing checks.  Only the review
-                # rows of the scoped records are taken from the new response;
-                # every other decision and the coordination links stay as first
-                # reviewed, and the merged review passes the same application
-                # validators as the first one.
-                nonlocal semantic_result, review_in_force
-                corrected = _call_3_coordination(
+    # the gates artifact and returns a failed outcome when the reviewed graph
+    # regresses.  The outcome is published before its failure is raised, so
+    # the canonical graph and the failure evidence always agree.
+    if post_review_density_check is not None:
+        outcome = post_review_density_check(
+            outcome,
+            partial(
+                _correct_review,
+                context=_ReviewCorrectionContext(
                     llm_client=llm_client,
                     use_case_text=use_case_text,
                     control_structure=assembled_structure,
                     loss_analysis=loss_analysis,
+                    coordination_analysis=coordination_analysis,
                     run_dir=run_dir,
                     loader=loader,
                     temperature=temperature,
-                    correction_feedback=_density_correction_feedback(
-                        failing_checks, hazard_ids, constraint_ids
-                    ),
-                    step="call_3_density_correction",
                     target_evidence=target_evidence,
-                )
-                merged_review = _merge_scoped_review_rows(
-                    coordination_analysis.semantic_review,
-                    corrected.semantic_review,
-                    hazard_ids=set(hazard_ids),
-                    constraint_ids=set(constraint_ids),
-                )
-                try:
-                    result = apply_control_structure_semantic_review(
-                        assembled_structure,
-                        loss_analysis,
-                        merged_review,
-                        use_case_text=use_case_text,
-                    )
-                except ValueError as exc:
-                    raise StageError(
-                        stage=STAGE,
-                        step="call_3_density_correction",
-                        message=f"corrected review failed application: {exc}",
-                    ) from exc
-                write_yaml(
-                    coordination_analysis.model_copy(
-                        update={"semantic_review": merged_review}
-                    ),
-                    run_dir / "control-structure-review-corrected.yaml",
-                )
-                loss_versions.add(
-                    result.loss_analysis, "loss-analysis-reviewed-corrected.yaml"
-                )
-                semantic_result = result
-                review_in_force = merged_review
-                return result.loss_analysis
-
-            post_review_density_check(
-                reviewed_loss_analysis,
-                correct_review,
-                lambda: review_in_force.unresolved_ids(),
-            )
-            reviewed_loss_analysis = semantic_result.loss_analysis
-            control_structure = semantic_result.control_structure
-    finally:
-        loss_versions.publish(semantic_result.loss_analysis, "loss-analysis.yaml")
+                    loss_versions=loss_versions,
+                ),
+            ),
+        )
+    publish_review_outcome(outcome, loss_versions)
+    outcome.raise_for_failure()
+    reviewed_loss_analysis = outcome.loss_analysis
+    control_structure = outcome.control_structure
 
     # Add coordination links to the ControlStructure
     control_structure = _add_coordination_links(
@@ -2222,6 +2181,81 @@ def _derive_control_structure(
         warnings=[*call_2b_warnings, *repair_warnings],
         authority_warnings=list(call_2b_warnings),
     )
+
+
+@dataclass(frozen=True)
+class _ReviewCorrectionContext:
+    """The fixed call context of one post-review density correction."""
+
+    llm_client: LLMClient
+    use_case_text: str
+    control_structure: ControlStructure
+    loss_analysis: LossAnalysis
+    coordination_analysis: CoordinationAnalysis
+    run_dir: Path
+    loader: TemplateLoader
+    temperature: float
+    target_evidence: TargetEvidence | None
+    loss_versions: VersionChain
+
+
+def _correct_review(
+    failing_checks: tuple[str, ...],
+    hazard_ids: tuple[str, ...],
+    constraint_ids: tuple[str, ...],
+    *,
+    context: _ReviewCorrectionContext,
+) -> ReviewOutcome:
+    """Run one more Call 3 for the scoped records and return the new outcome.
+
+    Only the review rows of the scoped records are taken from the new
+    response; every other decision and the coordination links stay as first
+    reviewed, and the merged review passes the same application validators as
+    the first one.
+    """
+    corrected = _call_3_coordination(
+        llm_client=context.llm_client,
+        use_case_text=context.use_case_text,
+        control_structure=context.control_structure,
+        loss_analysis=context.loss_analysis,
+        run_dir=context.run_dir,
+        loader=context.loader,
+        temperature=context.temperature,
+        correction_feedback=_density_correction_feedback(
+            failing_checks, hazard_ids, constraint_ids
+        ),
+        step="call_3_density_correction",
+        target_evidence=context.target_evidence,
+    )
+    merged_review = _merge_scoped_review_rows(
+        context.coordination_analysis.semantic_review,
+        corrected.semantic_review,
+        hazard_ids=set(hazard_ids),
+        constraint_ids=set(constraint_ids),
+    )
+    try:
+        result = apply_control_structure_semantic_review(
+            context.control_structure,
+            context.loss_analysis,
+            merged_review,
+            use_case_text=context.use_case_text,
+        )
+    except ValueError as exc:
+        raise StageError(
+            stage=STAGE,
+            step="call_3_density_correction",
+            message=f"corrected review failed application: {exc}",
+        ) from exc
+    write_yaml(
+        context.coordination_analysis.model_copy(
+            update={"semantic_review": merged_review}
+        ),
+        context.run_dir / "control-structure-review-corrected.yaml",
+    )
+    context.loss_versions.add(
+        result.loss_analysis, "loss-analysis-reviewed-corrected.yaml"
+    )
+    return ReviewOutcome(result=result, review=merged_review)
 
 
 # ---------------------------------------------------------------------------

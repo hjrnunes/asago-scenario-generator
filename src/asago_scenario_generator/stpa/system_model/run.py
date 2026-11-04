@@ -767,14 +767,11 @@ def _derive_stage2_control_structure(
             temperature=temperature,
             target_evidence=target_evidence,
             versions=versions,
-            post_review_density_check=lambda reviewed, correct, unresolved: (
-                verify_reviewed_density(
-                    reviewed,
-                    run_dir=run_dir,
-                    draft=loss_analysis,
-                    correct=correct,
-                    unresolved=unresolved,
-                )
+            post_review_density_check=lambda outcome, correct: verify_reviewed_density(
+                outcome,
+                run_dir=run_dir,
+                draft=loss_analysis,
+                correct=correct,
             ),
         )
     except StageError as exc:

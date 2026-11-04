@@ -594,6 +594,9 @@ SYSTEM_MODEL_LAYERS: dict[str, int] = {
     "kc_decision": 0,
     "risk_actionability": 1,
     "stated_rule_coverage": 1,
+    # The Stage 2 review outcome: the reviewed graph, the review in force and
+    # its post-review verdict; its publisher writes the canonical graph.
+    "control_structure_review": 1,
     "control_structure": 1,
     "critic": 2,
     "reply_constraint_placement": 2,

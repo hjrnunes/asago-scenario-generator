@@ -44,6 +44,10 @@ from asago_scenario_generator.stpa.infra.llm import LLMClient
 from asago_scenario_generator.stpa.infra.llm_helpers import StageError
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
+from asago_scenario_generator.stpa.system_model.control_structure_review import (
+    ReviewCorrection,
+    ReviewOutcome,
+)
 from asago_scenario_generator.stpa.system_model.loss_analysis import (
     STAGE,
     STEP_GAP,
@@ -104,10 +108,6 @@ _RevisionConstraintEdit = RevisionConstraintEdit
 _Stage1aRevisionPatch = Stage1aRevisionPatch
 
 POST_REVIEW_CORRECTION_ROUNDS = 1
-# (failing checks, hazard IDs, constraint IDs) -> re-reviewed loss graph.
-ReviewCorrection = Callable[
-    [tuple[str, ...], tuple[str, ...], tuple[str, ...]], LossAnalysis
-]
 # () -> (unresolved hazard IDs, unresolved constraint IDs) of the review in force.
 UnresolvedReviewIds = Callable[[], tuple[frozenset[str], frozenset[str]]]
 
@@ -211,7 +211,7 @@ def post_review_correction_scope(
 
 def _exempt_unresolved(
     report: HazardGraphDensityReport,
-    unresolved: UnresolvedReviewIds | None,
+    unresolved: UnresolvedReviewIds,
 ) -> tuple[HazardGraphDensityReport, tuple[str, ...]]:
     """Remove records the review explicitly marked unresolved from the checks.
 
@@ -219,8 +219,6 @@ def _exempt_unresolved(
     grounded edge.  Only that record is exempt: a kept record left without its
     partner is still a structural failure.
     """
-    if unresolved is None:
-        return report, ()
     hazards, constraints = unresolved()
     kept_hazards, exempt_hazards = _partition_unresolved(
         report.hazards_without_constraint,
@@ -253,46 +251,44 @@ def _partition_unresolved(
 
 
 def verify_reviewed_density(
-    reviewed: LossAnalysis,
+    outcome: ReviewOutcome,
     *,
     run_dir: Path,
-    draft: LossAnalysis | None = None,
-    correct: ReviewCorrection | None = None,
-    unresolved: UnresolvedReviewIds | None = None,
-) -> LossAnalysis:
+    draft: LossAnalysis,
+    correct: ReviewCorrection,
+) -> ReviewOutcome:
     """Re-run the offline density checks on the reviewed graph.
 
     The Stage 2 semantic review may reword hazards/constraints or replace
     constraint hazard edges, so the persisted reviewed graph is re-checked
-    before it replaces the canonical ``loss-analysis.yaml``.  ``unresolved``
-    returns the hazard and constraint IDs the review in force marks
-    unresolved; a missing edge on exactly those records is recorded as a
-    post-review advisory instead of a failure.  When the review
-    breaks a structural check and the caller supplies the pre-review
-    ``draft`` and ``correct``, the review gets
-    :data:`POST_REVIEW_CORRECTION_ROUNDS` correction round: ``correct``
+    before it replaces the canonical ``loss-analysis.yaml``.  The outcome's
+    review names the hazard and constraint records it marks unresolved; a
+    missing edge on exactly those records is recorded as a post-review
+    advisory instead of a failure.  When the review breaks a structural check,
+    it gets :data:`POST_REVIEW_CORRECTION_ROUNDS` correction round: ``correct``
     receives the failing checks and the hazard and constraint IDs of
-    :func:`post_review_correction_scope`, and returns the re-reviewed graph
-    or raises :class:`StageError` when the correction cannot be made.  Every
-    report and correction round is recorded in the gates artifact;
-    structural failures left after the last round fail closed with the exact
-    still-failing checks, while subject mismatches are recorded as
-    post-review advisories.  Returns the graph that passed the checks.
+    :func:`post_review_correction_scope`, and returns the corrected outcome or
+    raises :class:`StageError` when the correction cannot be made.  Every
+    report and correction round is recorded in the gates artifact; structural
+    failures left after the last round come back on the returned outcome with
+    the exact still-failing checks, while subject mismatches are recorded as
+    post-review advisories.  Returns the outcome holding the graph in force and
+    its verdict.
     """
     report, exempted = _exempt_unresolved(
-        check_hazard_graph_density(reviewed), unresolved
+        check_hazard_graph_density(outcome.loss_analysis),
+        outcome.review.unresolved_ids,
     )
     first_report = report
     corrections: list[dict] = []
     correction_error: str | None = None
-    if not report.passed and correct is not None and draft is not None:
-        reviewed, report, exempted, correction_error = _run_post_review_corrections(
-            reviewed,
+    if not report.passed:
+        outcome, report, exempted, correction_error = _run_post_review_corrections(
+            outcome,
             report,
             exempted,
             draft=draft,
             correct=correct,
-            unresolved=unresolved,
             corrections_out=corrections,
         )
     write_post_review_density(
@@ -302,37 +298,39 @@ def verify_reviewed_density(
         corrections=corrections,
         exempted=exempted,
     )
-    if not report.passed:
-        message = "hazard graph density gate failed after review: " + "; ".join(
-            report.failing_checks
-        )
-        if corrections and report is not first_report:
-            message += " (after one review correction round)"
-        elif correction_error is not None:
-            message += f" (review correction failed: {correction_error})"
-        raise LossAnalysisGateError(
+    if report.passed:
+        return outcome
+    message = "hazard graph density gate failed after review: " + "; ".join(
+        report.failing_checks
+    )
+    if corrections and report is not first_report:
+        message += " (after one review correction round)"
+    elif correction_error is not None:
+        message += f" (review correction failed: {correction_error})"
+    return replace(
+        outcome,
+        failure=LossAnalysisGateError(
             stage="stage_2",
             step="semantic_review",
             message=message,
             gate="hazard_graph_density",
             failing_checks=report.failing_checks,
-        )
-    return reviewed
+        ),
+    )
 
 
 def _run_post_review_corrections(
-    reviewed: LossAnalysis,
+    outcome: ReviewOutcome,
     report: HazardGraphDensityReport,
     exempted: tuple[str, ...],
     *,
     draft: LossAnalysis,
     correct: ReviewCorrection,
-    unresolved: UnresolvedReviewIds | None,
     corrections_out: list[dict],
-) -> tuple[LossAnalysis, HazardGraphDensityReport, tuple[str, ...], str | None]:
+) -> tuple[ReviewOutcome, HazardGraphDensityReport, tuple[str, ...], str | None]:
     """Run the bounded post-review correction rounds and record each one.
 
-    Returns the latest graph, its report, its exempted checks, and the
+    Returns the latest outcome, its report, its exempted checks, and the
     correction error when a round raised :class:`StageError`.
     """
     first_report = report
@@ -354,9 +352,10 @@ def _run_post_review_corrections(
                     "error": str(exc),
                 }
             )
-            return reviewed, report, exempted, str(exc)
+            return outcome, report, exempted, str(exc)
         after, exempted = _exempt_unresolved(
-            check_hazard_graph_density(corrected), unresolved
+            check_hazard_graph_density(corrected.loss_analysis),
+            corrected.review.unresolved_ids,
         )
         corrections_out.append(
             revision_round_record(
@@ -366,10 +365,10 @@ def _run_post_review_corrections(
                 original=first_report,
             )
         )
-        reviewed, report = corrected, after
+        outcome, report = corrected, after
         if report.passed:
             break
-    return reviewed, report, exempted, None
+    return outcome, report, exempted, None
 
 
 def gate_loss_analysis(
