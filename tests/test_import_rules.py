@@ -576,7 +576,15 @@ SYSTEM_MODEL_LAYERS: dict[str, int] = {
     # heuristics check and is shared by the derivation and the orchestrator.
     "publication": 1,
     "loss_analysis": 1,
+    # The gate's artifact writer: typed reports in, YAML and repair records
+    # out, no model client.
+    "loss_analysis_gate_publication": 1,
+    # The gate's orchestration: it runs the bounded rounds and the failure
+    # policy, and imports the runner and the publication module.
     "loss_analysis_gates": 2,
+    # The three revision calls and their corrections: a model client and a
+    # graph in, a validated graph or a stage error out.
+    "loss_analysis_gate_runner": 2,
     "risk_coverage_review": 2,
     "profile": 1,
     "target_evidence": 0,

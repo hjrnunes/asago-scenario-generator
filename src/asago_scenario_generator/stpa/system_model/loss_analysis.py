@@ -497,6 +497,18 @@ class _Stage1aRevisionPatch(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+# Public aliases for the revision request models.  The gate runner imports
+# these names instead of the private definitions, which keep their class names
+# so the request schema name recorded with every prompt does not change.  The
+# underscored names stay importable for one cycle.
+ProviderObligation = _ProviderObligation
+RevisionHazardEdit = _RevisionHazardEdit
+RevisionHazardAddition = _RevisionHazardAddition
+RevisionConstraintEdit = _RevisionConstraintEdit
+RevisionConstraintAddition = _RevisionConstraintAddition
+Stage1aRevisionPatch = _Stage1aRevisionPatch
+
+
 def _in_boundary_statements(
     risk_actionability: RiskActionabilityRecord | None,
 ) -> dict[str, tuple[str, str]]:

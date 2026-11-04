@@ -38,7 +38,8 @@ actuators and no sensors, so most *possible* rows have no producer field.
 **Layers.**
 
 - **Wire**: decoding and validating a model response. Stage 1a is
-  `stpa/system_model/loss_analysis.py` and `loss_analysis_gates.py`; Stage 2
+  `stpa/system_model/loss_analysis.py` (the request models and the first
+  call) and `loss_analysis_gate_runner.py` (the revision calls); Stage 2
   is `stpa/system_model/control_structure.py` (Calls 1, 2a, 2b, 3); ICA slot
   filling is `stpa/obligation_aware/provider.py` and `slot_filling.py`;
   scenarios are `stpa/scenario_prod/`.

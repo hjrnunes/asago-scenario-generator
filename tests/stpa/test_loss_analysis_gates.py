@@ -38,6 +38,9 @@ from asago_scenario_generator.stpa.system_model.loss_analysis import (
     _Stage1aRevisionPatch,
 )
 from asago_scenario_generator.stpa.system_model import (
+    loss_analysis_gate_runner as runner_module,
+)
+from asago_scenario_generator.stpa.system_model import (
     loss_analysis_gates as gates_module,
 )
 from tests.helpers.calls_log import read_calls_jsonl
@@ -938,7 +941,7 @@ class TestRunSp1Gates:
                 raise ValueError(rejections.pop())
             _validate_revision(prior, draft)
 
-        monkeypatch.setattr(gates_module, "_validate_revision", validate_once)
+        monkeypatch.setattr(runner_module, "_validate_revision", validate_once)
         client = setup_sp1_mock_client()
         client.set_response_for(
             LossAnalysisDraft,

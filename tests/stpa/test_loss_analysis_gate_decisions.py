@@ -17,7 +17,10 @@ import pytest
 from asago_scenario_generator.stpa.infra.llm_helpers import StageError
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
-from asago_scenario_generator.stpa.system_model import loss_analysis_gates
+from asago_scenario_generator.stpa.system_model import (
+    loss_analysis_gate_runner,
+    loss_analysis_gates,
+)
 from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
 from asago_scenario_generator.stpa.system_model.loss_analysis import (
     _Stage1aRevisionPatch,
@@ -247,7 +250,7 @@ class TestTheGateFollowsTheDecision:
 
     def test_the_revision_call_raises_the_stop_reasons(self, tmp_path, monkeypatch):
         monkeypatch.setattr(
-            loss_analysis_gates,
+            loss_analysis_gate_runner,
             "decide_revision_call",
             lambda *args, **kwargs: Stop(reason="the decision stopped the call"),
         )
@@ -272,7 +275,7 @@ class TestTheGateFollowsTheDecision:
         self, tmp_path, monkeypatch
     ) -> None:
         monkeypatch.setattr(
-            loss_analysis_gates,
+            loss_analysis_gate_runner,
             "decide_stated_rule_round",
             lambda *args, **kwargs: KeepPrior(reason="the decision kept the graph"),
         )
@@ -307,7 +310,9 @@ class TestTheGateFollowsTheDecision:
             return Stop(reason=decision.findings.failing_checks[0])
 
         monkeypatch.setattr(
-            loss_analysis_gates, "decide_density_round", stop_after_the_first_round
+            loss_analysis_gate_runner,
+            "decide_density_round",
+            stop_after_the_first_round,
         )
         client = MockLLMClient()
         patch = _sc2_edit_patch(
@@ -335,7 +340,7 @@ class TestTheGateFollowsTheDecision:
     def test_the_revision_policy_is_built_from_the_correction_decision(
         self, monkeypatch
     ) -> None:
-        monkeypatch.setattr(loss_analysis_gates, "REVISION_VALIDATION_RETRIES", 0)
+        monkeypatch.setattr(loss_analysis_gate_runner, "REVISION_VALIDATION_RETRIES", 0)
 
         policy = _revision_policy(TemplateLoader(PROMPTS_DIR))
 
@@ -345,7 +350,7 @@ class TestTheGateFollowsTheDecision:
     def test_the_revision_policy_names_the_scope_the_decision_carries(self) -> None:
         decision = decide_correction(
             scope=REVISION_CORRECTION_SCOPE,
-            retries=loss_analysis_gates.REVISION_VALIDATION_RETRIES,
+            retries=loss_analysis_gate_runner.REVISION_VALIDATION_RETRIES,
         )
 
         assert isinstance(decision, Correct)
