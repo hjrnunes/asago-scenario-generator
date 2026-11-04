@@ -8,6 +8,13 @@ normalize the citation evidence.  The caller runs its own validators
 immediately after acceptance, so every path keeps its own failure messages and
 repair records.
 
+This module also owns the acceptance decision for a revised graph.  A revision
+that fails only the class-ownership check loses the added constraints that
+take over a hazard another behavior class cites alone
+(:func:`_trim_failed_class_ownership`); that decision reads the prior graph
+and the revision's records, so it lives here rather than in the model call
+that produced them.
+
 The repair model is a required argument.  A missing model once made the
 re-check silently do nothing; nothing can skip it now.
 """
@@ -21,6 +28,13 @@ from pydantic import BaseModel, ValidationError
 from asago_scenario_generator.stpa.models.loss_analysis import (
     LossAnalysis,
     LossAnalysisDraft,
+    SecurityConstraint,
+)
+from asago_scenario_generator.stpa.system_model.loss_analysis_gate_checks import (
+    UNCLASSIFIED,
+    HazardGraphDensityReport,
+    _declared_class,
+    check_hazard_graph_density,
 )
 
 # A citing loss that accounts for more than this many risk cards weakens
@@ -166,3 +180,112 @@ def accept_stage1a_draft(
     accepted = authority(draft) if authority is not None else draft
     record_warnings(normalize(accepted), warnings)
     return accepted
+
+
+def _fails_only_class_ownership(report: HazardGraphDensityReport) -> bool:
+    return not report.passed and not (
+        report.losses_without_hazard
+        or report.constraints_without_hazard
+        or report.hazards_without_constraint
+    )
+
+
+def _sole_citing_classes(analysis: LossAnalysis) -> dict[str, str]:
+    """Map each hazard that one classified behavior class alone cites to it."""
+    classes: dict[str, set[str]] = {}
+    for constraint in analysis.security_constraints:
+        for hazard_id in constraint.related_hazards:
+            classes.setdefault(hazard_id, set()).add(_declared_class(constraint))
+    return {
+        hazard_id: next(iter(cited))
+        for hazard_id, cited in classes.items()
+        if len(cited) == 1 and UNCLASSIFIED not in cited
+    }
+
+
+def _trimmed_graph(
+    revised: LossAnalysis, kept: list[SecurityConstraint], orphaned: set[str]
+) -> LossAnalysis:
+    return LossAnalysis.model_validate(
+        {
+            "risk_card_losses": revised.risk_card_losses,
+            "use_case_losses": revised.use_case_losses,
+            "hazards": [h for h in revised.hazards if h.hazard_id not in orphaned],
+            "security_constraints": kept,
+            "risk_dispositions": revised.risk_dispositions,
+        }
+    )
+
+
+def _cross_class_hazards(
+    constraint: SecurityConstraint, sole: dict[str, str]
+) -> list[str]:
+    """The hazards *constraint* cites that a different class cites alone."""
+    declared = _declared_class(constraint)
+    return [h for h in constraint.related_hazards if sole.get(h, declared) != declared]
+
+
+def _cross_class_record(
+    constraint_id: str, clashes: list[str], sole: dict[str, str]
+) -> dict:
+    owners = ", ".join(sorted({sole[h] for h in clashes}))
+    return {
+        "record": "security_constraint_addition",
+        "constraint_id": constraint_id,
+        "error": f"it cites hazard {', '.join(clashes)}, which {owners} "
+        "constraints cite alone, so the revised graph leaves that behavior "
+        "class without a hazard of its own",
+    }
+
+
+def _trim_cross_class_additions(
+    prior: LossAnalysis, revised: LossAnalysis
+) -> tuple[LossAnalysis, list[dict]]:
+    """Drop added constraints that cite a hazard another class cites alone.
+
+    Prior constraints stay as they are.  A new hazard only a trimmed
+    constraint cited goes with it.  Returns *revised* and no records when no
+    added constraint cites such a hazard.
+    """
+    sole = _sole_citing_classes(prior)
+    prior_ids = {c.constraint_id for c in prior.security_constraints}
+    kept: list[SecurityConstraint] = []
+    dropped: list[dict] = []
+    cited_by_dropped: set[str] = set()
+    for constraint in revised.security_constraints:
+        clashes = _cross_class_hazards(constraint, sole)
+        if constraint.constraint_id in prior_ids or not clashes:
+            kept.append(constraint)
+            continue
+        cited_by_dropped.update(constraint.related_hazards)
+        dropped.append(_cross_class_record(constraint.constraint_id, clashes, sole))
+    if not dropped:
+        return revised, []
+    still_cited = {h for c in kept for h in c.related_hazards}
+    prior_hazards = {h.hazard_id for h in prior.hazards}
+    orphaned = cited_by_dropped - still_cited - prior_hazards
+    return _trimmed_graph(revised, kept, orphaned), dropped
+
+
+def _trim_failed_class_ownership(
+    prior: LossAnalysis,
+    revised: LossAnalysis,
+    density: HazardGraphDensityReport,
+) -> tuple[LossAnalysis, HazardGraphDensityReport, list[dict]]:
+    """Repair a revision that fails only the class-ownership check.
+
+    The model cites a hazard it declared for another behavior class, so the
+    class that owned that hazard has none of its own.  Trimming the added
+    constraints that do so is the repair; the trimmed graph replaces
+    *revised* only when it still adds something and passes the density
+    checks.  Otherwise the result is *revised* and *density*, unchanged.
+    """
+    if not _fails_only_class_ownership(density):
+        return revised, density, []
+    trimmed, dropped = _trim_cross_class_additions(prior, revised)
+    if not dropped or trimmed == prior:
+        return revised, density, []
+    trimmed_density = check_hazard_graph_density(trimmed)
+    if not trimmed_density.passed:
+        return revised, density, []
+    return trimmed, trimmed_density, dropped

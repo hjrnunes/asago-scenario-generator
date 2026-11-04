@@ -556,11 +556,16 @@ SYSTEM_MODEL_LAYERS: dict[str, int] = {
     "id_normalization": 0,
     "loss_analysis_repair": 0,
     # The one acceptance order (re-check, authority merge, citation
-    # normalization) shared by the first reply, the cleanup and the repair.
+    # normalization) shared by the first reply, the cleanup and the repair,
+    # plus the acceptance repair that trims a cross-class revision.
     "loss_analysis_acceptance": 0,
     # The pure check layer behind the Stage 1a gate: a graph in, typed
     # findings out, no model client and no run directory.
     "loss_analysis_gate_checks": 0,
+    # The gate's revision decisions as values: a graph, its findings and the
+    # records it dropped in, one of six named outcomes out; no model client
+    # and no writes.
+    "loss_analysis_gate_decisions": 0,
     "repair_ids": 0,
     "rule_span_repair": 0,
     "quote_normalization": 0,

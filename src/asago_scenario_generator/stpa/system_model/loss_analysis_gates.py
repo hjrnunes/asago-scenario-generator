@@ -12,6 +12,13 @@ hazard graph is dense enough to tell scenarios apart:
 The fixed-rule subject-phrase check remains recorded evidence, but a mismatch
 is advisory and does not block the structural gate.
 
+Each revision round ends in a named decision from
+:mod:`asago_scenario_generator.stpa.system_model.loss_analysis_gate_decisions`:
+the gate accepts the revision, keeps it without the records it broke, keeps
+the prior graph, asks for another round, or stops the run.  The rules that
+produce those values are pure; this module makes the calls and writes the
+evidence.
+
 A graph with a failing structural check receives a bounded revision request
 that reports the exact failing checks; a response that fails validation gets
 one correction call.  A valid revision that still fails a structural check
@@ -66,17 +73,30 @@ from asago_scenario_generator.stpa.system_model.loss_analysis import (
     _RevisionHazardEdit,
     _Stage1aRevisionPatch,
 )
+from asago_scenario_generator.stpa.system_model.loss_analysis_acceptance import (
+    _trim_failed_class_ownership,
+)
 from asago_scenario_generator.stpa.system_model.loss_analysis_gate_checks import (
-    UNCLASSIFIED,
+    UNCLASSIFIED as UNCLASSIFIED,
     BehaviorClassOwnHazardCheck as BehaviorClassOwnHazardCheck,
     ConstraintSubjectCheck as ConstraintSubjectCheck,
     HazardGraphDensityReport,
     RiskAccountingReport,
-    _declared_class,
     check_hazard_graph_density,
     check_loss_analysis_graph,
     check_risk_accounting as check_risk_accounting,
     extract_subject_phrases as extract_subject_phrases,
+)
+from asago_scenario_generator.stpa.system_model.loss_analysis_gate_decisions import (
+    Accept,
+    Correct,
+    KeepPrior,
+    Revise,
+    Stop,
+    decide_correction,
+    decide_density_round,
+    decide_revision_call,
+    decide_stated_rule_round,
 )
 from asago_scenario_generator.stpa.system_model.loss_analysis_repair import (
     RepairRecord,
@@ -100,6 +120,8 @@ from pydantic_core import ErrorDetails, InitErrorDetails
 STEP_GRAPH_REVISION = "hazard_graph_revision"
 GATES_ARTIFACT = "loss-analysis-gates.yaml"
 REVISION_VALIDATION_RETRIES = 1
+# What a failed graph-revision reply may correct when it earns the request.
+REVISION_CORRECTION_SCOPE = "the graph revision reply"
 # A valid revision that still fails a structural check gets one further round
 # on the revised graph; the gate stays fail-closed after the last round.
 GRAPH_REVISION_ROUNDS = 2
@@ -1589,6 +1611,9 @@ def _run_density_revision(
     current = progress.loss_analysis
     current_density = density
     round_attempts: list[list[_RevisionAttempt]] = []
+    decision: Accept | Revise | Stop = Stop(
+        reason="; ".join(density.failing_checks), findings=density
+    )
     for round_number in range(1, GRAPH_REVISION_ROUNDS + 1):
         attempts: list[_RevisionAttempt] = []
         round_attempts.append(attempts)
@@ -1641,7 +1666,13 @@ def _run_density_revision(
             original=density,
         )
         current = revised
-        if current_density.passed:
+        decision = decide_density_round(
+            revised,
+            current_density,
+            round_number=round_number,
+            rounds=GRAPH_REVISION_ROUNDS,
+        )
+        if not isinstance(decision, Revise):
             break
     # Retain the unrevised graph on failure; the stage error carries every
     # still-failing check for the run manifest.
@@ -1651,9 +1682,9 @@ def _run_density_revision(
             inputs.repair_record,
             inputs.run_dir,
             recorded,
-            accepted=current_density.passed,
+            accepted=isinstance(decision, Accept),
         )
-    if current_density.passed:
+    if isinstance(decision, Accept):
         progress.revision_applied = True
         progress.loss_analysis = current
         progress.failing = []
@@ -1823,8 +1854,11 @@ def _run_stated_rule_revision(
     Two repairs keep a revision that would otherwise fail.  Records whose
     ``rule_span`` is not in their rule are dropped after the correction call.
     A revision that fails only the class-ownership check loses the added
-    constraints that cite a hazard another behavior class cites alone
-    (see :func:`_trim_failed_class_ownership`).
+    constraints that cite a hazard another behavior class cites alone; the
+    acceptance module owns that repair
+    (:func:`asago_scenario_generator.stpa.system_model.loss_analysis_acceptance._trim_failed_class_ownership`).
+    The round then asks :func:`decide_stated_rule_round` what to keep: the
+    revision, the revision without those records, or the prior graph.
     """
     attempts: list[_RevisionAttempt] = []
     warnings: list[str] = []
@@ -1885,12 +1919,20 @@ def _run_stated_rule_revision(
     dropped = [*attempts[-1].dropped, *trimmed]
     if dropped:
         record["dropped_records"] = dropped
-    reason = _revision_rejection(revised, revised_density, check)
-    _record_revision_span_repairs(
-        repair_record, run_dir, attempts, accepted=reason is None
+    decision = decide_stated_rule_round(
+        revised,
+        rejection=_revision_rejection(revised, revised_density, check),
+        records=tuple(dropped),
     )
-    if reason is not None:
-        return rejected(reason, record, call_count)
+    _record_revision_span_repairs(
+        repair_record,
+        run_dir,
+        attempts,
+        accepted=not isinstance(decision, KeepPrior),
+    )
+    if isinstance(decision, KeepPrior):
+        return rejected(decision.reason, record, call_count)
+    revised = decision.analysis
     accepted_attempt = attempts[-1]
     warnings.extend(accepted_attempt.warnings)
     warnings.extend(
@@ -1922,115 +1964,6 @@ def _revision_rejection(
         return check(revised)
     except Exception as exc:  # noqa: BLE001 - this revision is advisory
         return f"revision check failed: {type(exc).__name__}: {exc}"
-
-
-def _fails_only_class_ownership(report: HazardGraphDensityReport) -> bool:
-    return not report.passed and not (
-        report.losses_without_hazard
-        or report.constraints_without_hazard
-        or report.hazards_without_constraint
-    )
-
-
-def _sole_citing_classes(analysis: LossAnalysis) -> dict[str, str]:
-    """Map each hazard that one classified behavior class alone cites to it."""
-    classes: dict[str, set[str]] = {}
-    for constraint in analysis.security_constraints:
-        for hazard_id in constraint.related_hazards:
-            classes.setdefault(hazard_id, set()).add(_declared_class(constraint))
-    return {
-        hazard_id: next(iter(cited))
-        for hazard_id, cited in classes.items()
-        if len(cited) == 1 and UNCLASSIFIED not in cited
-    }
-
-
-def _trimmed_graph(
-    revised: LossAnalysis, kept: list[SecurityConstraint], orphaned: set[str]
-) -> LossAnalysis:
-    return LossAnalysis.model_validate(
-        {
-            "risk_card_losses": revised.risk_card_losses,
-            "use_case_losses": revised.use_case_losses,
-            "hazards": [h for h in revised.hazards if h.hazard_id not in orphaned],
-            "security_constraints": kept,
-            "risk_dispositions": revised.risk_dispositions,
-        }
-    )
-
-
-def _cross_class_hazards(
-    constraint: SecurityConstraint, sole: dict[str, str]
-) -> list[str]:
-    """The hazards *constraint* cites that a different class cites alone."""
-    declared = _declared_class(constraint)
-    return [h for h in constraint.related_hazards if sole.get(h, declared) != declared]
-
-
-def _cross_class_record(
-    constraint_id: str, clashes: list[str], sole: dict[str, str]
-) -> dict:
-    owners = ", ".join(sorted({sole[h] for h in clashes}))
-    return {
-        "record": "security_constraint_addition",
-        "constraint_id": constraint_id,
-        "error": f"it cites hazard {', '.join(clashes)}, which {owners} "
-        "constraints cite alone, so the revised graph leaves that behavior "
-        "class without a hazard of its own",
-    }
-
-
-def _trim_cross_class_additions(
-    prior: LossAnalysis, revised: LossAnalysis
-) -> tuple[LossAnalysis, list[dict]]:
-    """Drop added constraints that cite a hazard another class cites alone.
-
-    Prior constraints stay as they are.  A new hazard only a trimmed
-    constraint cited goes with it.  Returns *revised* and no records when no
-    added constraint cites such a hazard.
-    """
-    sole = _sole_citing_classes(prior)
-    prior_ids = {c.constraint_id for c in prior.security_constraints}
-    kept: list[SecurityConstraint] = []
-    dropped: list[dict] = []
-    cited_by_dropped: set[str] = set()
-    for constraint in revised.security_constraints:
-        clashes = _cross_class_hazards(constraint, sole)
-        if constraint.constraint_id in prior_ids or not clashes:
-            kept.append(constraint)
-            continue
-        cited_by_dropped.update(constraint.related_hazards)
-        dropped.append(_cross_class_record(constraint.constraint_id, clashes, sole))
-    if not dropped:
-        return revised, []
-    still_cited = {h for c in kept for h in c.related_hazards}
-    prior_hazards = {h.hazard_id for h in prior.hazards}
-    orphaned = cited_by_dropped - still_cited - prior_hazards
-    return _trimmed_graph(revised, kept, orphaned), dropped
-
-
-def _trim_failed_class_ownership(
-    prior: LossAnalysis,
-    revised: LossAnalysis,
-    density: HazardGraphDensityReport,
-) -> tuple[LossAnalysis, HazardGraphDensityReport, list[dict]]:
-    """Repair a revision that fails only the class-ownership check.
-
-    The model cites a hazard it declared for another behavior class, so the
-    class that owned that hazard has none of its own.  Trimming the added
-    constraints that do so is the repair; the trimmed graph replaces
-    *revised* only when it still adds something and passes the density
-    checks.  Otherwise the result is *revised* and *density*, unchanged.
-    """
-    if not _fails_only_class_ownership(density):
-        return revised, density, []
-    trimmed, dropped = _trim_cross_class_additions(prior, revised)
-    if not dropped or trimmed == prior:
-        return revised, density, []
-    trimmed_density = check_hazard_graph_density(trimmed)
-    if not trimmed_density.passed:
-        return revised, density, []
-    return trimmed, trimmed_density, dropped
 
 
 def _record_revision_span_repairs(
@@ -2150,6 +2083,10 @@ def _run_graph_revision_call(
     Each parsed attempt is appended to ``attempts_out`` with its own warnings
     and ``rule_span`` repairs, so only the accepted attempt's evidence is
     applied.
+
+    The reply is judged by :func:`decide_revision_call`, which decides whether
+    the call accepts the graph, keeps it without the records it dropped, or
+    stops the run with the decision's reason.
     """
     system_prompt = template_loader.render_prompt(
         "stage1a_graph_revision_system.j2", stated_rules=bool(stated_rules)
@@ -2220,6 +2157,7 @@ def _run_graph_revision_call(
         result_validator=validate_revision,
     )
     revised = outcome.value
+    records: tuple[dict, ...] = ()
     if revised is None and drop_defective_records:
         revised = _revision_without_defective_records(
             loss_analysis,
@@ -2227,19 +2165,28 @@ def _run_graph_revision_call(
             outcome.failure,
             addition_only=addition_only,
         )
-    if revised is None:
+        if revised is not None:
+            records = tuple(attempts_out[-1].dropped)
+    decision = decide_revision_call(
+        revised,
+        error=_revision_failure_message(outcome.error, attempts_out[first_attempt:]),
+        records=records,
+    )
+    if isinstance(decision, Stop):
         raise StageError(
             stage=STAGE,
             step=STEP_GRAPH_REVISION,
-            message=_revision_failure_message(
-                outcome.error, attempts_out[first_attempt:]
-            ),
+            message=decision.reason,
         )
-    return _revised_analysis(loss_analysis, revised)
+    return _revised_analysis(loss_analysis, decision.analysis)
 
 
 def _revision_policy(template_loader: TemplateLoader) -> CorrectionPolicy:
     """The graph-revision correction: one request, also for an undecodable reply."""
+    decision = decide_correction(
+        scope=REVISION_CORRECTION_SCOPE, retries=REVISION_VALIDATION_RETRIES
+    )
+    retries = decision.retries if isinstance(decision, Correct) else 0
 
     def feedback(error: Exception) -> str:
         if isinstance(error, json.JSONDecodeError):
@@ -2247,11 +2194,11 @@ def _revision_policy(template_loader: TemplateLoader) -> CorrectionPolicy:
         return REVISION_CORRECTION_FEEDBACK
 
     return CorrectionPolicy(
-        validation_retries=REVISION_VALIDATION_RETRIES,
+        validation_retries=retries,
         feedback=feedback,
         include_schema=False,
         include_response=True,
-        correct_undecodable=True,
+        correct_undecodable=retries > 0,
     )
 
 

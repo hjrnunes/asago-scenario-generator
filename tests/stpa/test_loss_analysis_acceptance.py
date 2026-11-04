@@ -20,8 +20,10 @@ from asago_scenario_generator.stpa.infra.llm import LLMResult
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.models.loss_analysis import (
     Hazard,
+    LossAnalysis,
     LossAnalysisDraft,
 )
+from asago_scenario_generator.stpa.system_model import loss_analysis_gates
 from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
 from asago_scenario_generator.stpa.system_model.loss_analysis import (
     DeterministicCleanup,
@@ -37,6 +39,7 @@ from asago_scenario_generator.stpa.system_model.loss_analysis import (
     normalize_disposition_citations,
 )
 from asago_scenario_generator.stpa.system_model.loss_analysis_acceptance import (
+    _trim_cross_class_additions,
     accept_stage1a_draft,
 )
 from asago_scenario_generator.stpa.system_model.loss_analysis_repair import (
@@ -46,6 +49,7 @@ from asago_scenario_generator.stpa.system_model.loss_analysis_repair import (
     run_targeted_repair,
     salvage_corrected_reply,
 )
+from tests.fixtures.sp1 import load_sp1_fixture
 from tests.helpers.stpa_builders import make_risk_cards
 from tests.stpa.sp1_helpers import MockLLMClient
 
@@ -403,3 +407,74 @@ def test_a_gap_draft_keeps_no_dispositions_after_salvage(tmp_path) -> None:
     assert draft.risk_dispositions == []
     assert report.dropped_dispositions
     _Stage1aGapRepairDraft.model_validate(draft.model_dump(mode="json"))
+
+
+def _classed_prior() -> LossAnalysis:
+    """SC-1 (disclosure) alone cites H-1; SC-2 (unauthorized_write) cites H-2."""
+    payload = load_sp1_fixture("loss_analysis", "two_losses")
+    payload["security_constraints"][0]["behavior_class"] = "disclosure"
+    payload["security_constraints"][1]["behavior_class"] = "unauthorized_write"
+    return LossAnalysis.model_validate(payload)
+
+
+def _revised_with_cross_class_addition() -> LossAnalysis:
+    """Add SC-3 (wrong_information) citing H-1, plus an H-3 only it cites."""
+    payload = load_sp1_fixture("loss_analysis", "two_losses")
+    payload["security_constraints"][0]["behavior_class"] = "disclosure"
+    payload["security_constraints"][1]["behavior_class"] = "unauthorized_write"
+    payload["hazards"].append(
+        {
+            "hazard_id": "H-3",
+            "description": "The agent cites a superseded policy.",
+            "related_losses": ["L-2"],
+        }
+    )
+    payload["security_constraints"].append(
+        {
+            "constraint_id": "SC-3",
+            "rule": "The agent must cite only current policies.",
+            "applies_when": [],
+            "related_hazards": ["H-1", "H-3"],
+            "behavior_class": "wrong_information",
+        }
+    )
+    return LossAnalysis.model_validate(payload)
+
+
+class TestTheCrossClassTrimLivesHere:
+    """A revision that takes over another class's hazard loses the addition."""
+
+    def test_the_trim_is_defined_in_this_module(self) -> None:
+        assert (
+            _trim_cross_class_additions.__module__
+            == "asago_scenario_generator.stpa.system_model."
+            "loss_analysis_acceptance"
+        )
+        assert not hasattr(loss_analysis_gates, "_trim_cross_class_additions")
+
+    def test_an_addition_that_takes_over_the_only_hazard_is_dropped(self) -> None:
+        prior = _classed_prior()
+
+        trimmed, dropped = _trim_cross_class_additions(
+            prior, _revised_with_cross_class_addition()
+        )
+
+        assert trimmed.security_constraints == prior.security_constraints
+        assert [hazard.hazard_id for hazard in trimmed.hazards] == ["H-1", "H-2"]
+        assert dropped == [
+            {
+                "record": "security_constraint_addition",
+                "constraint_id": "SC-3",
+                "error": "it cites hazard H-1, which disclosure constraints "
+                "cite alone, so the revised graph leaves that behavior class "
+                "without a hazard of its own",
+            }
+        ]
+
+    def test_a_graph_with_no_cross_class_addition_is_kept_whole(self) -> None:
+        prior = _classed_prior()
+
+        trimmed, dropped = _trim_cross_class_additions(prior, prior)
+
+        assert trimmed == prior
+        assert dropped == []
