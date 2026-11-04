@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 """Copy the contract documents the shared core owns into its package.
 
-``asago_contracts_core`` reads the composed schema and the ownership rules from
-its own data directory, so a reader needs no checkout, and its tests read the
-handoff kit and the condition vectors from the package too, so they run after
+``asago_contracts_core`` reads the scenario-handoff contract from its own data
+directory, so a reader needs no checkout, and its tests read the whole contract
+tree and the condition vectors from the package too, so they run after
 extraction. The producer's ``data/contracts/`` stays the authority; this script
-copies it, and ``tests/test_contracts_core_data.py`` fails when the copies
-differ.
+copies it byte for byte, removes what the authority no longer holds, and
+``tests/test_contracts_core_data.py`` fails when the copies differ.
+
+The installed copy keeps the authority's layout, so ``<data>/scenario-handoff``
+is the contract directory and ``<data>`` is the spec root the reader loads.
 
 Usage:
     python3 scripts/sync_handoff_package_data.py [--check]
@@ -27,30 +30,22 @@ PACKAGE = ROOT / "packages" / "asago-contracts-core"
 DATA = PACKAGE / "src" / "asago_contracts_core" / "data"
 TEST_DATA = PACKAGE / "tests" / "data"
 
-# The documents the package reads at run time.
-FILES = (
-    (CONTRACTS / "scenario-handoff" / "ownership-rules.json", DATA / "ownership-rules.json"),
-    (
-        CONTRACTS / "scenario-handoff" / "handoff-v5" / "schema.json",
-        DATA / "handoff-v5" / "schema.json",
-    ),
-    # The same rules in the kit layout the validator tests load.
-    (
-        CONTRACTS / "scenario-handoff" / "ownership-rules.json",
-        TEST_DATA / "scenario-handoff" / "ownership-rules.json",
-    ),
-)
-
-# The directories the package's tests read.
+# The directories the package reads, and the same trees in its test data.
 TREES = (
-    (
-        CONTRACTS / "scenario-handoff" / "handoff-v5",
-        TEST_DATA / "scenario-handoff" / "handoff-v5",
-    ),
+    (CONTRACTS / "scenario-handoff", DATA / "scenario-handoff"),
+    (CONTRACTS / "scenario-handoff", TEST_DATA / "scenario-handoff"),
     (
         CONTRACTS / "tool-call-condition" / "tool-call-condition-v2" / "vectors",
         TEST_DATA / "tool-call-condition" / "tool-call-condition-v2" / "vectors",
     ),
+)
+
+
+# Paths an earlier layout installed; the whole-contract copy replaces them.
+RETIRED = (
+    DATA / "ownership-rules.json",
+    DATA / "handoff-v5",
+    TEST_DATA / "scenario-handoff" / "handoff-v5",
 )
 
 
@@ -72,30 +67,53 @@ def _tree_drift(source: Path, target: Path) -> list[Path]:
     return sorted(drifted | (target_files - source_files))
 
 
+def _sync_tree(source: Path, target: Path) -> None:
+    """Write the source's files into the target and drop what it no longer holds."""
+
+    source_files = _files(source)
+    for relative in sorted(source_files):
+        destination = target / relative
+        if destination.is_file() and destination.read_bytes() == (
+            source / relative
+        ).read_bytes():
+            continue
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source / relative, destination)
+    if not target.is_dir():
+        return
+    for relative in sorted(_files(target) - source_files):
+        (target / relative).unlink()
+    for directory in sorted(
+        (path for path in target.rglob("*") if path.is_dir()),
+        key=lambda path: len(path.parts),
+        reverse=True,
+    ):
+        if not any(directory.iterdir()):
+            directory.rmdir()
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--check", action="store_true", help="report drift, write nothing")
     args = parser.parse_args(argv)
 
-    drifted: list[tuple[str, Path, Path]] = []
-    for source, target in FILES:
-        content = source.read_bytes()
-        if target.is_file() and target.read_bytes() == content:
-            continue
-        drifted.append(("differs", source, target))
-        if not args.check:
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes(content)
-
+    drifted: list[Path] = []
     for source, target in TREES:
-        for relative in _tree_drift(source, target):
-            drifted.append(("differs", source / relative, target / relative))
-            if not args.check:
-                (target / relative).parent.mkdir(parents=True, exist_ok=True)
-                shutil.copyfile(source / relative, target / relative)
+        drifted.extend(target / relative for relative in _tree_drift(source, target))
+        if not args.check:
+            _sync_tree(source, target)
+    for retired in RETIRED:
+        if not retired.exists():
+            continue
+        drifted.append(retired)
+        if not args.check:
+            if retired.is_dir():
+                shutil.rmtree(retired)
+            else:
+                retired.unlink()
 
-    for action, _source, target in drifted:
-        print(f"{action}: {target.relative_to(ROOT)}")
+    for target in drifted:
+        print(f"differs: {target.relative_to(ROOT)}")
     return 1 if args.check and drifted else 0
 
 

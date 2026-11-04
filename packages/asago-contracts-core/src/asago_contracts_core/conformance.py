@@ -1,12 +1,12 @@
 """Run a handoff kit's conformance cases against the shared rules.
 
-``handoff-v5/conformance-cases.json`` names, for each rule, the valid handoffs or
-companions that must pass, the invalid ones that must be reported, and the
-violation codes the rule owns. An invalid case passes only when one of its
-violations carries one of those codes, so a violation from another rule cannot
-hide a case that no longer exercises the rule it names. The runner reads the kit
-directory it is given, so it runs the producer's contract tree and a consumer's
-mirror alike.
+``scenario-handoff-v5/cases/conformance-cases.json`` names, for each rule, the
+valid handoffs or companions that must pass, the invalid ones that must be
+reported, and the violation codes the rule owns. An invalid case passes only
+when one of its violations carries one of those codes, so a violation from
+another rule cannot hide a case that no longer exercises the rule it names. The
+runner reads the kit directory it is given, so it runs the producer's contract
+tree and a consumer's mirror alike.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from .companion import feature_violations
-from .contract import KIT_V5, ContractError, load_contract
+from .contract import CASES_NAME, KIT_V5, ContractError, load_contract
 from .violation import Violation
 from .violations import validate_handoff
 
@@ -64,13 +64,15 @@ def load_conformance_cases(contract_dir: Path) -> list[ConformanceCase]:
     """Read a kit's manifest and every document it names."""
 
     kit_dir = Path(contract_dir) / KIT_V5
-    manifest = _read_json(kit_dir / "conformance-cases.json", "conformance manifest")
+    manifest = _read_json(
+        kit_dir / CASES_NAME / "conformance-cases.json", "conformance manifest"
+    )
     cases: list[ConformanceCase] = []
     for rule in manifest["rules"]:
         codes = _rule_codes(rule)
         for valid, paths in ((True, rule["valid"]), (False, rule["invalid"])):
             for path in paths:
-                cases.append(_case(rule, valid, path, kit_dir, codes))
+                cases.append(_case(rule, valid, path, kit_dir / CASES_NAME, codes))
     return cases
 
 

@@ -27,7 +27,8 @@ from asago_scenario_generator.stpa.scenario_prod.handoff import (
 
 ROOT = Path(__file__).resolve().parents[2]
 CONTRACT_ROOT = ROOT / "data/contracts/scenario-handoff"
-KIT = CONTRACT_ROOT / "handoff-v5"
+VERSION_DIR = CONTRACT_ROOT / "scenario-handoff-v5"
+KIT = VERSION_DIR / "cases"
 
 VALID = {
     "adversarial-condition-omitted.json",
@@ -168,7 +169,9 @@ def _load(relative: str) -> dict:
 
 
 def _validator() -> Draft202012Validator:
-    return Draft202012Validator(_load("schema.json"))
+    return Draft202012Validator(
+        json.loads((VERSION_DIR / "schema.json").read_text(encoding="utf-8"))
+    )
 
 
 def test_the_kit_holds_exactly_the_listed_fixtures() -> None:

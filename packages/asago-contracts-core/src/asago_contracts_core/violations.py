@@ -1,23 +1,35 @@
 """The scenario-handoff-v5 rules: one implementation for every reader.
 
-``validate_handoff`` runs the ownership walker, the composed schema, and the
-rules the schema cannot state. Each break is a :class:`Violation` carrying the
-producer's code, the dotted path of the break, and a reason. Ownership codes
-come first, in first-seen order; a payload the schema rejects reports one code
-per field it rejects, and a schema-valid payload reports the first rule it
-breaks.
+``validate_handoff`` reads the document through the installed spec first, then
+runs the ownership walker, the composed schema, and the rules the schema cannot
+state. Each break is a :class:`Violation` carrying the producer's code, the
+dotted path of the break, and a reason. Ownership codes come first, in
+first-seen order; a payload the schema rejects reports one code per field it
+rejects, and a schema-valid payload reports the first rule it breaks.
 """
 
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from typing import Any
 
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import best_match
 
 from .boundary import ownership_violations
-from .contract import HANDOFF_SCHEMA_VERSION_V5, Contract, packaged_contract
+from .contract import (
+    HANDOFF_SCHEMA_VERSION_V5,
+    Contract,
+    installed_specs,
+    packaged_contract,
+)
+from .envelope import (
+    ENVELOPE_FIELD,
+    InvalidDocumentError,
+    UnknownFieldError,
+    UnsupportedVersionError,
+)
 from .shape import attack_shape_violation
 from .violation import Violation
 
@@ -54,11 +66,46 @@ def validate_handoff(
     """
 
     contract = contract or packaged_contract()
-    ownership = ownership_violations(payload, contract)
-    breaks = schema_violations(payload, contract) or hand_rule_violations(
-        payload, contract
+    _read_through_installed_spec(payload, contract)
+    document = _without_envelope(payload)
+    ownership = ownership_violations(document, contract)
+    breaks = schema_violations(document, contract) or hand_rule_violations(
+        document, contract
     )
     return [*ownership, *breaks]
+
+
+def _without_envelope(document: Any) -> Any:
+    """Return *document* without the envelope the reader already answered.
+
+    The envelope states who wrote the document and under which spec, not the
+    handoff's content, so its fields are not extra handoff fields.
+    """
+
+    if not isinstance(document, Mapping) or ENVELOPE_FIELD not in document:
+        return document
+    return {name: value for name, value in document.items() if name != ENVELOPE_FIELD}
+
+
+def _read_through_installed_spec(document: Any, contract: Contract) -> None:
+    """Select the installed spec for *document* before its rules run.
+
+    An enveloped document is answered by the reader alone: a version, a
+    requirement or a digest it refuses has no producer code. A legacy document
+    that names another version, an unknown field or another break keeps the
+    code the kit records for it, so the walk below words it exactly as before.
+    """
+
+    if not isinstance(document, Mapping):
+        return
+    specs = contract.specs or installed_specs()
+    if ENVELOPE_FIELD in document:
+        specs.read(document)
+        return
+    try:
+        specs.read(document)
+    except (InvalidDocumentError, UnknownFieldError, UnsupportedVersionError):
+        return
 
 
 def schema_violations(
@@ -75,6 +122,7 @@ def schema_violations(
     if not isinstance(payload, dict):
         return [_ROOT_REFUSAL]
     contract = contract or packaged_contract()
+    payload = _without_envelope(payload)
     if payload.get("schema_version") != HANDOFF_SCHEMA_VERSION_V5:
         return list(OTHER_VERSION_VIOLATIONS)
     found: dict[str, Violation] = {}

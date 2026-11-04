@@ -51,13 +51,19 @@ from .conformance import (
     run_conformance,
 )
 from .contract import (
+    CASES_NAME,
+    CONTRACT,
+    CONTRACT_DIR,
     HANDOFF_SCHEMA_VERSION_V5,
     KIT_V5,
+    VERSION,
     Contract,
     ContractError,
+    installed_specs,
     load_contract,
     load_ownership_rules,
     packaged_contract,
+    read_handoff,
 )
 from .envelope import (
     CORE_VERSION,
@@ -99,10 +105,13 @@ from .violations import (
 )
 
 __all__ = [
+    "CASES_NAME",
     "CHANNEL_DIRECT",
     "CHANNEL_FORGED",
     "CHANNEL_INDIRECT",
     "CONSUMER_ENCODING",
+    "CONTRACT",
+    "CONTRACT_DIR",
     "CORE_VERSION",
     "DETECTED",
     "ENVELOPE_FIELD",
@@ -136,6 +145,7 @@ __all__ = [
     "UnknownFieldError",
     "UnknownRequirementError",
     "UnsupportedVersionError",
+    "VERSION",
     "Violation",
     "attack_shape_violation",
     "canonical_json",
@@ -148,6 +158,7 @@ __all__ = [
     "feature_violations",
     "framed_digest",
     "hand_rule_violations",
+    "installed_specs",
     "iter_boundary_strings",
     "load_conformance_cases",
     "load_contract",
@@ -156,6 +167,7 @@ __all__ = [
     "normalize_unicode",
     "ownership_violations",
     "packaged_contract",
+    "read_handoff",
     "read_envelope",
     "render_feature_text",
     "run_conformance",

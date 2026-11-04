@@ -4,7 +4,7 @@
 keys and prose patterns. The handoff module reads it, the contract lock pins
 it, and the consumer mirrors it byte for byte, so both sides enforce one list.
 
-``handoff-v5/conformance-cases.json`` names the cases for the five rules the
+``scenario-handoff-v5/cases/conformance-cases.json`` names the cases for the five rules the
 consumer re-implements: safe-call arguments, the procedure chain, reference
 order, the ownership walker, and the feature companion. Each rule carries at
 least one valid and one invalid case, and the consumer runs the same manifest.
@@ -33,7 +33,7 @@ RULES = (
     Path(__file__).resolve().parents[2]
     / "data/contracts/scenario-handoff/ownership-rules.json"
 )
-KIT = RULES.parent / "handoff-v5"
+KIT = RULES.parent / "scenario-handoff-v5" / "cases"
 RULE_NAMES = frozenset(
     {
         "safe-call-arguments",
@@ -129,7 +129,7 @@ def test_the_kit_carries_a_case_for_each_of_the_five_rules() -> None:
     rules = manifest["rules"]
 
     assert manifest["contract"] == "scenario-handoff"
-    assert manifest["kit"] == "handoff-v5"
+    assert manifest["kit"] == "scenario-handoff-v5"
     assert {rule["name"] for rule in rules} == RULE_NAMES
     assert len(rules) == len(RULE_NAMES)
     for rule in rules:

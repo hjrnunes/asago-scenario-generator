@@ -18,7 +18,8 @@ from asago_contracts_core import (
 )
 
 CONTRACT_DIR = Path(__file__).resolve().parent / "data" / "scenario-handoff"
-KIT_DIR = CONTRACT_DIR / "handoff-v5"
+VERSION_DIR = CONTRACT_DIR / "scenario-handoff-v5"
+KIT_DIR = VERSION_DIR / "cases"
 
 
 def _load(path: Path) -> Any:
@@ -26,9 +27,8 @@ def _load(path: Path) -> Any:
 
 
 def _copy_kit(tmp_path: Path) -> Path:
-    kit = tmp_path / "scenario-handoff"
-    shutil.copytree(KIT_DIR, kit / "handoff-v5")
-    shutil.copy(CONTRACT_DIR / "ownership-rules.json", kit / "ownership-rules.json")
+    kit = tmp_path / CONTRACT_DIR.name
+    shutil.copytree(CONTRACT_DIR, kit)
     return kit
 
 
@@ -53,7 +53,7 @@ def test_every_invalid_case_reports_a_code_its_rule_names() -> None:
 
 def test_an_invalid_case_with_an_unrelated_violation_fails(tmp_path: Path) -> None:
     kit = _copy_kit(tmp_path)
-    kit_dir = kit / "handoff-v5"
+    kit_dir = kit / "scenario-handoff-v5" / "cases"
     (kit_dir / "invalid" / "taxonomy-unsorted-references.json").write_bytes(
         (kit_dir / "invalid" / "safe-call-argument-blank-name.json").read_bytes()
     )
@@ -69,7 +69,7 @@ def test_an_invalid_case_with_an_unrelated_violation_fails(tmp_path: Path) -> No
 
 def test_a_manifest_rule_without_codes_is_refused(tmp_path: Path) -> None:
     kit = _copy_kit(tmp_path)
-    manifest_path = kit / "handoff-v5" / "conformance-cases.json"
+    manifest_path = kit / "scenario-handoff-v5" / "cases" / "conformance-cases.json"
     manifest = _load(manifest_path)
     del manifest["rules"][0]["codes"]
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
@@ -116,7 +116,13 @@ def test_a_companion_rule_names_the_first_break() -> None:
 
 def test_a_broken_companion_fails_only_its_own_case(tmp_path: Path) -> None:
     kit = _copy_kit(tmp_path)
-    path = kit / "handoff-v5" / "companions" / "feature-companion-holds.json"
+    path = (
+        kit
+        / "scenario-handoff-v5"
+        / "cases"
+        / "companions"
+        / "feature-companion-holds.json"
+    )
     entry = _load(path)
     entry["text"] = "Feature: something else\n"
     path.write_text(json.dumps(entry), encoding="utf-8")

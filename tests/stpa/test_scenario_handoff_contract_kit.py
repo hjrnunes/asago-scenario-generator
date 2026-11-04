@@ -19,6 +19,7 @@ import pytest
 from jsonschema import Draft202012Validator
 from pydantic import ValidationError
 
+from asago_contracts_core import spec_digest
 from asago_scenario_generator.models.canonical import canonical_json_bytes
 from asago_scenario_generator.stpa.observation_contract import SafeObservableOutcome
 from asago_scenario_generator.stpa.scenario_prod.handoff import (
@@ -35,11 +36,18 @@ from asago_scenario_generator.stpa.scenario_prod.handoff import (
 from asago_scenario_generator.stpa.scenario_prod.handoff_schema import handoff_schema
 
 CONTRACT_ROOT = Path(__file__).resolve().parents[2] / "data/contracts/scenario-handoff"
-KIT = CONTRACT_ROOT / "handoff-v5"
+VERSION_DIR = CONTRACT_ROOT / "scenario-handoff-v5"
+# The cases live under the version directory; these tests read them by their
+# paths relative to it.
+KIT = VERSION_DIR / "cases"
 
 
 def _lock() -> dict:
     return json.loads((CONTRACT_ROOT / "CONTRACT.lock").read_text(encoding="utf-8"))
+
+
+def _spec() -> dict:
+    return json.loads((VERSION_DIR / "spec.json").read_text(encoding="utf-8"))
 
 
 def _digests() -> dict:
@@ -51,11 +59,47 @@ def _expected_violations() -> dict:
 
 
 def _schema() -> dict:
-    return json.loads((KIT / "schema.json").read_text(encoding="utf-8"))
+    return json.loads((VERSION_DIR / "schema.json").read_text(encoding="utf-8"))
 
 
 def _valid_fixtures() -> list[Path]:
     return sorted((KIT / "valid").glob("*.json"))
+
+
+def test_the_spec_identifies_the_published_version() -> None:
+    spec = _spec()
+    schema_bytes = (VERSION_DIR / "schema.json").read_bytes()
+
+    assert (spec["contract"], spec["version"]) == (
+        "scenario-handoff",
+        HANDOFF_SCHEMA_VERSION_V5,
+    )
+    assert (spec["status"], spec["envelope"]) == ("published", "optional")
+    assert spec["supports"] == []
+    assert spec["extensions"] == []
+    assert spec["schema"] == "schema.json"
+    assert spec["cases"] == "cases"
+    assert spec["docs"] == "README.md"
+    body = {name: value for name, value in spec.items() if name != "spec_digest"}
+    assert spec["spec_digest"] == spec_digest(body, schema_bytes)
+
+
+def test_the_lock_pins_every_file_beside_it() -> None:
+    lock = _lock()
+    on_disk = {
+        path.relative_to(CONTRACT_ROOT).as_posix(): hashlib.sha256(
+            path.read_bytes()
+        ).hexdigest()
+        for path in CONTRACT_ROOT.rglob("*")
+        if path.is_file() and path.name != "CONTRACT.lock"
+    }
+
+    assert (lock["authority"], lock["contract"]) == (
+        "asago-scenario-generator",
+        "scenario-handoff",
+    )
+    assert lock["schema_version"] == HANDOFF_SCHEMA_VERSION_V5
+    assert lock["files"] == on_disk
 
 
 def test_schema_matches_the_published_handoff_schema() -> None:
@@ -63,7 +107,7 @@ def test_schema_matches_the_published_handoff_schema() -> None:
 
 
 def test_schema_file_is_the_published_schema_byte_for_byte() -> None:
-    committed = (KIT / "schema.json").read_text(encoding="utf-8")
+    committed = (VERSION_DIR / "schema.json").read_text(encoding="utf-8")
 
     rendered = json.dumps(handoff_schema(), indent=2) + "\n"
 
@@ -81,13 +125,12 @@ def test_the_published_schema_adds_only_its_rule_assertions() -> None:
 
 
 def test_kit_introduces_no_fourth_scenario_representation() -> None:
-    lock = _lock()
-    assert lock["representations"] == ["narrative", "attack_path", "gherkin"]
+    representations = {"narrative", "attack_path", "gherkin"}
     # Every top-level schema property is one of the three representations or a
-    # named metadata field; the envelope adds nothing else.
-    declared = set(lock["representations"]) | set(lock["metadata_fields"])
+    # named metadata field; the spec adds nothing else.
     schema = _schema()
-    assert set(schema["properties"]) == declared
+    assert representations <= set(schema["properties"])
+    assert set(schema["properties"]) == set(ScenarioHandoffV5.model_fields)
     assert schema["additionalProperties"] is False
 
 

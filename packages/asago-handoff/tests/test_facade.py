@@ -14,12 +14,13 @@ from asago_contracts_core import (
     condition_eval as core_condition_eval,
     conformance as core_conformance,
     contract as core_contract,
+    envelope as core_envelope,
     shape as core_shape,
     violation as core_violation,
     violations as core_violations,
 )
 from asago_handoff import boundary, companion, condition_eval, conformance, contract
-from asago_handoff import shape, violation, violations
+from asago_handoff import envelope, shape, violation, violations
 
 CONTRACT_DIR = (
     Path(__file__).resolve().parents[3] / "data" / "contracts" / "scenario-handoff"
@@ -34,6 +35,7 @@ CONTRACT_DIR = (
         (condition_eval, core_condition_eval),
         (conformance, core_conformance),
         (contract, core_contract),
+        (envelope, core_envelope),
         (shape, core_shape),
         (violation, core_violation),
         (violations, core_violations),

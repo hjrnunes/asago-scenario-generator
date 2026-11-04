@@ -312,7 +312,7 @@ def test_handoff_without_failure_criterion_or_safe_alternative_is_rejected() -> 
     alternative fails validation — the ownership boundary requires both."""
     fixture_path = (
         Path(__file__).resolve().parents[2]
-        / "data/contracts/scenario-handoff/handoff-v5/valid/"
+        / "data/contracts/scenario-handoff/scenario-handoff-v5/cases/valid/"
         "adversarial-observed-record.json"
     )
     document = json.loads(fixture_path.read_text(encoding="utf-8"))

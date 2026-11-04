@@ -18,7 +18,8 @@ ownership boundary enforced by the negative tests.
 Schema version: the producer publishes :class:`ScenarioHandoffV5`
 (:data:`HANDOFF_SCHEMA_VERSION_V5`), whose fields beyond the shared envelope
 ``handoff_v5`` derives. The kit lives in
-``data/contracts/scenario-handoff/handoff-v5/``, and the consumer vendors it
+``data/contracts/scenario-handoff/scenario-handoff-v5/``, and the consumer
+vendors it
 byte-for-byte, the same discipline as ``data/contracts/target-profile/``.
 """
 

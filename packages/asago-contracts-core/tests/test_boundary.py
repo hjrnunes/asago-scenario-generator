@@ -17,7 +17,7 @@ from asago_contracts_core import (
 
 from asago_contracts_core.contract import DATA_DIR
 
-CONTRACT_DIR = DATA_DIR
+CONTRACT_DIR = DATA_DIR / "scenario-handoff"
 
 
 def _codes(payload: Any) -> list[str]:

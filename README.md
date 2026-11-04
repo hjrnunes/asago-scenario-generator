@@ -834,7 +834,7 @@ The normal product `generate` publishes the versioned **scenario handoff**: the 
 necessary metadata defined by
 [`data/contracts/scenario-handoff/`](data/contracts/scenario-handoff/)
 (schema `scenario-handoff-v5`, kit in
-`data/contracts/scenario-handoff/handoff-v5/`), written under `scenarios/`
+`data/contracts/scenario-handoff/scenario-handoff-v5/`), written under `scenarios/`
 with its matching `.feature` companion. Each run builds an AND/OR attack tree
 per scenario and publishes the scenario's `attack_path` (format
 `attack-path-v1`) reduced from it, beside the shared envelope fields and six

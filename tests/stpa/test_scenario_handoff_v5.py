@@ -76,7 +76,8 @@ from tests.stpa.test_narration import (
 
 ROOT = Path(__file__).resolve().parents[2]
 CONTRACT_ROOT = ROOT / "data/contracts/scenario-handoff"
-KIT = CONTRACT_ROOT / "handoff-v5"
+KIT = CONTRACT_ROOT / "scenario-handoff-v5"
+CASES = KIT / "cases"
 SCHEMA = json.loads((KIT / "schema.json").read_text(encoding="utf-8"))
 
 PERSISTENCE = {"id": "AML.TA0006", "name": "Persistence"}
@@ -544,7 +545,7 @@ def test_a_run_publishes_the_taxonomy_block_it_is_given(tmp_path: Path) -> None:
 
 
 def _kit(relative: str) -> dict:
-    return json.loads((KIT / relative).read_text(encoding="utf-8"))
+    return json.loads((CASES / relative).read_text(encoding="utf-8"))
 
 
 def test_the_v5_schema_file_is_the_published_schema_byte_for_byte() -> None:
@@ -554,7 +555,7 @@ def test_the_v5_schema_file_is_the_published_schema_byte_for_byte() -> None:
 
 
 def test_the_kit_holds_the_attack_path_case_and_names_every_invalid_case() -> None:
-    invalid = {path.name for path in (KIT / "invalid").glob("*.json")}
+    invalid = {path.name for path in (CASES / "invalid").glob("*.json")}
 
     assert "schema-attack-tree-not-object.json" not in invalid
     assert "schema-attack-path-not-object.json" in invalid
@@ -562,7 +563,7 @@ def test_the_kit_holds_the_attack_path_case_and_names_every_invalid_case() -> No
 
 
 @pytest.mark.parametrize(
-    "path", sorted((KIT / "valid").glob("*.json")), ids=lambda path: path.name
+    "path", sorted((CASES / "valid").glob("*.json")), ids=lambda path: path.name
 )
 def test_each_valid_v5_fixture_passes_every_check(path: Path) -> None:
     payload = json.loads(path.read_text(encoding="utf-8"))
@@ -577,7 +578,7 @@ def test_each_valid_v5_fixture_passes_every_check(path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    "path", sorted((KIT / "invalid").glob("*.json")), ids=lambda path: path.name
+    "path", sorted((CASES / "invalid").glob("*.json")), ids=lambda path: path.name
 )
 def test_each_invalid_v5_fixture_is_rejected_with_its_recorded_codes(
     path: Path,
@@ -618,16 +619,10 @@ def test_the_schema_states_the_tactic_technique_pairing() -> None:
 def test_the_lock_pins_the_v5_kit_only() -> None:
     lock = json.loads((CONTRACT_ROOT / "CONTRACT.lock").read_text(encoding="utf-8"))
 
-    assert lock["handoff_schema_version"] == HANDOFF_SCHEMA_VERSION_V5
-    assert lock["digest_domain"] == HANDOFF_DIGEST_DOMAIN_V5
+    assert lock["schema_version"] == HANDOFF_SCHEMA_VERSION_V5
     assert "additional_versions" not in lock
-    assert lock["metadata_fields"] == [
-        name
-        for name in ScenarioHandoffV5.model_fields
-        if name not in {"narrative", "attack_path", "gherkin"}
-    ]
     assert {name.split("/")[0] for name in lock["files"]} == {
-        "handoff-v5",
+        "scenario-handoff-v5",
         "ownership-rules.json",
     }
 

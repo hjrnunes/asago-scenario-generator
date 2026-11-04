@@ -14,6 +14,8 @@ import hashlib
 import json
 from pathlib import Path
 
+from asago_contracts_core import spec_digest
+
 from asago_scenario_generator.report.scenario_panels import feature_matches
 from asago_scenario_generator.stpa.discriminating_condition import (
     DiscriminatingCondition,
@@ -25,7 +27,6 @@ from asago_scenario_generator.stpa.scenario_prod.condition_check import (
 )
 from asago_scenario_generator.stpa.models.attack_shape import AttackShape
 from asago_scenario_generator.stpa.scenario_prod.handoff import (
-    HANDOFF_DIGEST_DOMAIN_V5,
     HANDOFF_SCHEMA_VERSION_V5,
     HYPOTHESIS_FRAMING,
     ScenarioHandoffV5,
@@ -45,7 +46,10 @@ from asago_scenario_generator.stpa.scenario_prod.tool_call_binding import (
 )
 
 ROOT = Path(__file__).resolve().parents[1] / "data/contracts/scenario-handoff"
-KIT_NAME = "handoff-v5"
+CONTRACT_NAME = "scenario-handoff"
+KIT_NAME = HANDOFF_SCHEMA_VERSION_V5
+CASES_NAME = "cases"
+README_NAME = "README.md"
 
 
 def dump(value: object) -> str:
@@ -1605,7 +1609,7 @@ def conformance_cases(companions: dict[str, dict]) -> dict:
     """
     companion_cases = sorted(companions)
     return {
-        "contract": "scenario-handoff",
+        "contract": CONTRACT_NAME,
         "kit": KIT_NAME,
         "rules": [
             {
@@ -1688,20 +1692,82 @@ def conformance_cases(companions: dict[str, dict]) -> dict:
     }
 
 
-REPRESENTATIONS = ["narrative", "attack_path", "gherkin"]
+README = """# scenario-handoff
 
+The frozen scenario handoff a producer run publishes as `scenarios/SCN-*.yaml`: the
+narrative, the attack path, the Gherkin, the semantic failure criterion, the safe alternative
+and the metadata the consumer needs. The producer owns this contract; the consumer's
+`contracts/scenario-handoff/` and the shared core's package data carry byte-identical copies.
 
-def metadata_fields() -> list[str]:
-    return [
-        name
-        for name in ScenarioHandoffV5.model_fields
-        if name not in set(REPRESENTATIONS)
-    ]
+## The document
+
+`scenario-handoff-v5` states one failure: the unsafe outcome, the procedure chain that leads
+to it, the taxonomy references, the preconditions, the discriminating condition and the tool
+call the failure needs. `schema.json` is the runtime schema, `cases/` holds the valid and
+invalid documents with `expected-violations.json`, the conformance manifest and the feature
+companions, and `spec.json` names them.
+
+## The reader rules
+
+`asago_contracts_core.validate_handoff` runs the ownership walker and then the composed
+schema: the safe-outcome call rules, the procedure tactic/technique pairing, the reference
+order and uniqueness, the closed enums and the non-blank text. A break is one `Violation`
+carrying the producer's code (`schema_violation:<field>`, `artifact_design_field:<name>`,
+`prose_hiding:<pattern>` or `feature_companion:`), which both repositories' runners report
+unchanged.
+
+## The split
+
+`spec.json` and `schema.json` are the runtime spec. Their bytes are the contract's identity:
+`spec_digest` covers `spec.json` without its digest field and the bytes of `schema.json`.
+Changing a case or this README never changes the identity.
+
+## Identity and compatibility
+
+A document written from the self-identifying envelope carries one `contract` block:
+
+```json
+{
+  "contract": {
+    "id": "scenario-handoff",
+    "version": "scenario-handoff-v5",
+    "spec_digest": "sha256:...",
+    "requires": [],
+    "provenance": {
+      "writer": "asago_scenario_generator.stpa.scenario_prod.handoff",
+      "writer_version": "0.1.0",
+      "validator_version": "asago-contracts-core 0.1.0"
+    }
+  }
+}
+```
+
+`scenario-handoff-v5` is published with `"envelope": "optional"`, because every recorded
+handoff predates the envelope. A reader accepts a v5 document without one and the same
+document with one. A reader selects one of its installed specs by the document's contract id
+and version, and rejects:
+
+- an unsupported version, with the error listing the supported versions;
+- a `requires` entry the selected spec does not support (v5 supports none);
+- a top-level field outside the schema and the spec's declared extensions;
+- a `spec_digest` that is not exactly the installed spec's, for a draft as for a published
+  version.
+
+`packages/asago-contracts-core` ships the whole contract directory as package data, and
+`packages/asago-contracts-core/tests/test_handoff_contract.py` refuses a copy that differs
+from this directory. `asago_contracts_core.validate_handoff` reads every handoff through the
+installed spec before the hand-written rules, so the producer's Stage 6 check and the
+consumer's input adapter keep their existing error wording.
+
+The orchestrator keeps no copy of this contract and reads `schema_version` directly, so its
+handoff reader stays lenient on purpose.
+"""
 
 
 def write_kit(kit: Path, valid: dict[str, dict], invalid: dict[str, dict]) -> None:
-    (kit / "valid").mkdir(parents=True, exist_ok=True)
-    (kit / "invalid").mkdir(parents=True, exist_ok=True)
+    cases = kit / CASES_NAME
+    (cases / "valid").mkdir(parents=True, exist_ok=True)
+    (cases / "invalid").mkdir(parents=True, exist_ok=True)
     (kit / "schema.json").write_text(
         json.dumps(handoff_schema(), indent=2) + "\n",
         encoding="utf-8",
@@ -1709,12 +1775,12 @@ def write_kit(kit: Path, valid: dict[str, dict], invalid: dict[str, dict]) -> No
     for relative, payload in valid.items():
         assert not handoff_ownership_violations(payload), relative
         assert not handoff_schema_violations(payload), relative
-        (kit / relative).write_text(dump(payload), encoding="utf-8")
+        (cases / relative).write_text(dump(payload), encoding="utf-8")
 
     expected: dict[str, list[str]] = {}
     for relative, payload in invalid.items():
         written = dump(payload)
-        (kit / relative).write_text(written, encoding="utf-8")
+        (cases / relative).write_text(written, encoding="utf-8")
         # Validation reports some codes in key order, so record what a reader
         # of the sorted file sees.
         payload = json.loads(written)
@@ -1723,50 +1789,70 @@ def write_kit(kit: Path, valid: dict[str, dict], invalid: dict[str, dict]) -> No
         )
         assert codes, relative
         expected[relative] = codes
-    (kit / "expected-violations.json").write_text(dump(expected), encoding="utf-8")
+    (cases / "expected-violations.json").write_text(dump(expected), encoding="utf-8")
 
-    (kit / "companions").mkdir(parents=True, exist_ok=True)
+    (cases / "companions").mkdir(parents=True, exist_ok=True)
     companions = companion_payloads(valid)
     for relative, payload in companions.items():
-        (kit / relative).write_text(dump(payload), encoding="utf-8")
+        (cases / relative).write_text(dump(payload), encoding="utf-8")
     manifest = conformance_cases(companions)
     for rule in manifest["rules"]:
         assert rule["valid"] and rule["invalid"], rule["name"]
         for relative in [*rule["valid"], *rule["invalid"]]:
-            assert (kit / relative).is_file(), relative
-    (kit / "conformance-cases.json").write_text(dump(manifest), encoding="utf-8")
+            assert (cases / relative).is_file(), relative
+    (cases / "conformance-cases.json").write_text(dump(manifest), encoding="utf-8")
 
     files = sorted(
-        str(path.relative_to(kit))
-        for path in kit.rglob("*.json")
+        str(path.relative_to(cases))
+        for path in cases.rglob("*.json")
         if path.name != "canonical-digests.json"
     )
     digests = {
-        "content_sha256": {name: sha(kit / name) for name in files},
+        "content_sha256": {name: sha(cases / name) for name in files},
         "handoff_digests": {
             relative: payload["content_digest"] for relative, payload in valid.items()
         },
     }
-    (kit / "canonical-digests.json").write_text(dump(digests), encoding="utf-8")
+    (cases / "canonical-digests.json").write_text(dump(digests), encoding="utf-8")
 
 
-def write_lock(kit: Path) -> None:
-    """Pin every kit file and the ownership rules; keep the descriptive fields."""
+def write_spec(kit: Path) -> None:
+    """Write the runtime spec; its digest covers the spec body and the schema."""
+
+    body = {
+        "contract": CONTRACT_NAME,
+        "version": HANDOFF_SCHEMA_VERSION_V5,
+        "status": "published",
+        "envelope": "optional",
+        "supports": [],
+        "extensions": [],
+        "schema": "schema.json",
+        "cases": CASES_NAME,
+        "docs": README_NAME,
+    }
+    body["spec_digest"] = spec_digest(body, (kit / "schema.json").read_bytes())
+    (kit / "spec.json").write_text(dump(body), encoding="utf-8")
+
+
+def write_readme(kit: Path) -> None:
+    (kit / README_NAME).write_text(README, encoding="utf-8")
+
+
+def write_lock() -> None:
+    """Pin every file of this contract directory beside the lock."""
 
     lock_path = ROOT / "CONTRACT.lock"
     previous = json.loads(lock_path.read_text(encoding="utf-8"))
     files = {
-        str(path.relative_to(ROOT)): sha(path) for path in sorted(kit.rglob("*.json"))
+        str(path.relative_to(ROOT)): sha(path)
+        for path in sorted(ROOT.rglob("*"))
+        if path.is_file() and path.name != "CONTRACT.lock"
     }
-    files["ownership-rules.json"] = sha(ROOT / "ownership-rules.json")
     lock = {
         "authority": previous["authority"],
         "contract": previous["contract"],
-        "digest_domain": HANDOFF_DIGEST_DOMAIN_V5,
         "files": files,
-        "handoff_schema_version": HANDOFF_SCHEMA_VERSION_V5,
-        "metadata_fields": metadata_fields(),
-        "representations": REPRESENTATIONS,
+        "schema_version": HANDOFF_SCHEMA_VERSION_V5,
     }
     lock_path.write_text(json.dumps(lock, indent=2) + "\n", encoding="utf-8")
 
@@ -1775,7 +1861,9 @@ def main() -> None:
     kit = ROOT / KIT_NAME
     valid = valid_payloads(shaped_payloads(BUILDERS))
     write_kit(kit, valid, invalid_payloads(valid))
-    write_lock(kit)
+    write_spec(kit)
+    write_readme(kit)
+    write_lock()
 
 
 if __name__ == "__main__":

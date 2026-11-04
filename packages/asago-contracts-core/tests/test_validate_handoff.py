@@ -20,7 +20,8 @@ from asago_contracts_core import (
 )
 
 CONTRACT_DIR = Path(__file__).resolve().parent / "data" / "scenario-handoff"
-KIT_DIR = CONTRACT_DIR / "handoff-v5"
+VERSION_DIR = CONTRACT_DIR / "scenario-handoff-v5"
+KIT_DIR = VERSION_DIR / "cases"
 
 
 def _load(path: Path) -> Any:
@@ -114,10 +115,8 @@ def test_a_schema_clean_payload_reports_one_hand_rule() -> None:
 
 
 def test_the_contract_can_come_from_a_kit_directory(tmp_path: Path) -> None:
-    kit = tmp_path / "scenario-handoff"
-    (kit / "handoff-v5").mkdir(parents=True)
-    shutil.copy(CONTRACT_DIR / "ownership-rules.json", kit / "ownership-rules.json")
-    shutil.copy(KIT_DIR / "schema.json", kit / "handoff-v5" / "schema.json")
+    kit = tmp_path / CONTRACT_DIR.name
+    shutil.copytree(CONTRACT_DIR, kit)
     contract = load_contract(kit)
     assert (
         validate_handoff(

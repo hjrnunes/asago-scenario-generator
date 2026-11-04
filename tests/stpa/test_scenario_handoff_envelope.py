@@ -32,7 +32,7 @@ from asago_scenario_generator.stpa.scenario_prod.handoff import (
 
 KIT_VALID = (
     Path(__file__).resolve().parents[2]
-    / "data/contracts/scenario-handoff/handoff-v5/valid"
+    / "data/contracts/scenario-handoff/scenario-handoff-v5/cases/valid"
 )
 OTHER_VERSION_CODES = [
     "schema_violation:schema_version",

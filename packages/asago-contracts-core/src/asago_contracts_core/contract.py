@@ -1,9 +1,13 @@
 """The handoff contract documents the shared rules read.
 
-The producer owns ``data/contracts/scenario-handoff/``. This package carries a
-copy of the two documents ``validate_handoff`` reads, so a reader needs no
+The producer owns ``data/contracts/scenario-handoff/``. This package carries the
+whole contract directory, and the envelope schema, so a reader needs no
 checkout. ``scripts/sync_handoff_package_data.py`` copies them and a producer
 test fails when the copies differ.
+
+``installed_specs`` reads the specs the package installs and ``read_handoff``
+reads one handoff through them; ``load_contract`` pairs the selected spec's
+schema with the ownership rules.
 """
 
 from __future__ import annotations
@@ -16,10 +20,18 @@ from functools import cache
 from pathlib import Path
 from typing import Any
 
+from .envelope import ContractSpec, SpecSet, load_specs
+
 HANDOFF_SCHEMA_VERSION_V5 = "scenario-handoff-v5"
-KIT_V5 = "handoff-v5"
+#: The version's directory, as the contract layout names it.
+KIT_V5 = HANDOFF_SCHEMA_VERSION_V5
+CASES_NAME = "cases"
 OWNERSHIP_RULES_NAME = "ownership-rules.json"
+CONTRACT = "scenario-handoff"
+VERSION = HANDOFF_SCHEMA_VERSION_V5
+#: The installed spec root: ``<data>/<contract>/<version>/spec.json``.
 DATA_DIR = Path(__file__).resolve().parent / "data"
+CONTRACT_DIR = DATA_DIR / CONTRACT
 _REGEX_FLAGS = {"IGNORECASE": re.IGNORECASE}
 
 
@@ -34,20 +46,44 @@ class Contract:
     schema: Mapping[str, Any]
     forbidden_keys: frozenset[str]
     forbidden_patterns: tuple[tuple[str, re.Pattern[str]], ...]
+    specs: SpecSet | None = None
+
+
+@cache
+def installed_specs() -> SpecSet:
+    """Return the contract specs this package installs."""
+
+    return load_specs(DATA_DIR)
+
+
+def read_handoff(document: Any) -> ContractSpec:
+    """Read one handoff through the installed scenario-handoff-v5 spec.
+
+    A document that carries the envelope is selected by its contract id and
+    version; a legacy document without one is selected by ``schema_version``.
+    """
+
+    return installed_specs().read(document)
 
 
 def load_contract(contract_dir: Path | None = None) -> Contract:
     """Read the schema and the ownership rules of *contract_dir*.
 
     *contract_dir* is a directory holding ``ownership-rules.json`` and
-    ``handoff-v5/schema.json``, as the producer's contract tree does. Without it,
+    ``scenario-handoff-v5/``, as the producer's contract tree does. Without it,
     the package's own copies are read.
     """
 
-    root = Path(contract_dir) if contract_dir is not None else DATA_DIR
+    root = Path(contract_dir) if contract_dir is not None else CONTRACT_DIR
     rules = load_ownership_rules(root / OWNERSHIP_RULES_NAME)
-    schema = _read_json(root / KIT_V5 / "schema.json", "handoff schema")
-    return Contract(schema=schema, forbidden_keys=rules[0], forbidden_patterns=rules[1])
+    specs = installed_specs() if contract_dir is None else load_specs(root.parent)
+    spec = specs.spec(CONTRACT, VERSION)
+    return Contract(
+        schema=spec.schema,
+        forbidden_keys=rules[0],
+        forbidden_patterns=rules[1],
+        specs=specs,
+    )
 
 
 @cache
@@ -90,13 +126,19 @@ def _read_json(path: Path, label: str) -> Any:
 
 
 __all__ = [
+    "CASES_NAME",
+    "CONTRACT",
+    "CONTRACT_DIR",
     "DATA_DIR",
     "Contract",
     "ContractError",
     "HANDOFF_SCHEMA_VERSION_V5",
     "KIT_V5",
     "OWNERSHIP_RULES_NAME",
+    "VERSION",
+    "installed_specs",
     "load_contract",
     "load_ownership_rules",
     "packaged_contract",
+    "read_handoff",
 ]

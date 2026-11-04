@@ -1,7 +1,8 @@
 """The published scenario-handoff schema: the model's shape plus its rules.
 
 ``ScenarioHandoffV5`` checks the handoff rules in Pydantic validators, but a
-reader that holds only ``handoff-v5/schema.json`` sees the model's shape, not
+reader that holds only ``scenario-handoff-v5/schema.json`` sees the model's shape,
+not
 those checks.  This module states every rule JSON Schema can express as
 ``allOf``/``if``/``then`` assertions (the form ``json_schema_extra`` adds), and
 the generator writes the result as the published schema.  The Pydantic model

@@ -36,7 +36,7 @@ from asago_scenario_generator.stpa.scenario_prod.tool_call_binding import (
 DATA = Path(__file__).resolve().parents[2] / "data/contracts"
 CONTRACT_ROOT = DATA / "tool-call-condition"
 KIT = CONTRACT_ROOT / "tool-call-condition-v2"
-HANDOFF_VALID = DATA / "scenario-handoff/handoff-v5/valid"
+HANDOFF_VALID = DATA / "scenario-handoff/scenario-handoff-v5/cases/valid"
 
 VALUE_OPS = ("eq", "ne", "gt", "ge", "lt", "le", "in", "not_in")
 OUTCOME_REASONS = {

@@ -65,9 +65,16 @@ gives a document the envelope its spec's reader accepts.
 
 ## Rules
 
-- `validate_handoff(doc)` returns a `Violation` for each rule a handoff breaks:
-  the ownership walker's codes first, then the schema's and the rules the
-  schema cannot state.
+- `read_handoff(doc)` reads one handoff through the installed
+  `scenario-handoff-v5` spec: an enveloped document is selected by its contract
+  id and version, a legacy one by its `schema_version`. `installed_specs()`
+  returns the spec set the package carries, and `load_contract(contract_dir)`
+  pairs a selected spec's schema with the ownership rules.
+- `validate_handoff(doc)` reads the document through the installed spec first
+  and then returns a `Violation` for each rule a handoff breaks: the ownership
+  walker's codes first, then the schema's and the rules the schema cannot state.
+  A legacy document keeps the code the kit records for its break; an enveloped
+  document gets the reader's own refusal, since that states a newer contract.
 - `ownership_violations(doc)` and `iter_boundary_strings(doc)` run the
   artifact-design walker alone.
 - `run_conformance(contract_dir)` runs a kit's `conformance-cases.json`. An
@@ -97,13 +104,16 @@ policy combinations the consumer uses for input digests.
 
 ## Data
 
-`src/asago_contracts_core/data/` carries `handoff-v5/schema.json`,
-`ownership-rules.json` and `envelope-v1.schema.json` for the code to read.
-`tests/data/` carries the handoff kit and the tool-call-condition vectors the
-tests run against, so the package tests pass after extraction. The producer's
-`scripts/sync_handoff_package_data.py` copies both sets from `data/contracts/`,
-and the producer's `tests/test_contracts_core_data.py` fails when the copies
-differ.
+`src/asago_contracts_core/data/` is the spec root: it carries the producer's
+whole `scenario-handoff/` contract directory (the `scenario-handoff-v5/` version
+directory with `spec.json`, `schema.json`, `cases/` and `README.md`, plus
+`ownership-rules.json` and `CONTRACT.lock`) and `envelope-v1.schema.json`, for
+the code to read. `installed_specs()` loads the specs from that root.
+`tests/data/` carries the same contract tree and the tool-call-condition
+vectors the tests run against, so the package tests pass after extraction. The
+producer's `scripts/sync_handoff_package_data.py` copies both trees from
+`data/contracts/`, removes the files the authority no longer holds, and the
+producer's `tests/test_contracts_core_data.py` fails when the copies differ.
 
 ## Test and build alone
 

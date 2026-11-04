@@ -63,7 +63,7 @@ reaches no prompt, and a run without SSSOM rows or risk cards omits it. The owne
 scan reads its forbidden keys and prose patterns from `ownership-rules.json`
 beside the kit; the lock pins that file and the consumer mirrors it, so both
 sides enforce one list. `scripts/gen_handoff_kit.py` regenerates the kit and
-the lock; every kit file must come out byte-identical. `handoff-v5/schema.json`
+the lock; every kit file must come out byte-identical. `scenario-handoff-v5/schema.json`
 states the rules JSON Schema can express, composed from the model's own schema,
 so a reader that holds only the schema reaches the verdicts the Pydantic model
 enforces; the rules it cannot state stay model-only. The kit carries the
