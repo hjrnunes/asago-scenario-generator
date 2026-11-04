@@ -14,6 +14,7 @@ import hashlib
 import json
 from pathlib import Path
 
+from asago_scenario_generator.report.scenario_panels import feature_matches
 from asago_scenario_generator.stpa.discriminating_condition import (
     DiscriminatingCondition,
     canonical_comparisons,
@@ -1522,6 +1523,146 @@ def invalid_payloads(valid: dict[str, dict]) -> dict[str, dict]:
     return invalid
 
 
+CONFORMANCE_HANDOFF = "valid/adversarial-direct-single.json"
+COMPANION_VALID = "companions/feature-companion-holds.json"
+#: Each mutation breaks one rule the consumer's ``_companion_mismatch`` checks:
+#: the feature line, the scenario line, the steps in order, or the comment count.
+COMPANION_MUTATIONS = {
+    "feature-line": {"replace": ("Feature:", "Feature: A different behavior")},
+    "scenario-line": {"replace": ("Scenario:", "  Scenario: A different scenario")},
+    "steps": {"drop": "When "},
+    "comments": {"drop": "# Unsafe alternative"},
+}
+
+
+def _mutated_companion(
+    text: str,
+    *,
+    replace: tuple[str, str] | None = None,
+    drop: str | None = None,
+) -> str:
+    """Replace or drop the one line of ``text`` that starts with a prefix."""
+    lines = text.splitlines()
+    if replace is not None:
+        prefix, replacement = replace
+        index = next(
+            index for index, line in enumerate(lines) if line.strip().startswith(prefix)
+        )
+        lines[index] = replacement
+    if drop is not None:
+        index = next(
+            index for index, line in enumerate(lines) if line.strip().startswith(drop)
+        )
+        del lines[index]
+    return "\n".join(lines) + "\n"
+
+
+def companion_payloads(valid: dict[str, dict]) -> dict[str, dict]:
+    """The feature companions: the text the producer writes, and four it refuses."""
+    gherkin = ScenarioHandoffV5.model_validate(valid[CONFORMANCE_HANDOFF]).gherkin
+    text = gherkin.to_feature_text()
+    texts = {"holds": text}
+    texts.update(
+        {
+            name: _mutated_companion(text, **mutation)
+            for name, mutation in COMPANION_MUTATIONS.items()
+        }
+    )
+    for name, companion in texts.items():
+        holds = feature_matches(gherkin, companion)
+        assert holds == (name == "holds"), name
+    return {
+        f"companions/feature-companion-{name}.json": {
+            "handoff": CONFORMANCE_HANDOFF,
+            "text": companion,
+        }
+        for name, companion in texts.items()
+    }
+
+
+def conformance_cases(companions: dict[str, dict]) -> dict:
+    """Name the cases for each rule the consumer re-implements.
+
+    The four payload rules reuse the kit's valid and invalid handoffs. The
+    feature companion has no handoff fixture of its own, so its cases carry the
+    rendered text beside the handoff they belong to.
+    """
+    companion_cases = sorted(companions)
+    return {
+        "contract": "scenario-handoff",
+        "kit": KIT_NAME,
+        "rules": [
+            {
+                "name": "safe-call-arguments",
+                "kind": "handoff",
+                "rule": "A safe observable outcome names each call argument once, with a non-blank name, only when the call is made.",
+                "valid": [
+                    "valid/safe-call-arguments.json",
+                    "valid/safe-call-not-made.json",
+                ],
+                "invalid": [
+                    "invalid/safe-call-argument-blank-name.json",
+                    "invalid/safe-call-argument-value-not-scalar.json",
+                    "invalid/safe-call-made-not-boolean.json",
+                    "invalid/safe-call-not-made-with-arguments.json",
+                ],
+            },
+            {
+                "name": "procedure-chain",
+                "kind": "handoff",
+                "rule": "Procedure steps are S00, S01, ... in order, each leads to the next, and a step names a tactic exactly when it names a technique.",
+                "valid": ["valid/adversarial-direct-multi-turn.json"],
+                "invalid": [
+                    "invalid/v5-procedure-step-id-out-of-order.json",
+                    "invalid/v5-procedure-leads-to-wrong.json",
+                    "invalid/v5-procedure-technique-without-tactic.json",
+                    "invalid/v5-procedure-step-missing-tactic-key.json",
+                ],
+            },
+            {
+                "name": "reference-order",
+                "kind": "handoff",
+                "rule": "Taxonomy references are sorted by scheme and id, and each appears once.",
+                "valid": ["valid/taxonomy-block.json"],
+                "invalid": ["invalid/taxonomy-unsorted-references.json"],
+            },
+            {
+                "name": "ownership-walker",
+                "kind": "handoff",
+                "rule": "No mapping key or string names an artifact-design field or hides one in prose.",
+                "valid": ["valid/adversarial-direct-single.json"],
+                "invalid": [
+                    "invalid/narrative-role-serialization.json",
+                    "invalid/narrative-turn-array.json",
+                    "invalid/ownership-deliver-this-message.json",
+                    "invalid/ownership-dotted-key.json",
+                    "invalid/ownership-judge-prompt.json",
+                    "invalid/ownership-key-name-pattern.json",
+                    "invalid/ownership-oracle-basis-key.json",
+                    "invalid/ownership-oracle-kind-key.json",
+                    "invalid/ownership-oracle-observes-key.json",
+                    "invalid/ownership-system-prompt-is.json",
+                    "invalid/prepared-message-field.json",
+                    "invalid/role-turn-array.json",
+                    "invalid/smuggled-prose.json",
+                    "invalid/stimulus-turn-field.json",
+                ],
+            },
+            {
+                "name": "feature-companion",
+                "kind": "companion",
+                "rule": "A feature file holds the handoff's feature line, scenario line, given, when and then_expected steps in order, and one comment per unsafe alternative.",
+                "valid": [COMPANION_VALID],
+                "invalid": [
+                    relative
+                    for relative in companion_cases
+                    if relative != COMPANION_VALID
+                ],
+            },
+        ],
+    }
+
+
 REPRESENTATIONS = ["narrative", "attack_path", "gherkin"]
 
 
@@ -1558,6 +1699,17 @@ def write_kit(kit: Path, valid: dict[str, dict], invalid: dict[str, dict]) -> No
         assert codes, relative
         expected[relative] = codes
     (kit / "expected-violations.json").write_text(dump(expected), encoding="utf-8")
+
+    (kit / "companions").mkdir(parents=True, exist_ok=True)
+    companions = companion_payloads(valid)
+    for relative, payload in companions.items():
+        (kit / relative).write_text(dump(payload), encoding="utf-8")
+    manifest = conformance_cases(companions)
+    for rule in manifest["rules"]:
+        assert rule["valid"] and rule["invalid"], rule["name"]
+        for relative in [*rule["valid"], *rule["invalid"]]:
+            assert (kit / relative).is_file(), relative
+    (kit / "conformance-cases.json").write_text(dump(manifest), encoding="utf-8")
 
     files = sorted(
         str(path.relative_to(kit))
