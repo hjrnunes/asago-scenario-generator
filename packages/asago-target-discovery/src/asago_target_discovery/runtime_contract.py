@@ -3,8 +3,8 @@
 A declared target states its seed slots, and optionally its user-message
 deliveries and limit overrides, instead of exposing a live endpoint. The
 contract a consumer authors against is the shared base with those statements
-applied, and the result must satisfy the consumer's runtime-contract schema,
-which ``asago_package`` carries.
+applied, and the result must satisfy the consumer's runtime contract, which
+``asago_package`` carries and reads through its installed spec set.
 """
 
 from __future__ import annotations
@@ -14,10 +14,16 @@ import json
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from asago_contracts_core import (
+    ContractEnvelopeError,
+    InvalidDocumentError,
+    UnknownFieldError,
+)
 from asago_package.contract_kit import contract_dir, first_schema_error
+from asago_package.runtime_contract_spec import VERSION, read_runtime_contract
 
 PLANTED_ITEM = "planted_item"
-RUNTIME_CONTRACT_VERSION = "artifact-runtime-contract-v2"
+RUNTIME_CONTRACT_VERSION = VERSION
 
 
 class RuntimeContractViolation(ValueError):
@@ -28,16 +34,28 @@ class RuntimeContractViolation(ValueError):
 def _schema() -> dict[str, Any]:
     """Return the consumer's schema for the contract this builder emits."""
 
-    path = contract_dir("runtime-contract") / f"{RUNTIME_CONTRACT_VERSION}.schema.json"
+    path = contract_dir("runtime-contract") / RUNTIME_CONTRACT_VERSION / "schema.json"
     return json.loads(path.read_text(encoding="utf-8"))
 
 
 def _refuse_violation(contract: Mapping[str, Any]) -> None:
-    violation = first_schema_error(_schema(), contract)
-    if violation is not None:
+    try:
+        read_runtime_contract(contract)
+    except (InvalidDocumentError, UnknownFieldError):
+        # The hand check words the same schema fault with the location the listener
+        # sees; an unknown top-level field is a schema fault here, so both take it.
+        violation = first_schema_error(_schema(), contract)
+        if violation is None:
+            raise
         raise RuntimeContractViolation(
             f"the runtime contract violates {RUNTIME_CONTRACT_VERSION}: {violation}"
-        )
+        ) from None
+    except ContractEnvelopeError as error:
+        # The envelope's own refusals: an unsupported version, an unknown `requires`
+        # entry or a mismatched `spec_digest`.
+        raise RuntimeContractViolation(
+            f"the runtime contract violates {RUNTIME_CONTRACT_VERSION}: {error}"
+        ) from None
 
 
 def declared_runtime_contract(

@@ -230,7 +230,7 @@ def test_an_unknown_base_key_is_refused() -> None:
 
 def test_the_built_contract_passes_the_consumer_schema() -> None:
     schema = json.loads(
-        (contract_dir("runtime-contract") / f"{SCHEMA_VERSION}.schema.json").read_text(
+        (contract_dir("runtime-contract") / SCHEMA_VERSION / "schema.json").read_text(
             "utf-8"
         )
     )

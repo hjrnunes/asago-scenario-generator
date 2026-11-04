@@ -46,6 +46,9 @@ dev = [
 exclude-newer = "7 days"
 
 [tool.uv.sources]
+# The contracts core: the shared handoff validator, canonical JSON, the installed spec
+# reader and the envelope. The app and the target-discovery tests read it.
+asago-contracts-core = { workspace = true }
 asago-handoff = { workspace = true }
 # The report kit's workspace member: the HTML helpers, stylesheet, script and
 # stage-summary schema every report writer renders with.
