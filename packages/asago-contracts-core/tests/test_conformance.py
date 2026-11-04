@@ -20,6 +20,7 @@ from asago_contracts_core import (
 CONTRACT_DIR = Path(__file__).resolve().parent / "data" / "scenario-handoff"
 VERSION_DIR = CONTRACT_DIR / "scenario-handoff-v5"
 KIT_DIR = VERSION_DIR / "cases"
+V6 = "scenario-handoff-v6"
 
 
 def _load(path: Path) -> Any:
@@ -32,10 +33,25 @@ def _copy_kit(tmp_path: Path) -> Path:
     return kit
 
 
-def test_every_conformance_case_passes() -> None:
-    results = run_conformance(CONTRACT_DIR)
+@pytest.mark.parametrize("version", ["scenario-handoff-v5", V6])
+def test_every_conformance_case_passes(version: str) -> None:
+    results = run_conformance(CONTRACT_DIR, version)
     assert [result.case.path for result in results if not result.passed] == []
     assert len(results) == 35
+
+
+@pytest.mark.parametrize("version", ["scenario-handoff-v5", V6])
+def test_the_manifest_rule_without_codes_is_refused(
+    version: str, tmp_path: Path
+) -> None:
+    kit = _copy_kit(tmp_path)
+    manifest_path = kit / version / "cases" / "conformance-cases.json"
+    manifest = _load(manifest_path)
+    del manifest["rules"][0]["codes"]
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    with pytest.raises(ContractError, match="must name a non-empty codes list"):
+        load_conformance_cases(kit, version)
 
 
 def test_every_invalid_case_reports_a_code_its_rule_names() -> None:
@@ -65,17 +81,6 @@ def test_an_invalid_case_with_an_unrelated_violation_fails(tmp_path: Path) -> No
         "schema_violation:safe_observable_outcome"
     ]
     assert result.passed is False
-
-
-def test_a_manifest_rule_without_codes_is_refused(tmp_path: Path) -> None:
-    kit = _copy_kit(tmp_path)
-    manifest_path = kit / "scenario-handoff-v5" / "cases" / "conformance-cases.json"
-    manifest = _load(manifest_path)
-    del manifest["rules"][0]["codes"]
-    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
-
-    with pytest.raises(ContractError, match="must name a non-empty codes list"):
-        load_conformance_cases(kit)
 
 
 def test_the_manifest_names_the_five_rules() -> None:

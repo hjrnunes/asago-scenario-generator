@@ -16,6 +16,7 @@ from enum import StrEnum
 from typing import Annotated, Literal
 
 from pydantic import (
+    AliasChoices,
     BaseModel,
     ConfigDict,
     Field,
@@ -156,7 +157,15 @@ class PlantedItem(_ShapeModel):
 class PartyRelation(_ShapeModel):
     """Who controls the planted item and which actor the benign turns speak as."""
 
-    controller: ItemController
+    # The party field keeps its model-facing name in Python and in the published
+    # v5 schema. Scenario-handoff-v6 writes it as ``controlling_party``, so the
+    # serialization alias renames the document and never the prompts or the
+    # structured-output schema the model answers against. The class docstring
+    # stays v5's, because it is part of the frozen v5 schema.
+    controller: ItemController = Field(
+        validation_alias=AliasChoices("controlling_party", "controller"),
+        serialization_alias="controlling_party",
+    )
     benign_user_actor_ref: ShapeIdentifier | None
 
 

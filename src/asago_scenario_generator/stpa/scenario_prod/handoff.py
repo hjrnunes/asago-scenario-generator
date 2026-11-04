@@ -17,9 +17,11 @@ ownership boundary enforced by the negative tests.
 
 Schema version: the producer publishes :class:`ScenarioHandoffV5`
 (:data:`HANDOFF_SCHEMA_VERSION_V5`), whose fields beyond the shared envelope
-``handoff_v5`` derives. The kit lives in
-``data/contracts/scenario-handoff/scenario-handoff-v5/``, and the consumer
-vendors it
+``handoff_v5`` derives, and :class:`ScenarioHandoffV6`
+(:data:`HANDOFF_SCHEMA_VERSION_V6`), the same document with the party field
+renamed to ``controlling_party`` on the wire and the contract envelope required.
+``generate`` writes v5, so every recorded handoff and prompt stays byte-identical.
+The kits live in ``data/contracts/scenario-handoff/``; the consumer vendors them
 byte-for-byte, the same discipline as ``data/contracts/target-profile/``.
 """
 
@@ -44,6 +46,9 @@ from pydantic import (
     model_validator,
 )
 
+from asago_contracts_core.contract import CONTRACT as HANDOFF_CONTRACT
+from asago_contracts_core.contract import installed_specs
+from asago_contracts_core.envelope import write_envelope
 from asago_handoff import load_ownership_rules as _shared_load_ownership_rules
 from asago_handoff import ownership_violations as _shared_ownership_violations
 
@@ -53,7 +58,7 @@ from asago_scenario_generator.stpa.discriminating_condition import (
     ConditionCheck,
     DiscriminatingCondition,
 )
-from asago_scenario_generator.stpa.infra.yaml_io import write_yaml
+from asago_scenario_generator.stpa.infra.yaml_io import write_yaml_document
 from asago_scenario_generator.stpa.models.loss_analysis import (
     LossAnalysis,
     SecurityConstraint,
@@ -88,6 +93,19 @@ from asago_scenario_generator.stpa.tool_call_condition import (
 
 HANDOFF_SCHEMA_VERSION_V5 = "scenario-handoff-v5"
 HANDOFF_DIGEST_DOMAIN_V5 = "scenario-handoff-v5"
+HANDOFF_SCHEMA_VERSION_V6 = "scenario-handoff-v6"
+HANDOFF_DIGEST_DOMAIN_V6 = "scenario-handoff-v6"
+
+#: Every published version, oldest first, and the digest domain that signs it.
+HANDOFF_SCHEMA_VERSIONS = (HANDOFF_SCHEMA_VERSION_V5, HANDOFF_SCHEMA_VERSION_V6)
+HANDOFF_DIGEST_DOMAINS = {
+    HANDOFF_SCHEMA_VERSION_V5: HANDOFF_DIGEST_DOMAIN_V5,
+    HANDOFF_SCHEMA_VERSION_V6: HANDOFF_DIGEST_DOMAIN_V6,
+}
+
+#: The envelope names the module that composed a document and its package version.
+HANDOFF_WRITER = "asago_scenario_generator.stpa.scenario_prod.handoff"
+HANDOFF_WRITER_VERSION = "0.1.0"
 OPERATION_AUTHORITY_CRITERION = "criterion_observed_operation"
 OPERATION_AUTHORITY_ENRICHMENT = "verified_control_action_specialization"
 OPERATION_AUTHORITY_SAFE_OUTCOME = "safe_observable_outcome_operation"
@@ -733,7 +751,9 @@ class ScenarioHandoffV5(_HandoffTail, _HandoffPath, _HandoffHead):
         data = handler(self)
         shape = self.attack_shape
         data["attack_shape"] = (
-            None if shape is None else shape.model_dump(mode=info.mode)
+            None
+            if shape is None
+            else shape.model_dump(mode=info.mode, by_alias=info.by_alias)
         )
         data["actor"] = (
             None if self.actor is None else self.actor.model_dump(mode=info.mode)
@@ -745,21 +765,61 @@ class ScenarioHandoffV5(_HandoffTail, _HandoffPath, _HandoffHead):
         return {name: data[name] for name in type(self).model_fields if name in data}
 
 
-#: The published handoff.
+class ScenarioHandoffV6(ScenarioHandoffV5):
+    """Scenario-handoff-v6: the same document with one field renamed on the wire.
+
+    A v6 document writes ``attack_shape.indirect.party_relation.controlling_party``
+    where v5 writes ``controller``. The model keeps ``controller`` as its
+    attribute, and the serializer renames only the document, so every prompt and
+    every structured-output schema stays byte-identical to v5. v6 documents
+    carry the contract envelope that ``scenario-handoff-v6/spec.json`` requires.
+    """
+
+    schema_version: Literal["scenario-handoff-v6"] = HANDOFF_SCHEMA_VERSION_V6
+
+
+#: The published handoff: the version ``generate`` writes today.
 ScenarioHandoff = ScenarioHandoffV5
+
+#: The model that validates each published version.
+HANDOFF_MODELS = {
+    HANDOFF_SCHEMA_VERSION_V5: ScenarioHandoffV5,
+    HANDOFF_SCHEMA_VERSION_V6: ScenarioHandoffV6,
+}
+
+
+def handoff_model(version: str) -> type[ScenarioHandoffV5]:
+    """Return the model that validates one published version."""
+    try:
+        return HANDOFF_MODELS[version]
+    except KeyError:
+        raise ValueError(
+            f"unsupported scenario handoff schema_version: {version!r}"
+        ) from None
+
+
+def _wire_payload(handoff: ScenarioHandoffV5) -> dict[str, Any]:
+    """Dump a handoff as its document: v6 renames the party field on the wire."""
+
+    return handoff.model_dump(
+        mode="json",
+        exclude_none=True,
+        by_alias=handoff.schema_version == HANDOFF_SCHEMA_VERSION_V6,
+    )
 
 
 def handoff_payload_digest(payload: dict[str, Any]) -> str:
-    """Return the framed content digest for a handoff payload."""
+    """Return the framed content digest for a handoff payload of either version."""
     version = payload.get("schema_version")
-    if version != HANDOFF_SCHEMA_VERSION_V5:
+    domain = HANDOFF_DIGEST_DOMAINS.get(version) if isinstance(version, str) else None
+    if domain is None:
         raise ValueError(f"unsupported scenario handoff schema_version: {version!r}")
-    return compute_framed_digest(HANDOFF_DIGEST_DOMAIN_V5, payload)
+    return compute_framed_digest(domain, payload)
 
 
-def finalize_handoff(handoff: ScenarioHandoff) -> ScenarioHandoff:
+def finalize_handoff(handoff: ScenarioHandoffV5) -> ScenarioHandoffV5:
     """Return the handoff with its content digest computed and verified."""
-    payload = handoff.model_dump(mode="json", exclude_none=True)
+    payload = _wire_payload(handoff)
     payload.pop("content_digest", None)
     digest = handoff_payload_digest(payload)
     if handoff.content_digest and handoff.content_digest != digest:
@@ -767,9 +827,9 @@ def finalize_handoff(handoff: ScenarioHandoff) -> ScenarioHandoff:
     return handoff.model_copy(update={"content_digest": digest})
 
 
-def verify_handoff_digest(handoff: ScenarioHandoff) -> None:
+def verify_handoff_digest(handoff: ScenarioHandoffV5) -> None:
     """Fail closed when a handoff's recorded digest does not match its bytes."""
-    payload = handoff.model_dump(mode="json", exclude_none=True)
+    payload = _wire_payload(handoff)
     payload.pop("content_digest", None)
     if handoff.content_digest != handoff_payload_digest(payload):
         raise ValueError("scenario handoff content_digest does not match its content")
@@ -803,15 +863,20 @@ _OTHER_VERSION_VIOLATIONS = (
 def handoff_schema_violations(payload: dict[str, Any]) -> list[str]:
     """Return ``schema_violation:<top-level field>`` codes for one handoff payload.
 
-    A payload with any other ``schema_version`` gets
+    A payload with an unpublished ``schema_version`` gets
     :data:`_OTHER_VERSION_VIOLATIONS`, the codes the kit records for its
-    unknown-version case. An empty list means the closed schema accepts
-    the payload.
+    unknown-version case. A published version validates against its own model.
+    An empty list means the closed schema accepts the payload.
     """
-    if payload.get("schema_version") != HANDOFF_SCHEMA_VERSION_V5:
+    version = payload.get("schema_version")
+    try:
+        model = handoff_model(version) if isinstance(version, str) else None
+    except ValueError:
+        model = None
+    if model is None:
         return list(_OTHER_VERSION_VIOLATIONS)
     try:
-        ScenarioHandoffV5.model_validate(payload)
+        model.model_validate(payload)
     except ValidationError as exc:
         violations: list[str] = []
         for error in exc.errors():
@@ -1224,17 +1289,19 @@ def scenario_handoff_fields(
     observed_operations: tuple[str, ...] | None = None,
     stage_1a_source: Stage1aSource | None = None,
     deduplication: ScenarioDeduplication | None = None,
+    version: str = HANDOFF_SCHEMA_VERSION_V5,
 ) -> dict[str, Any]:
     """Return the shared envelope fields of one scenario's handoff.
 
     The fields exclude the attack path and the fields ``handoff_v5`` derives.
-    The Gherkin block is the envelope's Gherkin spec.
+    The Gherkin block is the envelope's Gherkin spec. ``version`` stamps the
+    published ``schema_version``; it defaults to the version ``generate`` writes.
     """
     gherkin_spec: GherkinSpec = envelope.gherkin_spec
     status, tool_call_condition = _tool_call_condition(envelope)
     kind = "functional" if envelope.scenario_spec.is_functional_test else "adversarial"
     return dict(
-        schema_version=HANDOFF_SCHEMA_VERSION_V5,
+        schema_version=version,
         scenario_id=envelope.scenario_id,
         kind=kind,
         attack_shape=_attack_shape(envelope, kind),
@@ -1301,7 +1368,7 @@ def _tool_call_condition(
 
 
 def write_scenario_handoff(
-    handoff: ScenarioHandoff,
+    handoff: ScenarioHandoffV5,
     scenarios_dir: Path,
 ) -> tuple[Path, Path]:
     """Write the handoff YAML and its declarative ``.feature`` companion."""
@@ -1309,9 +1376,28 @@ def write_scenario_handoff(
     scenarios_dir.mkdir(parents=True, exist_ok=True)
     handoff_path = scenarios_dir / f"{handoff.scenario_id}.yaml"
     feature_path = scenarios_dir / f"{handoff.scenario_id}.feature"
-    write_yaml(handoff, handoff_path)
+    write_yaml_document(handoff_document(handoff), handoff_path)
     feature_path.write_text(handoff.gherkin.to_feature_text(), encoding="utf-8")
     return handoff_path, feature_path
+
+
+def handoff_document(handoff: ScenarioHandoffV5) -> dict[str, Any]:
+    """Return the document a writer publishes for one handoff.
+
+    A v5 document is its bare payload: every recorded handoff predates the
+    envelope. A v6 document carries the envelope ``scenario-handoff-v6``'s spec
+    requires, stamped by ``asago_contracts_core.write_envelope`` from the
+    installed spec, so a reader names the version before it validates anything.
+    """
+    payload = _wire_payload(handoff)
+    if handoff.schema_version == HANDOFF_SCHEMA_VERSION_V5:
+        return payload
+    return write_envelope(
+        payload,
+        installed_specs().spec(HANDOFF_CONTRACT, handoff.schema_version),
+        writer=HANDOFF_WRITER,
+        writer_version=HANDOFF_WRITER_VERSION,
+    )
 
 
 __all__ = [
@@ -1321,7 +1407,14 @@ __all__ = [
     "AUTHORITY_UNSOURCED",
     "AttackPath",
     "HANDOFF_DIGEST_DOMAIN_V5",
+    "HANDOFF_DIGEST_DOMAIN_V6",
+    "HANDOFF_DIGEST_DOMAINS",
+    "HANDOFF_MODELS",
+    "HANDOFF_SCHEMA_VERSIONS",
     "HANDOFF_SCHEMA_VERSION_V5",
+    "HANDOFF_SCHEMA_VERSION_V6",
+    "HANDOFF_WRITER",
+    "HANDOFF_WRITER_VERSION",
     "HYPOTHESIS_FRAMING",
     "OPERATION_AUTHORITY_CRITERION",
     "OPERATION_AUTHORITY_ENRICHMENT",
@@ -1341,8 +1434,11 @@ __all__ = [
     "HandoffUca",
     "ScenarioHandoff",
     "ScenarioHandoffV5",
+    "ScenarioHandoffV6",
     "Stage1aSource",
     "finalize_handoff",
+    "handoff_document",
+    "handoff_model",
     "handoff_ownership_violations",
     "handoff_payload_digest",
     "handoff_schema_violations",

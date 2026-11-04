@@ -1,6 +1,8 @@
 """YAML I/O helpers for the STPA pipeline — clean copy.
 
 ``write_yaml(model, path)`` serializes a Pydantic model to YAML.
+``write_yaml_document(document, path)`` writes a document that is already a
+mapping, such as a contract document carrying its envelope.
 ``read_yaml(path, model_class)`` loads a YAML file and validates it
 against a Pydantic model class.  ``VersionChain`` publishes the successive
 versions of one artifact without writing identical copies.
@@ -10,17 +12,30 @@ This is the STPA pipeline's isolated YAML persistence boundary.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 
 import yaml
 from pydantic import BaseModel
+
+
+def yaml_document(document: Mapping[str, Any]) -> str:
+    """Return the YAML text of a document that is already a mapping."""
+
+    return yaml.dump(
+        dict(document),
+        default_flow_style=False,
+        sort_keys=False,
+        allow_unicode=True,
+    )
 
 
 def yaml_text(
     model: BaseModel,
     *,
     exclude_none: bool = True,
+    by_alias: bool = False,
     post_process: Callable[[dict], dict] | None = None,
 ) -> str:
     """Return the YAML text that :func:`write_yaml` persists for *model*.
@@ -29,12 +44,15 @@ def yaml_text(
         model: A Pydantic model instance.
         exclude_none: Drop ``None`` fields. Pass ``False`` for an artifact
             contract that requires explicit ``null`` values.
+        by_alias: Dump serialization aliases instead of field names. Pass
+            ``True`` for a document whose published name differs from the
+            model-facing one, such as scenario-handoff-v6.
         post_process: Optional callable that receives the dumped dict
             and returns a (possibly modified) dict before YAML
             serialization.  Used by callers to inject companion display
             fields (e.g. ``kc_subcodes_display`` on CapabilityProfile).
     """
-    data = model.model_dump(mode="json", exclude_none=exclude_none)
+    data = model.model_dump(mode="json", exclude_none=exclude_none, by_alias=by_alias)
     if post_process is not None:
         data = post_process(data)
     return yaml.dump(
@@ -49,6 +67,8 @@ def write_yaml(
     model: BaseModel,
     path: Path,
     post_process: Callable[[dict], dict] | None = None,
+    *,
+    by_alias: bool = False,
 ) -> Path:
     """Serialize *model* to a YAML file at *path*.
 
@@ -56,13 +76,26 @@ def write_yaml(
         model: A Pydantic model instance.
         path: Destination file path.
         post_process: Optional callable; see :func:`yaml_text`.
+        by_alias: Dump serialization aliases; see :func:`yaml_text`.
 
     Returns:
         The path that was written.
     """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(yaml_text(model, post_process=post_process), encoding="utf-8")
+    path.write_text(
+        yaml_text(model, by_alias=by_alias, post_process=post_process),
+        encoding="utf-8",
+    )
+    return path
+
+
+def write_yaml_document(document: Mapping[str, Any], path: Path) -> Path:
+    """Write an already-composed document, envelope included, as YAML."""
+
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(yaml_document(document), encoding="utf-8")
     return path
 
 

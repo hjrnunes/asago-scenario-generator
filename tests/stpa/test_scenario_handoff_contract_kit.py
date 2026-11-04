@@ -24,6 +24,7 @@ from asago_scenario_generator.models.canonical import canonical_json_bytes
 from asago_scenario_generator.stpa.observation_contract import SafeObservableOutcome
 from asago_scenario_generator.stpa.scenario_prod.handoff import (
     HANDOFF_SCHEMA_VERSION_V5,
+    HANDOFF_SCHEMA_VERSION_V6,
     HandoffGherkin,
     ScenarioHandoffV5,
     _FORBIDDEN_KEYS,
@@ -98,7 +99,8 @@ def test_the_lock_pins_every_file_beside_it() -> None:
         "asago-scenario-generator",
         "scenario-handoff",
     )
-    assert lock["schema_version"] == HANDOFF_SCHEMA_VERSION_V5
+    # The lock names the newest published version; its rows cover every version.
+    assert lock["schema_version"] == HANDOFF_SCHEMA_VERSION_V6
     assert lock["files"] == on_disk
 
 
@@ -116,7 +118,8 @@ def test_schema_file_is_the_published_schema_byte_for_byte() -> None:
 
 
 def test_the_published_schema_adds_only_its_rule_assertions() -> None:
-    model = ScenarioHandoffV5.model_json_schema()
+    # v5 publishes the model's field names, so its schema dumps without aliases.
+    model = ScenarioHandoffV5.model_json_schema(by_alias=False)
     published = _schema()
 
     assert published["properties"] == model["properties"]

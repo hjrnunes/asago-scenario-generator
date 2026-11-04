@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
-"""Generate the scenario-handoff-v5 contract kit and refresh CONTRACT.lock.
+"""Generate the scenario-handoff contract kits and refresh CONTRACT.lock.
 
-Run from any directory: ``uv run python scripts/gen_handoff_kit.py``.
-Regenerating the kit must leave every byte unchanged, which
+The generator writes ``scenario-handoff-v5`` and derives ``scenario-handoff-v6``
+from the same builders: v6 is v5's document with the party field renamed to
+``controlling_party`` and v6's digest domain, plus the envelope its spec
+requires. Run from any directory: ``uv run python scripts/gen_handoff_kit.py``.
+Regenerating the kits must leave every byte unchanged, which
 ``git status --porcelain data/contracts`` confirms.
 Downstream repositories mirror the regenerated files byte-identically.
 """
@@ -28,9 +31,11 @@ from asago_scenario_generator.stpa.scenario_prod.condition_check import (
 from asago_scenario_generator.stpa.models.attack_shape import AttackShape
 from asago_scenario_generator.stpa.scenario_prod.handoff import (
     HANDOFF_SCHEMA_VERSION_V5,
+    HANDOFF_SCHEMA_VERSION_V6,
     HYPOTHESIS_FRAMING,
     ScenarioHandoffV5,
     finalize_handoff,
+    handoff_model,
     handoff_ownership_violations,
     handoff_payload_digest,
     handoff_schema_violations,
@@ -48,8 +53,16 @@ from asago_scenario_generator.stpa.scenario_prod.tool_call_binding import (
 ROOT = Path(__file__).resolve().parents[1] / "data/contracts/scenario-handoff"
 CONTRACT_NAME = "scenario-handoff"
 KIT_NAME = HANDOFF_SCHEMA_VERSION_V5
+KIT_NAMES = (HANDOFF_SCHEMA_VERSION_V5, HANDOFF_SCHEMA_VERSION_V6)
 CASES_NAME = "cases"
 README_NAME = "README.md"
+
+#: The envelope mode each published version declares. v5 predates the envelope;
+#: v6 requires it, so a reader never guesses a version from the payload.
+ENVELOPE_MODES = {
+    HANDOFF_SCHEMA_VERSION_V5: "optional",
+    HANDOFF_SCHEMA_VERSION_V6: "required",
+}
 
 
 def dump(value: object) -> str:
@@ -58,6 +71,29 @@ def dump(value: object) -> str:
 
 def sha(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def v6_payload(payload: dict) -> dict:
+    """Return the v6 form of one v5 payload: the party field renamed and re-signed.
+
+    A payload of another version keeps its digest, so the kit's unknown-version
+    case stays the one document no published spec signs.
+    """
+
+    document = copy.deepcopy(payload)
+    shape = document.get("attack_shape")
+    indirect = shape.get("indirect") if isinstance(shape, dict) else None
+    relation = indirect.get("party_relation") if isinstance(indirect, dict) else None
+    if isinstance(relation, dict) and "controller" in relation:
+        relation["controlling_party"] = relation.pop("controller")
+    if document.get("schema_version") != HANDOFF_SCHEMA_VERSION_V5:
+        return document
+    document["schema_version"] = HANDOFF_SCHEMA_VERSION_V6
+    unsigned = {
+        key: value for key, value in document.items() if key != "content_digest"
+    }
+    document["content_digest"] = handoff_payload_digest(unsigned)
+    return document
 
 
 UNKNOWNS = [
@@ -1577,9 +1613,11 @@ def _mutated_companion(
     return "\n".join(lines) + "\n"
 
 
-def companion_payloads(valid: dict[str, dict]) -> dict[str, dict]:
+def companion_payloads(
+    valid: dict[str, dict], version: str = HANDOFF_SCHEMA_VERSION_V5
+) -> dict[str, dict]:
     """The feature companions: the text the producer writes, and four it refuses."""
-    gherkin = ScenarioHandoffV5.model_validate(valid[CONFORMANCE_HANDOFF]).gherkin
+    gherkin = handoff_model(version).model_validate(valid[CONFORMANCE_HANDOFF]).gherkin
     text = gherkin.to_feature_text()
     texts = {"holds": text}
     texts.update(
@@ -1600,7 +1638,9 @@ def companion_payloads(valid: dict[str, dict]) -> dict[str, dict]:
     }
 
 
-def conformance_cases(companions: dict[str, dict]) -> dict:
+def conformance_cases(
+    companions: dict[str, dict], version: str = HANDOFF_SCHEMA_VERSION_V5
+) -> dict:
     """Name the cases for each rule the consumer re-implements.
 
     The four payload rules reuse the kit's valid and invalid handoffs. The
@@ -1610,7 +1650,7 @@ def conformance_cases(companions: dict[str, dict]) -> dict:
     companion_cases = sorted(companions)
     return {
         "contract": CONTRACT_NAME,
-        "kit": KIT_NAME,
+        "kit": version,
         "rules": [
             {
                 "name": "safe-call-arguments",
@@ -1763,13 +1803,100 @@ The orchestrator keeps no copy of this contract and reads `schema_version` direc
 handoff reader stays lenient on purpose.
 """
 
+README_V6 = """# scenario-handoff
 
-def write_kit(kit: Path, valid: dict[str, dict], invalid: dict[str, dict]) -> None:
+The frozen scenario handoff a producer run publishes as `scenarios/SCN-*.yaml`: the
+narrative, the attack path, the Gherkin, the semantic failure criterion, the safe alternative
+and the metadata the consumer needs. The producer owns this contract; the consumer's
+`contracts/scenario-handoff/` and the shared core's package data carry byte-identical copies.
+
+## The document
+
+`scenario-handoff-v6` states one failure: the unsafe outcome, the procedure chain that leads
+to it, the taxonomy references, the preconditions, the discriminating condition and the tool
+call the failure needs. It is v5's document with one field renamed on the wire:
+
+| v5 path | v6 path |
+| --- | --- |
+| `attack_shape.indirect.party_relation.controller` | `attack_shape.indirect.party_relation.controlling_party` |
+
+The producer's model keeps `controller` as its attribute, and every prompt and
+structured-output schema it sends the model keeps the old name, so the rename reaches
+documents only. `schema.json` is the runtime schema, `cases/` holds the valid and invalid
+documents with `expected-violations.json`, the conformance manifest and the feature
+companions, and `spec.json` names them. The case files are bare payloads: a v6 document
+requires the envelope, so a test wraps each case with `write_envelope` before it reads it.
+
+## The reader rules
+
+`asago_contracts_core.validate_handoff` runs the ownership walker and then the composed
+schema: the safe-outcome call rules, the procedure tactic/technique pairing, the reference
+order and uniqueness, the closed enums and the non-blank text. A break is one `Violation`
+carrying the producer's code (`schema_violation:<field>`, `artifact_design_field:<name>`,
+`prose_hiding:<pattern>` or `feature_companion:`), which both repositories' runners report
+unchanged.
+
+## The split
+
+`spec.json` and `schema.json` are the runtime spec. Their bytes are the contract's identity:
+`spec_digest` covers `spec.json` without its digest field and the bytes of `schema.json`.
+Changing a case or this README never changes the identity.
+
+## Identity and compatibility
+
+A document written from the self-identifying envelope carries one `contract` block:
+
+```json
+{
+  "contract": {
+    "id": "scenario-handoff",
+    "version": "scenario-handoff-v6",
+    "spec_digest": "sha256:...",
+    "requires": [],
+    "provenance": {
+      "writer": "asago_scenario_generator.stpa.scenario_prod.handoff",
+      "writer_version": "0.1.0",
+      "validator_version": "asago-contracts-core 0.1.0"
+    }
+  }
+}
+```
+
+`scenario-handoff-v6` is published with `"envelope": "required"`, so a v6 document names its
+version before a reader validates it. `scenario-handoff-v5` stays published with
+`"envelope": "optional"`, because every recorded handoff predates the envelope, and the
+producer's `generate` still writes v5. A reader selects one of its installed specs by the
+document's contract id and version, and rejects:
+
+- a v6 document without the envelope, with `MissingEnvelopeError`;
+- an unsupported version, with the error listing the supported versions;
+- a `requires` entry the selected spec does not support (v6 supports none);
+- a top-level field outside the schema and the spec's declared extensions;
+- a `spec_digest` that is not exactly the installed spec's, for a draft as for a published
+  version.
+
+`packages/asago-contracts-core` ships the whole contract directory as package data, and
+`packages/asago-contracts-core/tests/test_handoff_contract.py` refuses a copy that differs
+from this directory. `asago_contracts_core.validate_handoff` reads every handoff through the
+installed spec before the hand-written rules, so the producer's Stage 6 check and the
+consumer's input adapter keep their existing error wording.
+
+The orchestrator keeps no copy of this contract and reads `schema_version` directly, so its
+handoff reader stays lenient on purpose.
+"""
+
+
+def write_kit(
+    kit: Path,
+    valid: dict[str, dict],
+    invalid: dict[str, dict],
+    version: str = HANDOFF_SCHEMA_VERSION_V5,
+) -> None:
     cases = kit / CASES_NAME
     (cases / "valid").mkdir(parents=True, exist_ok=True)
     (cases / "invalid").mkdir(parents=True, exist_ok=True)
     (kit / "schema.json").write_text(
-        json.dumps(handoff_schema(), indent=2) + "\n",
+        json.dumps(handoff_schema(version), indent=2) + "\n",
         encoding="utf-8",
     )
     for relative, payload in valid.items():
@@ -1792,10 +1919,10 @@ def write_kit(kit: Path, valid: dict[str, dict], invalid: dict[str, dict]) -> No
     (cases / "expected-violations.json").write_text(dump(expected), encoding="utf-8")
 
     (cases / "companions").mkdir(parents=True, exist_ok=True)
-    companions = companion_payloads(valid)
+    companions = companion_payloads(valid, version)
     for relative, payload in companions.items():
         (cases / relative).write_text(dump(payload), encoding="utf-8")
-    manifest = conformance_cases(companions)
+    manifest = conformance_cases(companions, version)
     for rule in manifest["rules"]:
         assert rule["valid"] and rule["invalid"], rule["name"]
         for relative in [*rule["valid"], *rule["invalid"]]:
@@ -1816,14 +1943,14 @@ def write_kit(kit: Path, valid: dict[str, dict], invalid: dict[str, dict]) -> No
     (cases / "canonical-digests.json").write_text(dump(digests), encoding="utf-8")
 
 
-def write_spec(kit: Path) -> None:
+def write_spec(kit: Path, version: str = HANDOFF_SCHEMA_VERSION_V5) -> None:
     """Write the runtime spec; its digest covers the spec body and the schema."""
 
     body = {
         "contract": CONTRACT_NAME,
-        "version": HANDOFF_SCHEMA_VERSION_V5,
+        "version": version,
         "status": "published",
-        "envelope": "optional",
+        "envelope": ENVELOPE_MODES[version],
         "supports": [],
         "extensions": [],
         "schema": "schema.json",
@@ -1834,8 +1961,11 @@ def write_spec(kit: Path) -> None:
     (kit / "spec.json").write_text(dump(body), encoding="utf-8")
 
 
-def write_readme(kit: Path) -> None:
-    (kit / README_NAME).write_text(README, encoding="utf-8")
+def write_readme(kit: Path, version: str = HANDOFF_SCHEMA_VERSION_V5) -> None:
+    (kit / README_NAME).write_text(
+        README if version == HANDOFF_SCHEMA_VERSION_V5 else README_V6,
+        encoding="utf-8",
+    )
 
 
 def write_lock() -> None:
@@ -1852,17 +1982,26 @@ def write_lock() -> None:
         "authority": previous["authority"],
         "contract": previous["contract"],
         "files": files,
-        "schema_version": HANDOFF_SCHEMA_VERSION_V5,
+        "schema_version": HANDOFF_SCHEMA_VERSION_V6,
     }
     lock_path.write_text(json.dumps(lock, indent=2) + "\n", encoding="utf-8")
 
 
 def main() -> None:
-    kit = ROOT / KIT_NAME
     valid = valid_payloads(shaped_payloads(BUILDERS))
-    write_kit(kit, valid, invalid_payloads(valid))
-    write_spec(kit)
-    write_readme(kit)
+    invalid = invalid_payloads(valid)
+    for version in KIT_NAMES:
+        kit = ROOT / version
+        if version == HANDOFF_SCHEMA_VERSION_V5:
+            kit_valid, kit_invalid = valid, invalid
+        else:
+            kit_valid = {name: v6_payload(payload) for name, payload in valid.items()}
+            kit_invalid = {
+                name: v6_payload(payload) for name, payload in invalid.items()
+            }
+        write_kit(kit, kit_valid, kit_invalid, version)
+        write_spec(kit, version)
+        write_readme(kit, version)
     write_lock()
 
 

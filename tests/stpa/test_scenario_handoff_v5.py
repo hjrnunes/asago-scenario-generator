@@ -29,6 +29,7 @@ from asago_scenario_generator.stpa.scenario_prod.assembly import assemble_envelo
 from asago_scenario_generator.stpa.scenario_prod.handoff import (
     HANDOFF_DIGEST_DOMAIN_V5,
     HANDOFF_SCHEMA_VERSION_V5,
+    HANDOFF_SCHEMA_VERSION_V6,
     HandoffTaxonomy,
     HandoffTaxonomyInputs,
     HandoffTaxonomyRef,
@@ -616,13 +617,14 @@ def test_the_schema_states_the_tactic_technique_pairing() -> None:
     assert list(Draft202012Validator(SCHEMA).iter_errors(payload))
 
 
-def test_the_lock_pins_the_v5_kit_only() -> None:
+def test_the_lock_names_the_newest_version_and_pins_both_kits() -> None:
     lock = json.loads((CONTRACT_ROOT / "CONTRACT.lock").read_text(encoding="utf-8"))
 
-    assert lock["schema_version"] == HANDOFF_SCHEMA_VERSION_V5
+    assert lock["schema_version"] == HANDOFF_SCHEMA_VERSION_V6
     assert "additional_versions" not in lock
     assert {name.split("/")[0] for name in lock["files"]} == {
         "scenario-handoff-v5",
+        "scenario-handoff-v6",
         "ownership-rules.json",
     }
 

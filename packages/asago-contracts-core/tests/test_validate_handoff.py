@@ -1,4 +1,10 @@
-"""The shared validator reproduces the producer's contract cases."""
+"""The shared validator reproduces the producer's contract cases.
+
+Both published kits run: each invalid case reports its recorded codes and each
+valid case holds, for v5 and for v6 alike. A kit's case file is a bare payload,
+so the sweeps read the payload rules alone; ``test_handoff_contract`` covers the
+envelope a v6 document needs.
+"""
 
 from __future__ import annotations
 
@@ -11,7 +17,10 @@ import pytest
 
 from asago_contracts_core import (
     HANDOFF_SCHEMA_VERSION_V5,
+    HANDOFF_SCHEMA_VERSION_V6,
     OTHER_VERSION_VIOLATIONS,
+    VERSION,
+    VERSIONS,
     Violation,
     hand_rule_violations,
     load_contract,
@@ -20,20 +29,26 @@ from asago_contracts_core import (
 )
 
 CONTRACT_DIR = Path(__file__).resolve().parent / "data" / "scenario-handoff"
-VERSION_DIR = CONTRACT_DIR / "scenario-handoff-v5"
+VERSION_DIR = CONTRACT_DIR / HANDOFF_SCHEMA_VERSION_V5
 KIT_DIR = VERSION_DIR / "cases"
+_KIT_DIRS = {version: CONTRACT_DIR / version / "cases" for version in VERSIONS}
 
 
 def _load(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-EXPECTED = _load(KIT_DIR / "expected-violations.json")
-INVALID_IDS = sorted(EXPECTED)
-VALID_IDS = sorted(path.name for path in (KIT_DIR / "valid").glob("*.json"))
+def _expected(version: str) -> dict[str, list[str]]:
+    return _load(_KIT_DIRS[version] / "expected-violations.json")
+
+
+def _case(version: str, relative: str) -> dict[str, Any]:
+    return _load(_KIT_DIRS[version] / relative)
 
 
 def _document(relative: str) -> dict[str, Any]:
+    """Read one v5 case document, the version the single-case tests use."""
+
     return _load(KIT_DIR / relative)
 
 
@@ -41,14 +56,40 @@ def _codes(payload: Any) -> list[str]:
     return [violation.code for violation in validate_handoff(payload)]
 
 
-@pytest.mark.parametrize("relative", INVALID_IDS)
-def test_every_invalid_case_reports_the_expected_codes(relative: str) -> None:
-    assert _codes(_document(relative)) == EXPECTED[relative]
+def _payload_codes(payload: Any) -> list[str]:
+    """Read a bare kit payload as the case file it is, whatever version it names."""
+
+    return [
+        violation.code for violation in validate_handoff(payload, through_spec=False)
+    ]
 
 
-@pytest.mark.parametrize("name", VALID_IDS)
-def test_every_valid_case_holds(name: str) -> None:
-    assert validate_handoff(_document(f"valid/{name}")) == []
+def _case_ids(value: str) -> str:
+    return value
+
+
+_INVALID_CASES = [
+    (version, relative)
+    for version in VERSIONS
+    for relative in sorted(_expected(version))
+]
+_VALID_CASES = [
+    (version, path.name)
+    for version in VERSIONS
+    for path in sorted((_KIT_DIRS[version] / "valid").glob("*.json"))
+]
+
+
+@pytest.mark.parametrize(("version", "relative"), _INVALID_CASES, ids=_case_ids)
+def test_every_invalid_case_reports_the_expected_codes(
+    version: str, relative: str
+) -> None:
+    assert _payload_codes(_case(version, relative)) == _expected(version)[relative]
+
+
+@pytest.mark.parametrize(("version", "name"), _VALID_CASES, ids=_case_ids)
+def test_every_valid_case_holds(version: str, name: str) -> None:
+    assert _payload_codes(_case(version, f"valid/{name}")) == []
 
 
 def test_an_unknown_version_reports_the_two_kit_codes() -> None:
@@ -127,12 +168,16 @@ def test_the_contract_can_come_from_a_kit_directory(tmp_path: Path) -> None:
     assert contract.schema == load_contract().schema
 
 
-def test_the_packaged_contract_states_v5() -> None:
+def test_the_packaged_contract_states_every_published_version() -> None:
     assert HANDOFF_SCHEMA_VERSION_V5 == "scenario-handoff-v5"
-    document = load_contract().schema
-    assert (
-        document["properties"]["schema_version"]["const"] == HANDOFF_SCHEMA_VERSION_V5
-    )
+    assert HANDOFF_SCHEMA_VERSION_V6 == "scenario-handoff-v6"
+    contract = load_contract()
+    for version in VERSIONS:
+        assert (
+            contract.schemas[version]["properties"]["schema_version"]["const"]
+            == version
+        )
+    assert contract.schema == contract.schemas[VERSION]
     assert isinstance(Violation("c", "p", "r"), tuple)
 
 

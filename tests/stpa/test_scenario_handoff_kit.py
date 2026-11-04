@@ -322,7 +322,8 @@ def test_the_generator_reproduces_every_committed_kit_byte_for_byte(
     tmp_path: Path,
 ) -> None:
     module = _generator(tmp_path)
-    shutil.rmtree(module.ROOT / module.KIT_NAME)
+    for kit in module.KIT_NAMES:
+        shutil.rmtree(module.ROOT / kit)
 
     module.main()
 

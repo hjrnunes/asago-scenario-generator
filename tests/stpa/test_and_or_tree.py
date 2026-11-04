@@ -65,7 +65,9 @@ from tests.stpa.sp1_helpers import MockLLMClient
 from tests.cli_helpers import PlainCliRunner
 from tests.stpa.test_narration import adversarial, everyday
 
-SCHEMA = ScenarioHandoffV5.model_json_schema()
+# The v5 document names the party ``controller``; the model's ``by_alias`` schema
+# names the serialization alias scenario-handoff-v6 writes.
+SCHEMA = ScenarioHandoffV5.model_json_schema(by_alias=False)
 DIRECT = AttackShape.model_validate(
     {
         **DIRECT_REPLY,

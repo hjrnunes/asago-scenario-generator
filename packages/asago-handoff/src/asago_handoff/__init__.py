@@ -1,4 +1,4 @@
-"""The scenario-handoff-v5 rules, re-exported from ``asago_contracts_core``.
+"""The scenario-handoff rules, re-exported from ``asago_contracts_core``.
 
 This package stays as the name the producer, the consumer and the orchestrator
 import. The implementation moved to the shared contracts core, so this module
@@ -16,11 +16,15 @@ from asago_contracts_core import (
     CONTRACT_DIR,
     DETECTED,
     HANDOFF_SCHEMA_VERSION_V5,
+    HANDOFF_SCHEMA_VERSION_V6,
     INCONCLUSIVE,
     KIT_V5,
+    KIT_V6,
+    LEGACY_VERSION,
     NOT_DETECTED,
     OTHER_VERSION_VIOLATIONS,
     VERSION,
+    VERSIONS,
     ConditionEvaluation,
     ConformanceCase,
     ConformanceResult,
@@ -56,11 +60,15 @@ __all__ = [
     "CONTRACT_DIR",
     "DETECTED",
     "HANDOFF_SCHEMA_VERSION_V5",
+    "HANDOFF_SCHEMA_VERSION_V6",
     "INCONCLUSIVE",
     "KIT_V5",
+    "KIT_V6",
+    "LEGACY_VERSION",
     "NOT_DETECTED",
     "OTHER_VERSION_VIOLATIONS",
     "VERSION",
+    "VERSIONS",
     "ConditionEvaluation",
     "ConformanceCase",
     "ConformanceResult",

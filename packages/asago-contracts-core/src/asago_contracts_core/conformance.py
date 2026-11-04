@@ -1,12 +1,16 @@
 """Run a handoff kit's conformance cases against the shared rules.
 
-``scenario-handoff-v5/cases/conformance-cases.json`` names, for each rule, the
-valid handoffs or companions that must pass, the invalid ones that must be
-reported, and the violation codes the rule owns. An invalid case passes only
-when one of its violations carries one of those codes, so a violation from
-another rule cannot hide a case that no longer exercises the rule it names. The
-runner reads the kit directory it is given, so it runs the producer's contract
-tree and a consumer's mirror alike.
+``<version>/cases/conformance-cases.json`` names, for each rule, the valid
+handoffs or companions that must pass, the invalid ones that must be reported,
+and the violation codes the rule owns. An invalid case passes only when one of
+its violations carries one of those codes, so a violation from another rule
+cannot hide a case that no longer exercises the rule it names. The runner reads
+the kit directory it is given, so it runs the producer's contract tree and a
+consumer's mirror alike, for any published version.
+
+A kit's case files are bare payloads, including for a version whose spec requires
+the envelope, so the runner reads the payload rules alone; the envelope is
+exercised by the tests that read a document through the spec.
 """
 
 from __future__ import annotations
@@ -60,10 +64,12 @@ class ConformanceResult:
         )
 
 
-def load_conformance_cases(contract_dir: Path) -> list[ConformanceCase]:
-    """Read a kit's manifest and every document it names."""
+def load_conformance_cases(
+    contract_dir: Path, version: str = KIT_V5
+) -> list[ConformanceCase]:
+    """Read one kit's manifest and every document it names."""
 
-    kit_dir = Path(contract_dir) / KIT_V5
+    kit_dir = Path(contract_dir) / version
     manifest = _read_json(
         kit_dir / CASES_NAME / "conformance-cases.json", "conformance manifest"
     )
@@ -76,16 +82,20 @@ def load_conformance_cases(contract_dir: Path) -> list[ConformanceCase]:
     return cases
 
 
-def run_conformance(contract_dir: Path) -> list[ConformanceResult]:
-    """Run every case a kit's manifest names against the shared rules."""
+def run_conformance(
+    contract_dir: Path, version: str = KIT_V5
+) -> list[ConformanceResult]:
+    """Run every case one kit's manifest names against the shared rules."""
 
     contract = load_contract(contract_dir)
     results: list[ConformanceResult] = []
-    for case in load_conformance_cases(contract_dir):
+    for case in load_conformance_cases(contract_dir, version):
         if case.kind == "companion":
             violations = feature_violations(case.handoff["gherkin"], case.text or "")
         else:
-            violations = validate_handoff(case.handoff, contract=contract)
+            violations = validate_handoff(
+                case.handoff, contract=contract, through_spec=False
+            )
         results.append(ConformanceResult(case, tuple(violations)))
     return results
 

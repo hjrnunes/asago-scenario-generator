@@ -1,13 +1,18 @@
 """The published scenario-handoff schema: the model's shape plus its rules.
 
 ``ScenarioHandoffV5`` checks the handoff rules in Pydantic validators, but a
-reader that holds only ``scenario-handoff-v5/schema.json`` sees the model's shape,
-not
+reader that holds only a version's ``schema.json`` sees the model's shape, not
 those checks.  This module states every rule JSON Schema can express as
 ``allOf``/``if``/``then`` assertions (the form ``json_schema_extra`` adds), and
-the generator writes the result as the published schema.  The Pydantic model
+the generator writes the result as each published schema.  The Pydantic model
 stays the authority for the producer's own validation, so a rule that moves
 here keeps its model check.
+
+A version's schema dumps the property name that version publishes: v5 keeps
+``party_relation.controller``, v6 renames it to ``controlling_party`` through
+the model's serialization alias.  The model-facing name never changes, so the
+prompts and the structured-output schemas the model answers against stay
+byte-identical.
 
 The extras stay off the models.  Stage 5 puts ``SafeObservableOutcome`` in its
 provider response format, and a guided decoder accepts only a small JSON
@@ -22,7 +27,11 @@ from __future__ import annotations
 from typing import Any
 
 from asago_scenario_generator.stpa.observation_contract import _CLAIM_EVIDENCE
-from asago_scenario_generator.stpa.scenario_prod.handoff import ScenarioHandoffV5
+from asago_scenario_generator.stpa.scenario_prod.handoff import (
+    HANDOFF_SCHEMA_VERSION_V5,
+    HANDOFF_SCHEMA_VERSION_V6,
+    handoff_model,
+)
 
 #: The safe-outcome rules JSON Schema can state.  ``SafeObservableOutcome``
 #: enforces the same rules for a Pydantic reader; the published schema carries
@@ -139,14 +148,18 @@ _PROCEDURE_TACTIC_TECHNIQUE_PAIRING: dict[str, Any] = {
 }
 
 
-def handoff_schema() -> dict[str, Any]:
-    """Return the published handoff schema: the model's schema plus its rules.
+def handoff_schema(version: str = HANDOFF_SCHEMA_VERSION_V5) -> dict[str, Any]:
+    """Return one version's published handoff schema: the model's shape plus its rules.
 
-    Pydantic builds a fresh mapping on every call, so the additions never
-    reach ``ScenarioHandoffV5.model_json_schema()`` itself.
+    v5 publishes the model's field names; v6 publishes the serialization
+    aliases, so the party field reads ``controlling_party`` there and
+    ``controller`` in v5.  Pydantic builds a fresh mapping on every call, so the
+    additions never reach the model's own ``model_json_schema()``.
     """
 
-    schema = ScenarioHandoffV5.model_json_schema()
+    schema = handoff_model(version).model_json_schema(
+        by_alias=version == HANDOFF_SCHEMA_VERSION_V6
+    )
     safe_outcome = schema["$defs"]["SafeObservableOutcome"]
     safe_outcome["allOf"] = [
         *safe_outcome.get("allOf", []),

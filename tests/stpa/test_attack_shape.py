@@ -333,14 +333,50 @@ def test_every_shape_key_is_required_and_absent_values_are_explicit_null(
 
 
 def _schema_errors(payload: dict[str, Any]) -> list[Any]:
+    """Validate against the v5 form: the published schema never renames a field."""
+
     return list(
-        Draft202012Validator(AttackShape.model_json_schema()).iter_errors(payload)
+        Draft202012Validator(AttackShape.model_json_schema(by_alias=False)).iter_errors(
+            payload
+        )
     )
 
 
 @pytest.mark.parametrize("payload", VALID.values(), ids=VALID.keys())
 def test_the_json_schema_accepts_every_valid_shape(payload: dict[str, Any]) -> None:
     assert _schema_errors(payload) == []
+
+
+def test_the_party_field_keeps_its_model_name_and_publishes_the_wire_name() -> None:
+    """v6 renames the party field on the wire; the model and prompts keep ``controller``."""
+
+    block = _indirect_block(
+        party_relation={
+            "controlling_party": "third_party",
+            "benign_user_actor_ref": "GST001",
+        }
+    )
+    shape = AttackShape.model_validate(_indirect(indirect=block))
+
+    assert shape.indirect is not None
+    assert shape.indirect.party_relation.controller == "third_party"
+    dumped = shape.model_dump()
+    assert dumped["indirect"]["party_relation"]["controller"] == "third_party"
+    assert "controlling_party" not in dumped["indirect"]["party_relation"]
+    aliased = shape.model_dump(by_alias=True)
+    assert aliased["indirect"]["party_relation"]["controlling_party"] == "third_party"
+    assert (
+        "controlling_party"
+        in (AttackShape.model_json_schema()["$defs"]["PartyRelation"]["properties"])
+    )
+    assert (
+        "controller"
+        in (
+            AttackShape.model_json_schema(by_alias=False)["$defs"]["PartyRelation"][
+                "properties"
+            ]
+        )
+    )
 
 
 @pytest.mark.parametrize(
