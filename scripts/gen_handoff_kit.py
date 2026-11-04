@@ -34,6 +34,7 @@ from asago_scenario_generator.stpa.scenario_prod.handoff import (
     handoff_payload_digest,
     handoff_schema_violations,
 )
+from asago_scenario_generator.stpa.scenario_prod.handoff_schema import handoff_schema
 from asago_scenario_generator.stpa.scenario_prod.handoff_v5 import (
     procedure_steps,
     shape_preconditions,
@@ -1678,7 +1679,7 @@ def write_kit(kit: Path, valid: dict[str, dict], invalid: dict[str, dict]) -> No
     (kit / "valid").mkdir(parents=True, exist_ok=True)
     (kit / "invalid").mkdir(parents=True, exist_ok=True)
     (kit / "schema.json").write_text(
-        json.dumps(ScenarioHandoffV5.model_json_schema(), indent=2) + "\n",
+        json.dumps(handoff_schema(), indent=2) + "\n",
         encoding="utf-8",
     )
     for relative, payload in valid.items():

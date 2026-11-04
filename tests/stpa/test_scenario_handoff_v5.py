@@ -38,6 +38,7 @@ from asago_scenario_generator.stpa.scenario_prod.handoff import (
     handoff_schema_violations,
     verify_handoff_digest,
 )
+from asago_scenario_generator.stpa.scenario_prod.handoff_schema import handoff_schema
 from asago_scenario_generator.stpa.scenario_prod.handoff_v5 import (
     build_scenario_handoff_v5,
     uca_type,
@@ -546,8 +547,8 @@ def _kit(relative: str) -> dict:
     return json.loads((KIT / relative).read_text(encoding="utf-8"))
 
 
-def test_the_v5_schema_file_is_the_models_schema_byte_for_byte() -> None:
-    rendered = json.dumps(ScenarioHandoffV5.model_json_schema(), indent=2) + "\n"
+def test_the_v5_schema_file_is_the_published_schema_byte_for_byte() -> None:
+    rendered = json.dumps(handoff_schema(), indent=2) + "\n"
 
     assert (KIT / "schema.json").read_text(encoding="utf-8") == rendered
 
@@ -604,6 +605,14 @@ def test_the_v5_rules_reject_their_cases(name: str, codes: list[str]) -> None:
     payload = _kit(f"invalid/{name}.json")
 
     assert handoff_schema_violations(payload) == codes
+
+
+def test_the_schema_states_the_tactic_technique_pairing() -> None:
+    """A procedure step names a tactic exactly when it names a technique."""
+
+    payload = _kit("invalid/v5-procedure-technique-without-tactic.json")
+
+    assert list(Draft202012Validator(SCHEMA).iter_errors(payload))
 
 
 def test_the_lock_pins_the_v5_kit_only() -> None:

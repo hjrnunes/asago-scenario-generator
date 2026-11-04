@@ -30,6 +30,7 @@ from asago_scenario_generator.stpa.scenario_prod.handoff import (
     handoff_schema_violations,
     verify_handoff_digest,
 )
+from asago_scenario_generator.stpa.scenario_prod.handoff_schema import handoff_schema
 
 CONTRACT_ROOT = Path(__file__).resolve().parents[2] / "data/contracts/scenario-handoff"
 KIT = CONTRACT_ROOT / "handoff-v5"
@@ -55,17 +56,26 @@ def _valid_fixtures() -> list[Path]:
     return sorted((KIT / "valid").glob("*.json"))
 
 
-def test_schema_matches_the_producer_model() -> None:
-    assert _schema() == ScenarioHandoffV5.model_json_schema()
+def test_schema_matches_the_published_handoff_schema() -> None:
+    assert _schema() == handoff_schema()
 
 
-def test_schema_file_is_the_models_schema_byte_for_byte() -> None:
+def test_schema_file_is_the_published_schema_byte_for_byte() -> None:
     committed = (KIT / "schema.json").read_text(encoding="utf-8")
 
-    rendered = json.dumps(ScenarioHandoffV5.model_json_schema(), indent=2) + "\n"
+    rendered = json.dumps(handoff_schema(), indent=2) + "\n"
 
     assert rendered == committed
     assert list(ScenarioHandoffV5.model_fields) == list(_schema()["properties"])
+
+
+def test_the_published_schema_adds_only_its_rule_assertions() -> None:
+    model = ScenarioHandoffV5.model_json_schema()
+    published = _schema()
+
+    assert published["properties"] == model["properties"]
+    assert published["required"] == model["required"]
+    assert set(published["$defs"]) == set(model["$defs"])
 
 
 def test_kit_introduces_no_fourth_scenario_representation() -> None:
@@ -323,10 +333,18 @@ MODEL_ONLY_SCHEMA_CASES = {
     "schema-criterion-observable-without-claim",
     "schema-criterion-analytical-with-operation",
     "schema-assessment-blank-reason",
-    "schema-safe-outcome-blank-statement",
-    "schema-safe-outcome-analytical-with-refs",
     "schema-tool-call-reason-not-bound",
 }
+
+
+def test_the_schema_states_the_taxonomy_reference_uniqueness_rule() -> None:
+    """The schema rejects a repeated reference; it cannot state their order."""
+
+    payload = json.loads((KIT / "valid/taxonomy-block.json").read_text("utf-8"))
+    references = payload["taxonomy"]["references"]
+    references.append(dict(references[0]))
+
+    assert list(Draft202012Validator(_schema()).iter_errors(payload))
 
 
 def test_each_schema_case_is_rejected_with_its_recorded_codes() -> None:

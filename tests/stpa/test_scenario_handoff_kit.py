@@ -147,11 +147,11 @@ INVALID: dict[str, tuple[list[str], str | None, bool]] = {
     "failure-call-kind-not-enumerated.json": ([FAILURE_CALL], None, True),
     "failure-call-blank-operation.json": ([FAILURE_CALL], "blank", False),
     "safe-call-argument-value-not-scalar.json": ([SAFE_OUTCOME], None, True),
-    "safe-call-argument-blank-name.json": ([SAFE_OUTCOME], "blank", False),
+    "safe-call-argument-blank-name.json": ([SAFE_OUTCOME], "blank", True),
     "safe-call-not-made-with-arguments.json": (
         [SAFE_OUTCOME],
         "call_made false",
-        False,
+        True,
     ),
     "safe-call-made-not-boolean.json": ([SAFE_OUTCOME], None, True),
 }

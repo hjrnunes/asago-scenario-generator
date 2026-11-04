@@ -616,6 +616,9 @@ SCENARIO_PROD_LAYERS: dict[str, int] = {
     # The versioned scenario handoff is the normal publication seam: a pure
     # projection over the scenario envelope and its models.
     "handoff": 1,
+    # The published handoff schema restates the handoff envelope's expressible
+    # rules for readers that do not run Pydantic.
+    "handoff_schema": 1,
     # Deterministic scenario identity is a pure projection over ScenarioSpec.
     "deduplication": 1,
     # The narrate step's model request and write-up reuse presentation's
