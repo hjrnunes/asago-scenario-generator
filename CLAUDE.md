@@ -54,10 +54,12 @@ Run from the intended checkout. Check CLI `--help` for current flags.
 The runtime-contract builder imports `asago_package`, which the lock resolves
 from `../asago-artifact-generator/packages/asago-package`, so sync with the
 consumer checkout beside this one. The consumer resolves this checkout the same
-way.
+way. Target-discovery work and `asago-orch doctor` need the MCP SDK from the
+`target-discovery` extra, and only `--all-extras` installs it; a plain
+`uv sync --locked` prunes the extra.
 
 ```bash
-uv sync --locked
+uv sync --locked --all-extras
 uv run asago-scenario-generator generate --help
 uv run pytest tests/path_to_changed_test.py -q
 ./scripts/quality.sh
