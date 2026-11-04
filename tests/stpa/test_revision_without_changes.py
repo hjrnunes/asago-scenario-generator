@@ -39,6 +39,7 @@ from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
 from asago_scenario_generator.stpa.system_model.critic import (
     CriticFindings,
     CriticGap,
+    RevisionOutcome,
     run_revision,
 )
 from asago_scenario_generator.stpa.system_model.target_evidence import (
@@ -51,7 +52,7 @@ from asago_scenario_generator.stpa.system_model.target_evidence import (
 )
 from asago_scenario_generator.stpa.system_model.run import (
     _critic_revision_record,
-    _maybe_apply_revision,
+    _maybe_revise,
 )
 from asago_scenario_generator.stpa.system_model.critic import (
     strip_empty_responsibilities,
@@ -149,8 +150,8 @@ def _apply(
     reply: dict,
     run_dir: Path,
     target_evidence: TargetEvidence | None = None,
-):
-    return _maybe_apply_revision(
+) -> RevisionOutcome:
+    return _maybe_revise(
         structure,
         critic_findings=_findings(),
         llm_client=_client(reply),  # type: ignore[arg-type]
@@ -265,30 +266,32 @@ def test_a_revision_without_effect_is_recorded_unchanged(
 ) -> None:
     reviewed = _reviewed()
 
-    structure, warnings, revised = _apply(reviewed, reply, tmp_path)
+    outcome = _apply(reviewed, reply, tmp_path)
 
-    assert revised is False
-    assert structure == reviewed
-    assert _critic_revision_record(_findings(), warnings, revised=revised) == {
-        "status": "unchanged"
-    }
+    assert outcome.applied is False
+    assert outcome.structure == reviewed
+    record = _critic_revision_record(
+        _findings(), outcome.warnings, revised=outcome.applied
+    )
+    assert record == {"status": "unchanged"}
 
 
 @_REPLIES
 def test_stripping_an_empty_responsibility_is_not_a_revision(
     tmp_path: Path, reply: dict
 ) -> None:
-    structure, warnings, revised = _apply(_with_empty_responsibility(), reply, tmp_path)
+    outcome = _apply(_with_empty_responsibility(), reply, tmp_path)
 
     # The cleanup still runs, and its own warning reports it.
-    assert [r.resp_id for r in structure.responsibilities] == [
+    assert [r.resp_id for r in outcome.structure.responsibilities] == [
         r.resp_id for r in _reviewed().responsibilities
     ]
-    assert _STRIPPED_EMPTY in warnings
-    assert revised is False
-    assert _critic_revision_record(_findings(), warnings, revised=revised) == {
-        "status": "unchanged"
-    }
+    assert _STRIPPED_EMPTY in outcome.warnings
+    assert outcome.applied is False
+    record = _critic_revision_record(
+        _findings(), outcome.warnings, revised=outcome.applied
+    )
+    assert record == {"status": "unchanged"}
 
 
 def test_a_revision_with_effect_is_still_applied(tmp_path: Path) -> None:
@@ -296,13 +299,14 @@ def test_a_revision_with_effect_is_still_applied(tmp_path: Path) -> None:
     restated = reply["modified_responsibilities"][0]
     restated["description"] = "Answers reservation questions for verified guests."
 
-    structure, warnings, revised = _apply(_reviewed(), reply, tmp_path)
+    outcome = _apply(_reviewed(), reply, tmp_path)
 
-    assert revised is True
-    assert structure.responsibilities[2].description == restated["description"]
-    assert _critic_revision_record(_findings(), warnings, revised=revised) == {
-        "status": "applied"
-    }
+    assert outcome.applied is True
+    assert outcome.structure.responsibilities[2].description == restated["description"]
+    record = _critic_revision_record(
+        _findings(), outcome.warnings, revised=outcome.applied
+    )
+    assert record == {"status": "applied"}
 
 
 def test_the_evidence_holds_every_fixture_binding() -> None:
@@ -328,27 +332,29 @@ def test_a_change_evidence_binding_removes_is_unchanged(
 ) -> None:
     reviewed = _reviewed()
 
-    structure, warnings, revised = _apply(reviewed, reply, tmp_path, _evidence())
+    outcome = _apply(reviewed, reply, tmp_path, _evidence())
 
-    assert structure == reviewed
-    assert revised is False
-    assert _critic_revision_record(_findings(), warnings, revised=revised) == {
-        "status": "unchanged"
-    }
+    assert outcome.structure == reviewed
+    assert outcome.applied is False
+    record = _critic_revision_record(
+        _findings(), outcome.warnings, revised=outcome.applied
+    )
+    assert record == {"status": "unchanged"}
 
 
 def test_a_change_evidence_binding_keeps_is_applied(tmp_path: Path) -> None:
     reply = _resp_3_with(operation="lookup_policy")
 
-    structure, warnings, revised = _apply(_reviewed(), reply, tmp_path, _evidence())
+    outcome = _apply(_reviewed(), reply, tmp_path, _evidence())
 
-    assert structure.responsibilities[2].control_actions[0].operation == (
+    assert outcome.structure.responsibilities[2].control_actions[0].operation == (
         "lookup_policy"
     )
-    assert revised is True
-    assert _critic_revision_record(_findings(), warnings, revised=revised) == {
-        "status": "applied"
-    }
+    assert outcome.applied is True
+    record = _critic_revision_record(
+        _findings(), outcome.warnings, revised=outcome.applied
+    )
+    assert record == {"status": "applied"}
 
 
 def _restated(structure: ControlStructure, description: str) -> dict:
@@ -384,17 +390,16 @@ def test_an_identical_restatement_beside_an_empty_responsibility_is_unchanged(
     assert not baseline.responsibilities[index].control_actions
     resp_3 = _reviewed().responsibilities[2].description
 
-    structure, warnings, revised = _apply(
-        baseline, _restated(baseline, resp_3), tmp_path, _evidence()
-    )
+    outcome = _apply(baseline, _restated(baseline, resp_3), tmp_path, _evidence())
 
     # The published structure is the no-revision one: the empty
     # responsibility stripped, every other ID as the baseline numbers it.
-    assert structure == strip_empty_responsibilities(baseline)[0]
-    assert revised is False
-    assert _critic_revision_record(_findings(), warnings, revised=revised) == {
-        "status": "unchanged"
-    }
+    assert outcome.structure == strip_empty_responsibilities(baseline)[0]
+    assert outcome.applied is False
+    record = _critic_revision_record(
+        _findings(), outcome.warnings, revised=outcome.applied
+    )
+    assert record == {"status": "unchanged"}
 
 
 # The target observes an operation whose own name begins with ``operation:``.
@@ -433,10 +438,11 @@ def test_a_restated_prefixed_operation_is_unchanged(
     reply = _restated(baseline, baseline.responsibilities[2].description)
     reply["modified_responsibilities"][0]["control_actions"][1]["operation"] = spelling
 
-    structure, warnings, revised = _apply(baseline, reply, tmp_path, evidence)
+    outcome = _apply(baseline, reply, tmp_path, evidence)
 
-    assert structure == baseline
-    assert revised is False
-    assert _critic_revision_record(_findings(), warnings, revised=revised) == {
-        "status": "unchanged"
-    }
+    assert outcome.structure == baseline
+    assert outcome.applied is False
+    record = _critic_revision_record(
+        _findings(), outcome.warnings, revised=outcome.applied
+    )
+    assert record == {"status": "unchanged"}

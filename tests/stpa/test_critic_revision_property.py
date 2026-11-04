@@ -261,7 +261,7 @@ def _revision_attempted(findings: CriticFindings, run_dir) -> bool:
         "revise_control_structure",
         return_value=RevisionOutcome(baseline, [], applied=False),
     ) as revision:
-        run_module._maybe_apply_revision(
+        run_module._maybe_revise(
             baseline,
             critic_findings=findings,
             llm_client=MockLLMClient(),

@@ -66,7 +66,7 @@ from asago_scenario_generator.stpa.system_model.target_evidence import (
 )
 from asago_scenario_generator.stpa.system_model.run import (
     _critic_revision_record,
-    _maybe_apply_revision,
+    _maybe_revise,
 )
 from tests.stpa.sp1_helpers import MockLLMClient
 
@@ -2276,7 +2276,7 @@ def test_a_discarded_revision_that_strips_an_empty_responsibility_passes(
         _with_empty_responsibility(_reviewed_structure()), None
     )
 
-    revised_structure, warnings, revised = _maybe_apply_revision(
+    outcome = _maybe_revise(
         baseline,
         critic_findings=findings,
         llm_client=client,
@@ -2286,21 +2286,23 @@ def test_a_discarded_revision_that_strips_an_empty_responsibility_passes(
         loader=TemplateLoader(PROMPTS_DIR),
         temperature=0.4,
     )
-    record = _critic_revision_record(findings, warnings, revised=revised)
-    _write_revision_versions(tmp_path, baseline, revised_structure)
+    record = _critic_revision_record(
+        findings, outcome.warnings, revised=outcome.applied
+    )
+    _write_revision_versions(tmp_path, baseline, outcome.structure)
     (tmp_path / "run-manifest.yaml").write_text(
-        yaml.safe_dump({"post_revision_warnings": warnings})
+        yaml.safe_dump({"post_revision_warnings": outcome.warnings})
     )
     (tmp_path / "synthesis-manifest.yaml").write_text(
         yaml.safe_dump({"run_id": "r", "created_at": "t"})
     )
-    _write_post_revision_warnings(tmp_path, warnings)
+    _write_post_revision_warnings(tmp_path, outcome.warnings)
 
     assert record is not None and record["status"] == "discarded"
     assert record["reason"].startswith("Revision failed: ")
     # The step strips the empty responsibility; that is not a revision.
-    assert revised is False
-    assert revised_structure != baseline
+    assert outcome.applied is False
+    assert outcome.structure != baseline
     assert (tmp_path / "control-structure-evidence-bound.yaml").is_file()
     assert replay_gate._critic_revision_problem(record, tmp_path, {}) is None
 
@@ -2326,7 +2328,7 @@ def test_an_empty_revision_that_strips_an_empty_responsibility_is_unchanged(
         _with_empty_responsibility(_reviewed_structure()), None
     )
 
-    revised_structure, warnings, revised = _maybe_apply_revision(
+    outcome = _maybe_revise(
         baseline,
         critic_findings=findings,
         llm_client=client,
@@ -2336,20 +2338,24 @@ def test_an_empty_revision_that_strips_an_empty_responsibility_is_unchanged(
         loader=TemplateLoader(PROMPTS_DIR),
         temperature=0.4,
     )
-    record = _critic_revision_record(findings, warnings, revised=revised)
-    _write_revision_versions(tmp_path, baseline, revised_structure)
+    record = _critic_revision_record(
+        findings, outcome.warnings, revised=outcome.applied
+    )
+    _write_revision_versions(tmp_path, baseline, outcome.structure)
     (tmp_path / "run-manifest.yaml").write_text(
-        yaml.safe_dump({"post_revision_warnings": warnings})
+        yaml.safe_dump({"post_revision_warnings": outcome.warnings})
     )
     (tmp_path / "synthesis-manifest.yaml").write_text(
         yaml.safe_dump({"run_id": "r", "created_at": "t"})
     )
-    _write_post_revision_warnings(tmp_path, warnings)
+    _write_post_revision_warnings(tmp_path, outcome.warnings)
 
     assert record == {"status": "unchanged"}
     # The step still strips the empty responsibility.
-    assert revised_structure == strip_empty_responsibilities(baseline)[0]
-    assert any(w.startswith("Stripped empty responsibility RESP-99") for w in warnings)
+    assert outcome.structure == strip_empty_responsibilities(baseline)[0]
+    assert any(
+        w.startswith("Stripped empty responsibility RESP-99") for w in outcome.warnings
+    )
     assert replay_gate._critic_revision_problem(record, tmp_path, {}) is None
 
 
@@ -2433,7 +2439,7 @@ def test_an_applied_revision_that_drops_a_prefixed_binding_passes(
     client = MockLLMClient()
     client.set_response_for(RevisionDelta, {"modified_responsibilities": [restated]})
 
-    revised_structure, warnings, revised = _maybe_apply_revision(
+    outcome = _maybe_revise(
         baseline,
         critic_findings=findings,
         llm_client=client,
@@ -2444,18 +2450,20 @@ def test_an_applied_revision_that_drops_a_prefixed_binding_passes(
         temperature=0.4,
         target_evidence=evidence,
     )
-    record = _critic_revision_record(findings, warnings, revised=revised)
-    _write_revision_versions(tmp_path, baseline, revised_structure)
+    record = _critic_revision_record(
+        findings, outcome.warnings, revised=outcome.applied
+    )
+    _write_revision_versions(tmp_path, baseline, outcome.structure)
     (tmp_path / "run-manifest.yaml").write_text(
-        yaml.safe_dump({"post_revision_warnings": warnings})
+        yaml.safe_dump({"post_revision_warnings": outcome.warnings})
     )
     (tmp_path / "synthesis-manifest.yaml").write_text(
         yaml.safe_dump({"run_id": "r", "created_at": "t"})
     )
-    _write_post_revision_warnings(tmp_path, warnings)
+    _write_post_revision_warnings(tmp_path, outcome.warnings)
 
     assert record == {"status": "applied"}
-    assert revised_structure.responsibilities[0].control_actions[1].operation is None
+    assert outcome.structure.responsibilities[0].control_actions[1].operation is None
     assert replay_gate._critic_revision_problem(record, tmp_path, {}) is None
 
 

@@ -779,14 +779,6 @@ def _derive_stage2_control_structure(
         return None
 
 
-def _maybe_apply_revision(
-    control_structure: ControlStructure, **kwargs: Any
-) -> tuple[ControlStructure, list[str], bool]:
-    """Apply a critic revision only when unjustified gaps are present."""
-    outcome = _maybe_revise(control_structure, **kwargs)
-    return outcome.structure, outcome.warnings, outcome.applied
-
-
 def _maybe_revise(
     control_structure: ControlStructure,
     *,
