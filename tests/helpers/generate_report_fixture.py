@@ -18,7 +18,7 @@ from typing import Any
 
 import yaml
 
-from asago_scenario_generator.report_kit import read_metrics
+from asago_report_kit import read_metrics
 from asago_scenario_generator.stpa.infra.call_log import call_entries
 
 FIXTURE = Path(__file__).parent.parent / "fixtures" / "generate_report" / "miniklarna-1"

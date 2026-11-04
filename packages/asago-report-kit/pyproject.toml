@@ -1,0 +1,19 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "asago-report-kit"
+version = "0.1.0"
+description = "The offline HTML report kit: the components, styles, script and stage-summary schema the report writers share."
+readme = "README.md"
+requires-python = ">=3.12"
+
+[dependency-groups]
+dev = ["pytest"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/asago_report_kit"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

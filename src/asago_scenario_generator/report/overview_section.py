@@ -12,7 +12,7 @@ from asago_scenario_generator.report.common import ATTACK, plural
 from asago_scenario_generator.report.failures import Failure, failure_chains
 from asago_scenario_generator.report.run_data import RunData
 from asago_scenario_generator.report.slot_view import slot_views
-from asago_scenario_generator.report_kit import (
+from asago_report_kit import (
     Markup,
     callout,
     chain,

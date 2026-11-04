@@ -13,7 +13,7 @@ from asago_scenario_generator.report.testability_section import (
     omitted_reason,
     tool_of,
 )
-from asago_scenario_generator.report_kit import (
+from asago_report_kit import (
     Markup,
     badge,
     esc,

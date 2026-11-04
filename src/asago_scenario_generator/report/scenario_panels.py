@@ -17,7 +17,7 @@ from asago_scenario_generator.report.attack_path_view import (
 )
 from asago_scenario_generator.report.common import code_id, plural
 from asago_scenario_generator.report.run_data import RunData
-from asago_scenario_generator.report_kit import (
+from asago_report_kit import (
     Markup,
     TreeNode,
     code,

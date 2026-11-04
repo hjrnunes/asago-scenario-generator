@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from asago_scenario_generator.report.common import code_id, counted
 from asago_scenario_generator.report.run_data import RunData
-from asago_scenario_generator.report_kit import (
+from asago_report_kit import (
     Column,
     Markup,
     Row,

@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import Any
 
 from asago_scenario_generator.report.common import plural
-from asago_scenario_generator.report_kit import Markup, chip, esc, fields, join
+from asago_report_kit import Markup, chip, esc, fields, join
 
 CONDITION_WORD = {
     "situation": "Situation",

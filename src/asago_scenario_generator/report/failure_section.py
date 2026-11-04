@@ -14,7 +14,7 @@ from asago_scenario_generator.report.failures import (
 from asago_scenario_generator.report.run_data import RunData
 from asago_scenario_generator.report.slot_view import slot_views
 from asago_scenario_generator.report.steps import step_label
-from asago_scenario_generator.report_kit import (
+from asago_report_kit import (
     Column,
     Markup,
     Row,

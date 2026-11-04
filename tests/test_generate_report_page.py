@@ -16,18 +16,15 @@ from asago_scenario_generator.report.generate_report import (
     write_report,
 )
 from asago_scenario_generator.report.run_data import load_run
-from asago_scenario_generator.report_kit import (
+from asago_report_kit import (
     check_headline,
     check_offline,
     read_metrics,
+    stage_summary_schema,
 )
 from tests.helpers.generate_report_fixture import copy_run, edit_calls, edit_yaml
 
-SCHEMA = (
-    Path(generate_report.__file__).parent.parent
-    / "report_kit"
-    / "stage-summary-v1.schema.json"
-)
+SCHEMA = stage_summary_schema()
 SECTIONS = (
     "answer how risks slots testability obligations mechanism-suggestions failed "
     "warnings slot-hazard-ties uninvoked-operations hazards scenarios "
@@ -380,7 +377,7 @@ def test_every_number_tile_states_what_it_counts(tmp_path: Path) -> None:
 
 
 def test_a_tile_without_a_unit_is_refused() -> None:
-    from asago_scenario_generator.report_kit import KitError, metric
+    from asago_report_kit import KitError, metric
 
     with pytest.raises(KitError, match="unit"):
         metric("scenarios.written", "scenarios written", 8, unit=" ")

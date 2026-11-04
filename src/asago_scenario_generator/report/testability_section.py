@@ -11,7 +11,7 @@ from asago_scenario_generator.report.common import (
     scenario_link,
 )
 from asago_scenario_generator.report.run_data import RunData
-from asago_scenario_generator.report_kit import (
+from asago_report_kit import (
     Column,
     Markup,
     Row,

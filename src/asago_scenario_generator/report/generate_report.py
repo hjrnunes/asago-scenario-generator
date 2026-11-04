@@ -44,20 +44,17 @@ from asago_scenario_generator.report.steps import step_label
 from asago_scenario_generator.report.target_section import target_section
 from asago_scenario_generator.report.testability_section import testability_section
 from asago_scenario_generator.report.warning_section import warning_section
-from asago_scenario_generator.report_kit import (
+from asago_report_kit import (
     Markup,
     check_headline,
     page,
+    stage_summary_schema,
 )
 
 REPORT_DIR = "report"
 INDEX = "index.html"
 SUMMARY = "stage-summary.json"
-SCHEMA = (
-    Path(__file__).resolve().parent.parent
-    / "report_kit"
-    / "stage-summary-v1.schema.json"
-)
+SCHEMA = stage_summary_schema()
 EXTRA_CSS = ""
 RUN_STATUS = {
     "completed": "pass",

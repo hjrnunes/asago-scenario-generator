@@ -17,7 +17,7 @@ from asago_scenario_generator.report.scenario_panels import (
 )
 from asago_scenario_generator.report.slot_section import UCA_LABEL
 from asago_scenario_generator.report.testability_section import CHECK_LABEL, check_of
-from asago_scenario_generator.report_kit import (
+from asago_report_kit import (
     Column,
     Filter,
     Markup,

@@ -13,7 +13,7 @@ from asago_scenario_generator.report.common import (
 )
 from asago_scenario_generator.report.run_data import RunData
 from asago_scenario_generator.report.slot_view import Finding, SlotView, slot_views
-from asago_scenario_generator.report_kit import (
+from asago_report_kit import (
     Column,
     Markup,
     Row,

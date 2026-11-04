@@ -9,7 +9,7 @@ import pytest
 
 from asago_scenario_generator.report.policy_section import policy_section
 from asago_scenario_generator.report.run_data import load_run
-from asago_scenario_generator.report_kit import FootingError
+from asago_report_kit import FootingError
 from tests.helpers.generate_report_fixture import (
     body_rows,
     copy_run,

@@ -16,7 +16,7 @@ from asago_scenario_generator.pipeline.synthesis_manifest import (
 )
 from asago_scenario_generator.report.generate_report import build_report
 from asago_scenario_generator.report.run_data import load_run
-from asago_scenario_generator.report_kit import read_metrics
+from asago_report_kit import read_metrics
 from asago_scenario_generator.stpa.models.ica_enumeration import ICAEnumeration
 from asago_scenario_generator.stpa.obligation_aware.ica_verification import (
     verify_final_ica_batch,

@@ -7,7 +7,7 @@ from collections import defaultdict
 from asago_scenario_generator.report.common import counted
 from asago_scenario_generator.report.run_data import CallRecord, RunData
 from asago_scenario_generator.report.steps import GROUPS, OTHER, group_of
-from asago_scenario_generator.report_kit import (
+from asago_report_kit import (
     Column,
     Markup,
     Row,

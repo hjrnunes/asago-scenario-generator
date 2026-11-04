@@ -6,7 +6,7 @@ import re
 from typing import Any, Iterable
 
 from asago_scenario_generator.report.run_data import RunData
-from asago_scenario_generator.report_kit import Markup, callout, chip, esc, join
+from asago_report_kit import Markup, callout, chip, esc, join
 
 ATTACK = "adversarial"
 
