@@ -3,21 +3,41 @@
 from __future__ import annotations
 
 import copy
+import json
 from types import MappingProxyType
 from typing import Any
 
+import pytest
+from asago_package.contract_kit import contract_dir
+from jsonschema import Draft202012Validator
+
 from asago_scenario_generator.target_discovery import (
     PLANTED_ITEM,
+    RuntimeContractViolation,
     declared_runtime_contract,
 )
 
+SCHEMA_VERSION = "artifact-runtime-contract-v2"
+
 
 def _base() -> dict[str, Any]:
+    """Return the shared base every declared target builds on."""
+
     return {
-        "schema_version": "artifact-runtime-contract-v2",
-        "authoring_transports": {"discovery": "unavailable", "target": "unavailable"},
+        "schema_version": SCHEMA_VERSION,
+        "authoring_transports": {
+            "discovery": "unavailable",
+            "judge": "unavailable",
+            "setup": "unavailable",
+            "target": "unavailable",
+        },
         "delivery": ["direct_user_message", "sequential_user_turns"],
-        "limits": {"max_planned_turns": 4, "max_turns": 8},
+        "limits": {
+            "detector_timeout_seconds": 10,
+            "generation_timeout_seconds": 180,
+            "max_planned_turns": 4,
+            "max_turns": 8,
+        },
         "observation": {"tool_calls": {"availability": "captured_or_unavailable"}},
         "setup_permissions": [],
         "target_access": "downstream_only",
@@ -65,10 +85,9 @@ def test_without_a_declared_delivery_the_base_delivery_is_used() -> None:
     ]
 
 
-def test_an_empty_declared_delivery_still_replaces_the_base() -> None:
-    contract = declared_runtime_contract(_base(), seed_slots=[], delivery=[])
-
-    assert contract["delivery"] == []
+def test_an_empty_declared_delivery_is_refused() -> None:
+    with pytest.raises(RuntimeContractViolation, match="at delivery"):
+        declared_runtime_contract(_base(), seed_slots=[], delivery=[])
 
 
 def test_no_seed_slot_means_no_planted_item_even_if_a_source_names_it() -> None:
@@ -76,11 +95,13 @@ def test_no_seed_slot_means_no_planted_item_even_if_a_source_names_it() -> None:
 
     from_base = declared_runtime_contract(base, seed_slots=[])
     declared = declared_runtime_contract(
-        _base(), seed_slots=[], delivery=[PLANTED_ITEM, "sequential_user_turns"]
+        _base(),
+        seed_slots=[],
+        delivery=[PLANTED_ITEM, "direct_user_message", "sequential_user_turns"],
     )
 
     assert from_base["delivery"] == ["direct_user_message"]
-    assert declared["delivery"] == ["sequential_user_turns"]
+    assert declared["delivery"] == ["direct_user_message", "sequential_user_turns"]
 
 
 def test_the_planted_item_is_offered_once_and_last() -> None:
@@ -95,27 +116,37 @@ def test_the_planted_item_is_offered_once_and_last() -> None:
     assert contract["delivery"] == ["direct_user_message", "planted_item"]
 
 
-def test_a_base_without_delivery_gives_an_empty_delivery() -> None:
+def test_a_base_without_delivery_takes_the_declared_one() -> None:
     base = _base()
     del base["delivery"]
 
-    assert declared_runtime_contract(base, seed_slots=[])["delivery"] == []
-    assert declared_runtime_contract(base, seed_slots=[_slot()])["delivery"] == [
-        "planted_item"
-    ]
+    contract = declared_runtime_contract(
+        base, seed_slots=[], delivery=["direct_user_message"]
+    )
+
+    assert contract["delivery"] == ["direct_user_message"]
+
+
+def test_a_base_without_delivery_and_no_declaration_is_refused() -> None:
+    base = _base()
+    del base["delivery"]
+
+    with pytest.raises(RuntimeContractViolation, match="at delivery"):
+        declared_runtime_contract(base, seed_slots=[])
 
 
 def test_declared_limits_override_single_base_limits_and_keep_the_rest() -> None:
     base = _base()
 
     contract = declared_runtime_contract(
-        base, seed_slots=[], limits={"max_turns": 6, "detector_timeout_seconds": 10}
+        base, seed_slots=[], limits={"max_turns": 6, "detector_timeout_seconds": 12}
     )
 
     assert contract["limits"] == {
+        "detector_timeout_seconds": 12,
+        "generation_timeout_seconds": 180,
         "max_planned_turns": 4,
         "max_turns": 6,
-        "detector_timeout_seconds": 10,
     }
 
 
@@ -133,14 +164,27 @@ def test_absent_or_empty_limits_keep_the_base_limits() -> None:
     )
 
 
-def test_a_base_without_limits_takes_only_the_declared_limits() -> None:
+def test_a_base_without_limits_takes_the_declared_limits() -> None:
+    base = _base()
+    del base["limits"]
+    limits = {
+        "detector_timeout_seconds": 5,
+        "generation_timeout_seconds": 60,
+        "max_planned_turns": 2,
+        "max_turns": 3,
+    }
+
+    contract = declared_runtime_contract(base, seed_slots=[], limits=limits)
+
+    assert contract["limits"] == limits
+
+
+def test_a_partial_limit_on_a_base_without_limits_is_refused() -> None:
     base = _base()
     del base["limits"]
 
-    assert declared_runtime_contract(base, seed_slots=[])["limits"] == {}
-    assert declared_runtime_contract(base, seed_slots=[], limits={"max_turns": 3})[
-        "limits"
-    ] == {"max_turns": 3}
+    with pytest.raises(RuntimeContractViolation, match="at limits"):
+        declared_runtime_contract(base, seed_slots=[], limits={"max_turns": 3})
 
 
 def test_seed_slots_are_copied_as_plain_dicts() -> None:
@@ -166,15 +210,50 @@ def test_a_read_only_mapping_slot_becomes_a_dict() -> None:
 
 
 def test_every_other_base_key_is_carried_over_unchanged() -> None:
-    base = {**_base(), "extra": {"kept": True}}
+    base = _base()
 
     contract = declared_runtime_contract(
-        base, seed_slots=[_slot()], delivery=["direct_user_message"], limits={"x": 1}
+        base, seed_slots=[_slot()], delivery=["direct_user_message"]
     )
 
     for key in base.keys() - {"delivery", "limits"}:
         assert contract[key] == base[key]
     assert contract.keys() == base.keys() | {"seed_slots"}
+
+
+def test_an_unknown_base_key_is_refused() -> None:
+    base = {**_base(), "extra": {"kept": True}}
+
+    with pytest.raises(RuntimeContractViolation, match="extra"):
+        declared_runtime_contract(base, seed_slots=[_slot()])
+
+
+def test_the_built_contract_passes_the_consumer_schema() -> None:
+    schema = json.loads(
+        (contract_dir("runtime-contract") / f"{SCHEMA_VERSION}.schema.json").read_text(
+            "utf-8"
+        )
+    )
+
+    contract = declared_runtime_contract(
+        _base(),
+        seed_slots=[_slot()],
+        delivery=["direct_user_message"],
+        limits={"max_turns": 6},
+    )
+
+    Draft202012Validator(schema).validate(contract)
+
+
+def test_a_contract_the_consumer_schema_rejects_names_the_violation() -> None:
+    base = {**_base(), "target_access": "direct"}
+
+    with pytest.raises(RuntimeContractViolation) as error:
+        declared_runtime_contract(base, seed_slots=[])
+
+    assert str(error.value).startswith(
+        f"the runtime contract violates {SCHEMA_VERSION}: at target_access: "
+    )
 
 
 def test_with_nothing_declared_the_contract_is_the_base_with_no_seed_slots() -> None:

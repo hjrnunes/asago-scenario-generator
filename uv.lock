@@ -69,11 +69,27 @@ requires-dist = [{ name = "jsonschema", specifier = ">=4.0" }]
 dev = [{ name = "pytest" }]
 
 [[package]]
+name = "asago-package"
+version = "0.1.0"
+source = { editable = "../asago-artifact-generator/packages/asago-package" }
+dependencies = [
+    { name = "jsonschema" },
+    { name = "pydantic" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "jsonschema", specifier = ">=4.0" },
+    { name = "pydantic", specifier = ">=2.0" },
+]
+
+[[package]]
 name = "asago-scenario-generator"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "asago-handoff" },
+    { name = "asago-package" },
     { name = "jinja2" },
     { name = "jsonschema" },
     { name = "openai" },
@@ -101,6 +117,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "asago-handoff", editable = "packages/asago-handoff" },
+    { name = "asago-package", editable = "../asago-artifact-generator/packages/asago-package" },
     { name = "jinja2", specifier = ">=3.1" },
     { name = "jsonschema", specifier = ">=4.0" },
     { name = "mcp", marker = "extra == 'target-discovery'", specifier = ">=1.9.0,<2" },

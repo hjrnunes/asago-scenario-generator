@@ -51,6 +51,10 @@ own documents.
 ## Commands
 
 Run from the intended checkout. Check CLI `--help` for current flags.
+The runtime-contract builder imports `asago_package`, which the lock resolves
+from `../asago-artifact-generator/packages/asago-package`, so sync with the
+consumer checkout beside this one. The consumer resolves this checkout the same
+way.
 
 ```bash
 uv sync --locked
