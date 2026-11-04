@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "asago-contract-envelope-v1",
+  "title": "The self-identifying contract envelope",
+  "description": "The `contract` block a new-version document carries: the contract id, its version, the digest of the installed runtime spec the writer used, the requirements the document needs, and who wrote and validated it.",
+  "type": "object",
+  "required": ["id", "version", "spec_digest", "requires", "provenance"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "spec_digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "requires": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "provenance": {
+      "$ref": "#/$defs/provenance"
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "provenance": {
+      "type": "object",
+      "required": ["writer", "writer_version", "validator_version"],
+      "properties": {
+        "writer": {
+          "type": "string",
+          "minLength": 1
+        },
+        "writer_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "validator_version": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

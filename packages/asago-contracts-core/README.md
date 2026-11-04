@@ -1,15 +1,67 @@
 # asago-contracts-core
 
 The contracts machinery the producer, the consumer and the orchestrator share:
-scenario-handoff validation, the artifact-design boundary walker, canonical
-JSON and framed digests in both persisted encodings, and the conformance
-runner that checks a contract kit's cases.
+scenario-handoff validation, the self-identifying contract envelope, the
+artifact-design boundary walker, canonical JSON and framed digests in both
+persisted encodings, and the conformance runner that checks a contract kit's
+cases.
 
 The package needs the standard library and `jsonschema` only. It imports
 nothing from producer, consumer or orchestrator code, and every schema or data
 file it reads lives inside the package directory. It is a workspace member of
 `asago-scenario-generator` and is built to move to its own package and
 repository without a code change.
+
+## The self-identifying envelope
+
+A contract kit splits into its runtime spec, its cases and its docs:
+
+```
+contracts/<contract>/<version>/
+  spec.json      the identity: contract, version, status, supports, extensions,
+                 the schema's file name, its cases and docs, and spec_digest
+  schema.json    the runtime schema
+  cases/         the conformance cases (never part of the identity)
+  README.md      the contract's docs
+```
+
+`spec_digest` covers `spec.json` without its `spec_digest` field and the bytes of
+`schema.json`, under the producer encoding. Editing a case or a doc leaves it
+alone, so a case can change without changing the contract's identity.
+
+A new-version document carries the envelope:
+
+```json
+{
+  "contract": {
+    "id": "midojo-delivery",
+    "version": "midojo-delivery-v1",
+    "spec_digest": "sha256:...",
+    "requires": ["feature-a"],
+    "provenance": {
+      "writer": "asago-orch.qualification.midojo_episode_runner",
+      "writer_version": "0.1.0",
+      "validator_version": "asago-contracts-core 0.1.0"
+    }
+  }
+}
+```
+
+`envelope_schema()` is the JSON Schema of that block. `load_specs(contracts_dir)`
+loads every installed spec under a contract root, and `SpecSet.read(document)`
+selects the spec the document names and enforces four rules:
+
+- an unsupported version fails, and the error lists the supported versions;
+- a `requires` entry the spec does not support fails, so an old reader cannot
+  silently ignore a new constraint;
+- a top-level field outside the schema and the spec's `extensions` fails;
+- a `spec_digest` that is not exactly the installed spec's fails, for a draft as
+  for a published version.
+
+A document without an envelope is a legacy document of the version its
+`schema_version` names; a spec with `"envelope": "required"` refuses one.
+`write_envelope(document, spec, writer=..., writer_version=..., requires=...)`
+gives a document the envelope its spec's reader accepts.
 
 ## Rules
 
@@ -45,10 +97,10 @@ policy combinations the consumer uses for input digests.
 
 ## Data
 
-`src/asago_contracts_core/data/` carries `handoff-v5/schema.json` and
-`ownership-rules.json` for the code to read. `tests/data/` carries the handoff
-kit and the tool-call-condition vectors the tests run against, so the package
-tests pass after extraction. The producer's
+`src/asago_contracts_core/data/` carries `handoff-v5/schema.json`,
+`ownership-rules.json` and `envelope-v1.schema.json` for the code to read.
+`tests/data/` carries the handoff kit and the tool-call-condition vectors the
+tests run against, so the package tests pass after extraction. The producer's
 `scripts/sync_handoff_package_data.py` copies both sets from `data/contracts/`,
 and the producer's `tests/test_contracts_core_data.py` fails when the copies
 differ.

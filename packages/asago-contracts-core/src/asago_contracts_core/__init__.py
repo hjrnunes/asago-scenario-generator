@@ -7,9 +7,14 @@ walker, the composed schema, and the rules the schema cannot state.
 ``canonical_json``, ``framed_digest`` and ``digest_record`` pin the producer
 and consumer canonical-JSON encodings.
 
+``load_specs`` reads a contract kit's installed runtime specs, and ``spec_digest``
+pins one: the bytes of ``spec.json`` and its schema, never its cases or docs.
+``SpecSet.read`` selects the spec a document names and enforces the reader rules;
+``write_envelope`` gives a new-version document its identity.
+
 The package needs the standard library and ``jsonschema`` only. It carries the
-``handoff-v5`` schema and the ownership rules as package data, so it can move
-to its own repository without a code change.
+``handoff-v5`` schema, the ownership rules and the envelope schema as package
+data, so it can move to its own repository without a code change.
 """
 
 from __future__ import annotations
@@ -54,6 +59,31 @@ from .contract import (
     load_ownership_rules,
     packaged_contract,
 )
+from .envelope import (
+    CORE_VERSION,
+    ENVELOPE_FIELD,
+    ENVELOPE_SCHEMA_ID,
+    VALIDATOR,
+    ContractEnvelope,
+    ContractEnvelopeError,
+    ContractSpec,
+    InvalidDocumentError,
+    InvalidEnvelopeError,
+    InvalidSpecError,
+    MissingEnvelopeError,
+    Provenance,
+    SpecDigestMismatchError,
+    SpecSet,
+    UnknownContractError,
+    UnknownFieldError,
+    UnknownRequirementError,
+    UnsupportedVersionError,
+    envelope_schema,
+    load_specs,
+    read_envelope,
+    spec_digest,
+    write_envelope,
+)
 from .shape import (
     CHANNEL_DIRECT,
     CHANNEL_FORGED,
@@ -73,7 +103,10 @@ __all__ = [
     "CHANNEL_FORGED",
     "CHANNEL_INDIRECT",
     "CONSUMER_ENCODING",
+    "CORE_VERSION",
     "DETECTED",
+    "ENVELOPE_FIELD",
+    "ENVELOPE_SCHEMA_ID",
     "HANDOFF_SCHEMA_VERSION_V5",
     "INCONCLUSIVE",
     "KIT_V5",
@@ -82,12 +115,27 @@ __all__ = [
     "NO_NAN_ENCODING",
     "OTHER_VERSION_VIOLATIONS",
     "PRODUCER_ENCODING",
+    "VALIDATOR",
     "ConditionEvaluation",
     "ConformanceCase",
     "ConformanceResult",
     "Contract",
+    "ContractEnvelope",
+    "ContractEnvelopeError",
     "ContractError",
+    "ContractSpec",
     "Encoding",
+    "InvalidDocumentError",
+    "InvalidEnvelopeError",
+    "InvalidSpecError",
+    "MissingEnvelopeError",
+    "Provenance",
+    "SpecDigestMismatchError",
+    "SpecSet",
+    "UnknownContractError",
+    "UnknownFieldError",
+    "UnknownRequirementError",
+    "UnsupportedVersionError",
     "Violation",
     "attack_shape_violation",
     "canonical_json",
@@ -96,6 +144,7 @@ __all__ = [
     "encoding_for",
     "evaluate_condition",
     "evaluate_condition_v2",
+    "envelope_schema",
     "feature_violations",
     "framed_digest",
     "hand_rule_violations",
@@ -103,13 +152,17 @@ __all__ = [
     "load_conformance_cases",
     "load_contract",
     "load_ownership_rules",
+    "load_specs",
     "normalize_unicode",
     "ownership_violations",
     "packaged_contract",
+    "read_envelope",
     "render_feature_text",
     "run_conformance",
     "schema_violations",
     "sha256_hex",
+    "spec_digest",
     "validate_condition",
     "validate_handoff",
+    "write_envelope",
 ]
