@@ -2306,6 +2306,79 @@ class TestPostReviewDensityRecheck:
             }
         ]
 
+    def test_failed_published_graph_matches_the_recorded_failure_evidence(
+        self, tmp_path
+    ) -> None:
+        # The review keeps SC-2's wording but drops its only hazard edge; the
+        # correction re-points SC-2 at H-1 and still leaves H-2 orphaned.  The
+        # graph in force after the round is therefore the graph the gate
+        # rejects, and it differs from both the pre-review draft and the
+        # first-reviewed graph.
+        first = valid_empty_coordination_analysis_dict(
+            constraint_ids=("SC-1", "SC-2"),
+            hazard_ids=("H-1", "H-2"),
+        )
+        first["semantic_review"]["constraints"][1]["related_hazards"] = []
+        corrected = valid_empty_coordination_analysis_dict(
+            constraint_ids=("SC-1", "SC-2"),
+            hazard_ids=("H-1", "H-2"),
+        )
+        corrected["semantic_review"]["constraints"][1]["related_hazards"] = ["H-1"]
+        client = setup_sp1_mock_client()
+        client.set_response_for(CoordinationAnalysis, [first, corrected])
+        result = _run_atlas(client, tmp_path)
+
+        assert result.control_structure is None
+        assert any(
+            "density gate failed after review" in error for error in result.stage_errors
+        )
+
+        # A fresh density check of the published canonical graph reproduces
+        # the artifact's final report and the last correction round's
+        # after-findings.  The published graph is the graph the failure
+        # evidence describes, not a stale version of it.
+        published = LossAnalysis.model_validate(
+            yaml_lib.safe_load((tmp_path / "loss-analysis.yaml").read_text())
+        )
+        published_report = check_hazard_graph_density(published)
+        evidence = yaml_lib.safe_load(
+            (tmp_path / "loss-analysis-gates.yaml").read_text()
+        )
+        assert [sc.related_hazards for sc in published.security_constraints] == [
+            ["H-1"],
+            ["H-1"],
+        ]
+        assert published_report.failing_checks == ("hazard H-2 has no constraint",)
+        assert evidence["post_review_density"]["constraints_without_hazard"] == []
+        assert evidence["post_review_density"]["hazards_without_constraint"] == ["H-2"]
+        assert [
+            record["failing_checks_after"]
+            for record in evidence["post_review_corrections"]
+        ] == [list(published_report.failing_checks)]
+        assert (
+            "post-review correction still failing: hazard H-2 has no constraint"
+            in evidence["failing_checks"]
+        )
+
+        # The evidence separates the graph that failed last from the two
+        # graphs it replaced: the first review broke both directions of the
+        # SC-2/H-2 pair, and the pre-review draft passed.
+        first_record = evidence["post_review_corrections"][0]
+        assert first_record["failing_checks_before"] == [
+            "constraint SC-2 has no hazard",
+            "hazard H-2 has no constraint",
+        ]
+        reviewed = LossAnalysis.model_validate(
+            yaml_lib.safe_load((tmp_path / "loss-analysis-reviewed.yaml").read_text())
+        )
+        assert check_hazard_graph_density(reviewed).failing_checks == tuple(
+            first_record["failing_checks_before"]
+        )
+        draft = LossAnalysis.model_validate(
+            yaml_lib.safe_load((tmp_path / "loss-analysis-draft.yaml").read_text())
+        )
+        assert check_hazard_graph_density(draft).passed
+
     @staticmethod
     def _mark_hazard_unresolved(payload: dict, index: int) -> dict:
         row = payload["semantic_review"]["hazards"][index]
