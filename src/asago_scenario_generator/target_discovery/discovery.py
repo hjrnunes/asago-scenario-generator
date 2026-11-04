@@ -51,19 +51,17 @@ from .contracts import (
     TargetInterpreterFactory,
     TargetToolPromptView,
 )
-from .redaction import sanitize_tool_fields
-from .transport import (
+from .model_adapter import (
+    batch_prompt_hashes,
+    build_verifier_prompt,
     canonical_tool_fields,
     looks_like_incomplete_page,
     normalize_page,
+    prompt_hash,
     tool_digest_payload,
     tool_name_hint,
 )
-from .prompts import (
-    batch_prompt_hashes,
-    build_verifier_prompt,
-    prompt_hash,
-)
+from .redaction import sanitize_tool_fields
 
 
 _SCHEMA_FORMATS = frozenset(item.value for item in ValueFormat)

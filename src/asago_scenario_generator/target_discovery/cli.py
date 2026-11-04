@@ -15,13 +15,13 @@ from asago_scenario_generator.stpa.models.value_facts import TargetValueFacts
 
 from .contracts import McpInventoryAdapter, McpTargetDiscoveryInputs
 from .discovery import discover_mcp_target
-from .llm_interpreter import TargetDiscoveryLlmInterpreter
-from .persistence import write_target_discovery
-from .transport import (
+from .model_adapter import (
     FileMcpInventoryAdapter,
     HttpMcpInventoryAdapter,
     McpToolsListFileError,
+    TargetDiscoveryLlmInterpreter,
 )
+from .persistence import write_target_discovery
 
 
 app = typer.Typer(

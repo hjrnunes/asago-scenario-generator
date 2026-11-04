@@ -54,6 +54,7 @@ _SUBMODULES = frozenset(
         "contracts",
         "discovery",
         "llm_interpreter",
+        "model_adapter",
         "persistence",
         "prompts",
         "redaction",
