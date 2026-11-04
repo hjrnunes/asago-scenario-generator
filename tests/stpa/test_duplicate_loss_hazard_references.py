@@ -30,6 +30,7 @@ from asago_scenario_generator.stpa.models.loss_analysis import (
 )
 from asago_scenario_generator.stpa.system_model.loss_analysis import (
     _Stage1aRevisionPatch,
+    _Stage1aRiskRepairDraft,
     derive_loss_analysis,
 )
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
@@ -270,6 +271,7 @@ def test_a_list_the_plan_selects_twice_is_recorded_once(tmp_path, outcome) -> No
         risk_cards=make_risk_cards(),
         run_validators=validate,
         normalizer=lambda _draft: [],
+        provider_draft_model=_Stage1aRiskRepairDraft,
         repair_record=record,
     )
     if outcome == "failed":

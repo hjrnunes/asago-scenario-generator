@@ -76,6 +76,11 @@ from asago_scenario_generator.stpa.system_model.target_evidence import (
     TargetEvidence,
 )
 from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
+from asago_scenario_generator.stpa.system_model.loss_analysis_acceptance import (
+    accept_stage1a_draft,
+    normalize_disposition_citations,
+    revalidate_provider_object,
+)
 from asago_scenario_generator.stpa.system_model.loss_analysis_repair import (
     HAZARDLESS_CONSTRAINT_DROP_KIND,
     TRUNCATED_DISPOSITION_RECOVERY_KIND,
@@ -105,7 +110,6 @@ from asago_scenario_generator.stpa.system_model.loss_analysis_repair import (
     record_truncation_recovery,
     recover_truncated_risk_dispositions,
     recover_truncated_risk_losses,
-    revalidate_provider_object,
     run_targeted_repair,
     salvage_corrected_reply,
     salvage_reference_repair_input,
@@ -827,6 +831,15 @@ _HANDLE_ID_FIELDS = (
 )
 
 
+def _repair_draft_model(response_format: type[BaseModel]) -> type[LossAnalysisDraft]:
+    """Return the row-level repair view of a Stage 1a provider wire."""
+    return (
+        _Stage1aRiskRepairDraft
+        if issubclass(response_format, _Stage1aRiskProviderDraft)
+        else _Stage1aGapRepairDraft
+    )
+
+
 def _handle_repair_input(
     result: LLMResult | None,
     *,
@@ -851,9 +864,7 @@ def _handle_repair_input(
     _name_rows_by_handle(raw, is_risk_wire=is_risk_wire)
     return _RepairInput(
         result=result.model_copy(update={"content": raw}),
-        response_format=(
-            _Stage1aRiskRepairDraft if is_risk_wire else _Stage1aGapRepairDraft
-        ),
+        response_format=_repair_draft_model(response_format),
         ids=_provider_id_space(provider, prior),
     )
 
@@ -1331,84 +1342,6 @@ def _wire_error_summary(exc: ValidationError) -> str:
     return summary
 
 
-# A citing loss that accounts for more than this many risk cards weakens
-# the "the citation is direct evidence" argument (one bulk loss can sweep
-# in cards the model explicitly excluded), so those flips are flagged for
-# reviewer attention in the gates artifact.
-BULK_CITATION_FLAG_THRESHOLD = 8
-
-
-def normalize_disposition_citations(
-    analysis: LossAnalysisDraft | LossAnalysis,
-) -> list[str]:
-    """Resolve disposition/citation contradictions from the response's own evidence.
-
-    A ``not_applicable`` disposition for a risk card that a loss explicitly
-    cites in ``source_risk_cards`` is self-contradictory wire data (spec rule
-    1.1(4)).  The citation is direct evidence that the model derived that
-    loss from the risk, so deterministic code flips the disposition to
-    ``cited`` with exactly the citing losses and returns a warning for
-    reviewer visibility in the gates artifact.  The warning retains the
-    model's dropped reason and flags flips whose only citing loss is a bulk
-    citation (more than :data:`BULK_CITATION_FLAG_THRESHOLD` cards), where
-    the dropped reason deserves human attention.  Mutates the analysis in
-    place.
-    """
-    warnings: list[str] = []
-    citing: dict[str, list[str]] = {}
-    loss_citation_counts: dict[str, int] = {}
-    for loss in analysis.risk_card_losses + analysis.use_case_losses:
-        loss_citation_counts[loss.loss_id] = len(set(loss.source_risk_cards))
-        for risk_ref in loss.source_risk_cards:
-            citing.setdefault(risk_ref, []).append(loss.loss_id)
-    for disposition in analysis.risk_dispositions:
-        if disposition.disposition != "not_applicable":
-            continue
-        loss_ids = sorted(set(citing.get(disposition.risk_ref, ())))
-        if not loss_ids:
-            continue
-        dropped_reason = (disposition.reason or "").strip()
-        disposition.disposition = "cited"
-        disposition.loss_ids = loss_ids
-        disposition.reason = None
-        warnings.append(
-            _citation_flip_warning(
-                disposition.risk_ref, loss_ids, dropped_reason, loss_citation_counts
-            )
-        )
-    return warnings
-
-
-def _citation_flip_warning(
-    risk_ref: str,
-    loss_ids: list[str],
-    dropped_reason: str,
-    loss_citation_counts: dict[str, int],
-) -> str:
-    bulk_losses = [
-        loss_id
-        for loss_id in loss_ids
-        if loss_citation_counts.get(loss_id, 0) > BULK_CITATION_FLAG_THRESHOLD
-    ]
-    bulk_note = (
-        f"; bulk citation: {', '.join(bulk_losses)} cite more than "
-        f"{BULK_CITATION_FLAG_THRESHOLD} cards, review the dropped reason"
-        if bulk_losses
-        else ""
-    )
-    reason_note = (
-        f"; the model's dropped reason was: {dropped_reason}"
-        if dropped_reason
-        else "; the model gave no reason"
-    )
-    return (
-        f"risk accounting normalized: '{risk_ref}' was "
-        f"not_applicable but is cited by {', '.join(loss_ids)}"
-        f"{reason_note}; flipped to cited from the response's own "
-        f"citation evidence{bulk_note}"
-    )
-
-
 @dataclass
 class _Stage1aCall:
     """One Stage 1a call's inputs and the routing state of its first attempt.
@@ -1501,13 +1434,15 @@ class _Stage1aCall:
             result = self._recover_truncation(result, cleanup)
             result = self._drop_hazardless_constraints(result, cleanup)
         draft = self._parse_provider_draft(result)
-        merged = (
-            self.merge_authority(draft)
-            if self.authoritative_draft is not None
-            else draft
+        return accept_stage1a_draft(
+            draft,
+            repair_model=_repair_draft_model(self.response_format),
+            authority=(
+                self.merge_authority if self.authoritative_draft is not None else None
+            ),
+            warnings=self.normalization_warnings,
+            step=self.step,
         )
-        self.add_warnings(normalize_disposition_citations(merged))
-        return merged
 
     def _recover_truncation(
         self, result: LLMResult, cleanup: list[dict[str, Any]]
@@ -2422,6 +2357,9 @@ def _apply_deterministic_cleanup(
     response.
     """
     cleaned = outcome.draft
+    # The boundary re-check stays here so a failure keeps this path's own
+    # stop message.  Acceptance repeats it as its first step, on the same
+    # unchanged draft, so the second check cannot fail.
     try:
         revalidate_provider_object(cleaned, repair_response_format, step=call.step)
     except ValueError as exc:
@@ -2433,7 +2371,7 @@ def _apply_deterministic_cleanup(
             error_msg,
         ) from exc
     try:
-        cleaned = _validate_cleaned_draft(call, cleaned)
+        cleaned = _validate_cleaned_draft(call, cleaned, repair_response_format)
     except (_DraftReferenceValidationError, _DraftSemanticValidationError) as exc:
         raise _cleanup_stop(
             call,
@@ -2462,12 +2400,20 @@ def _apply_deterministic_cleanup(
 
 
 def _validate_cleaned_draft(
-    call: _Stage1aCall, cleaned: LossAnalysisDraft
+    call: _Stage1aCall,
+    cleaned: LossAnalysisDraft,
+    repair_model: type[BaseModel],
 ) -> LossAnalysisDraft:
-    """Merge, normalize, and validate a cleaned draft like a first response."""
-    if call.authoritative_draft is not None:
-        cleaned = call.merge_authority(cleaned)
-    call.add_warnings(normalize_disposition_citations(cleaned))
+    """Accept (re-check, merge, normalize) and validate a cleaned draft."""
+    cleaned = accept_stage1a_draft(
+        cleaned,
+        repair_model=repair_model,
+        authority=(
+            call.merge_authority if call.authoritative_draft is not None else None
+        ),
+        warnings=call.normalization_warnings,
+        step=call.step,
+    )
     call.run_validators(cleaned)
     return cleaned
 

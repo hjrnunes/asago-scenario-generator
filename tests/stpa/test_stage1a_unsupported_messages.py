@@ -175,7 +175,7 @@ def test_cleanup_leaving_a_draft_failure(
 ) -> None:
     cause = la._DraftReferenceValidationError("H-9 is unknown", feedback="Fix H-9.")
 
-    def fail(call, cleaned):
+    def fail(call, cleaned, repair_model):
         raise cause
 
     monkeypatch.setattr(la, "revalidate_provider_object", lambda *a, **kw: None)
@@ -199,7 +199,7 @@ def test_cleanup_leaving_a_draft_failure(
 def test_cleanup_producing_a_conflicting_duplicate(monkeypatch, cleanup) -> None:
     cause = ValueError("conflicting duplicate hazard ID 'H-1'")
 
-    def fail(call, cleaned):
+    def fail(call, cleaned, repair_model):
         raise cause
 
     monkeypatch.setattr(la, "revalidate_provider_object", lambda *a, **kw: None)

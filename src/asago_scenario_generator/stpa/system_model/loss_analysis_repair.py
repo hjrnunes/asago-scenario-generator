@@ -106,6 +106,11 @@ from asago_scenario_generator.stpa.models.loss_analysis import (
     account_for_risk_cards,
     span_quotes_rule,
 )
+from asago_scenario_generator.stpa.system_model.loss_analysis_acceptance import (
+    accept_stage1a_draft,
+    format_validation_errors,
+    record_warnings,
+)
 from asago_scenario_generator.stpa.system_model.repair_ids import (
     CONSTRAINT,
     HAZARD,
@@ -731,17 +736,6 @@ class WireErrorClassification:
     unsupported_reason: str | None
 
 
-def _format_validation_errors(
-    exc: ValidationError, *, limit: int = 3
-) -> tuple[str, ...]:
-    """Format a pydantic error's items as ``location: message`` strings."""
-    return tuple(
-        f"{'.'.join(str(part) for part in item.get('loc', ())) or 'row'}: "
-        f"{item.get('msg', '')}"
-        for item in exc.errors()[:limit]
-    )
-
-
 def _container_error(collection: str, error_type: str, message: str) -> str:
     if error_type == "missing":
         return f"container-presence: collection '{collection}' is missing"
@@ -1007,7 +1001,7 @@ def _salvage_rows(
         try:
             kept.append(model.model_validate(row))
         except ValidationError as exc:
-            reason = "; ".join(_format_validation_errors(exc))
+            reason = "; ".join(format_validation_errors(exc))
             label = _row_label(row, index, id_field, name)
             if label_pairs:
                 dropped.append((label, reason, _row_identity(row, id_field)))
@@ -1169,7 +1163,7 @@ def _gap_disposition_defect(row: object) -> str | None:
     try:
         RiskDisposition.model_validate(row)
     except ValidationError as exc:
-        return "; ".join(_format_validation_errors(exc))
+        return "; ".join(format_validation_errors(exc))
     return None
 
 
@@ -1204,7 +1198,7 @@ class _ConstraintSalvage:
         try:
             bare_constraint = self.constraint_wire_model.model_validate(bare)
         except ValidationError as exc:
-            reason = "; ".join(_format_validation_errors(exc))
+            reason = "; ".join(format_validation_errors(exc))
             label = _row_label(row, index, "constraint_id", self._name)
             self.dropped_constraint_fields.append(f"{label}: {reason}")
             return
@@ -1303,7 +1297,7 @@ def _check_obligation_entry(
     try:
         kept_candidate: Obligation | None = Obligation.model_validate(entry)
     except ValidationError as exc:
-        errors.extend(_format_validation_errors(exc, limit=4))
+        errors.extend(format_validation_errors(exc, limit=4))
         kept_candidate = None
     if _rule_span_defect(entry, rule):
         errors.append(
@@ -1468,7 +1462,7 @@ def classify_obligation_defects(
     try:
         Obligation.model_validate(corrected)
     except ValidationError as exc:
-        first = _format_validation_errors(exc, limit=1)[0]
+        first = format_validation_errors(exc, limit=1)[0]
         return (), f"the defect is outside the permitted repair table: {first}"
     return tuple(changes), None
 
@@ -2669,35 +2663,6 @@ def _accounting_repair_plan(
 
 
 # ---------------------------------------------------------------------------
-# Boundary 1: the corrected original provider object (R2.4)
-# ---------------------------------------------------------------------------
-
-
-def revalidate_provider_object(
-    draft: LossAnalysisDraft,
-    model: type[BaseModel] | None,
-    *,
-    step: str,
-) -> None:
-    """Re-validate the corrected wire object against the original schema.
-
-    After salvage and any repair or cleanup, the original collections with
-    only the authorized corrections applied must still satisfy the original
-    provider schema before the domain merge.
-    """
-    if model is None:
-        return
-    try:
-        model.model_validate(draft.model_dump(mode="json"))
-    except ValidationError as exc:
-        first = _format_validation_errors(exc, limit=3)
-        raise ValueError(
-            f"{step}: the corrected response no longer satisfies the original "
-            "provider schema: " + "; ".join(first)
-        ) from exc
-
-
-# ---------------------------------------------------------------------------
 # Merges
 # ---------------------------------------------------------------------------
 
@@ -3587,22 +3552,20 @@ def _drop_unresolved(
 
 @dataclass(frozen=True)
 class _RepairValidation:
-    """The callables one repaired draft must pass through before acceptance."""
+    """What a repaired draft must satisfy as it passes through acceptance."""
 
     run_validators: Callable[[LossAnalysisDraft], None]
     normalizer: Callable[[LossAnalysisDraft], list[str]]
     authoritative_merge: Callable[[LossAnalysisDraft], LossAnalysisDraft] | None
     normalization_warnings: list[str] | None
-    provider_draft_model: type[BaseModel] | None
+    provider_draft_model: type[BaseModel]
 
 
 def _record_warnings(
     warnings: Iterable[str],
     normalization_warnings: list[str] | None,
 ) -> None:
-    for warning in warnings:
-        if normalization_warnings is not None and warning not in normalization_warnings:
-            normalization_warnings.append(warning)
+    record_warnings(warnings, normalization_warnings)
 
 
 def _finish_merged_draft(
@@ -3611,14 +3574,17 @@ def _finish_merged_draft(
     *,
     step: str,
 ) -> LossAnalysisDraft:
-    """Re-validate against the provider schema, then normalize and validate."""
-    revalidate_provider_object(merged, validation.provider_draft_model, step=step)
-    for warning in validation.normalizer(merged):
-        _record_warnings((warning,), validation.normalization_warnings)
-    if validation.authoritative_merge is not None:
-        merged = validation.authoritative_merge(merged)
-    validation.run_validators(merged)
-    return merged
+    """Accept the repaired draft, then validate it like any other response."""
+    accepted = accept_stage1a_draft(
+        merged,
+        repair_model=validation.provider_draft_model,
+        authority=validation.authoritative_merge,
+        warnings=validation.normalization_warnings,
+        step=step,
+        normalize=validation.normalizer,
+    )
+    validation.run_validators(accepted)
+    return accepted
 
 
 def _plan_identities(plan: RepairPlan) -> list[tuple[str, str]]:
@@ -4018,17 +3984,19 @@ def run_targeted_repair(
     authoritative_merge: Callable[[LossAnalysisDraft], LossAnalysisDraft] | None = None,
     normalization_warnings: list[str] | None = None,
     max_completion_tokens: int = 8192,
-    provider_draft_model: type[BaseModel] | None = None,
+    provider_draft_model: type[BaseModel],
     repair_record: RepairRecord | None = None,
 ) -> LossAnalysisDraft:
     """Make exactly one targeted repair call and return the re-validated draft.
 
-    The repair prompt is preflighted by the shared call wrapper, so an
-    oversized repair fails closed before dispatch.  Any rejection or
-    validation failure raises :class:`StageError`; the repair is never
-    retried.  The attempt's proposed and applied changes are recorded in the
-    run-level repair record with exactly one terminal outcome (``repaired``,
-    ``rejected``, or ``failed``) per attempted identity, even when it fails.
+    ``provider_draft_model`` is the row-level repair view the corrected draft
+    must still satisfy before the domain merge.  The repair prompt is
+    preflighted by the shared call wrapper, so an oversized repair fails
+    closed before dispatch.  Any rejection or validation failure raises
+    :class:`StageError`; the repair is never retried.  The attempt's proposed
+    and applied changes are recorded in the run-level repair record with
+    exactly one terminal outcome (``repaired``, ``rejected``, or ``failed``)
+    per attempted identity, even when it fails.
     """
     validation = _RepairValidation(
         run_validators=run_validators,

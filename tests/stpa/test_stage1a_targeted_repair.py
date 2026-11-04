@@ -36,6 +36,7 @@ from asago_scenario_generator.stpa.system_model.loss_analysis import (
     normalize_disposition_citations,
     _ProviderSecurityConstraint,
     _Stage1aRiskProviderDraft,
+    _Stage1aRiskRepairDraft,
 )
 from asago_scenario_generator.stpa.system_model.loss_analysis_repair import (
     DispositionRepairResponse,
@@ -2097,6 +2098,7 @@ class TestRepairPreflight:
                 risk_cards=_occiai_cards(),
                 run_validators=lambda draft: None,
                 normalizer=normalize_disposition_citations,
+                provider_draft_model=_Stage1aRiskRepairDraft,
                 max_completion_tokens=STAGE1A_MAX_COMPLETION_TOKENS,
             )
 
@@ -2179,6 +2181,7 @@ class TestRepairValidationFailure:
                 risk_cards=_occiai_cards(),
                 run_validators=reject,
                 normalizer=normalize_disposition_citations,
+                provider_draft_model=_Stage1aRiskRepairDraft,
                 repair_record=record,
             )
 
