@@ -17,7 +17,13 @@ from asago_target_discovery import (
     declared_runtime_contract,
 )
 
-SCHEMA_VERSION = "artifact-runtime-contract-v2"
+SCHEMA_VERSION = "artifact-runtime-contract-v3"
+
+
+def _payload(contract: dict[str, Any]) -> dict[str, Any]:
+    """Return the contract without its self-identifying envelope."""
+
+    return {key: value for key, value in contract.items() if key != "contract"}
 
 
 def _base() -> dict[str, Any]:
@@ -49,7 +55,7 @@ def _slot(slot_id: str = "helpdesk.ticket.message") -> dict[str, Any]:
         "id": slot_id,
         "carrier_operation": "get_ticket",
         "field": "messages[].body",
-        "controller": "third_party",
+        "writable_by": ["third_party"],
         "content_kind": "ticket_message",
         "records": ["TCK-1001"],
         "max_chars": 2000,
@@ -216,9 +222,10 @@ def test_every_other_base_key_is_carried_over_unchanged() -> None:
         base, seed_slots=[_slot()], delivery=["direct_user_message"]
     )
 
+    payload = _payload(contract)
     for key in base.keys() - {"delivery", "limits"}:
-        assert contract[key] == base[key]
-    assert contract.keys() == base.keys() | {"seed_slots"}
+        assert payload[key] == base[key]
+    assert payload.keys() == base.keys() | {"seed_slots"}
 
 
 def test_an_unknown_base_key_is_refused() -> None:
@@ -242,7 +249,12 @@ def test_the_built_contract_passes_the_consumer_schema() -> None:
         limits={"max_turns": 6},
     )
 
-    Draft202012Validator(schema).validate(contract)
+    Draft202012Validator(schema).validate(_payload(contract))
+    assert contract["contract"]["version"] == SCHEMA_VERSION
+    assert contract["contract"]["provenance"]["writer"] == (
+        "asago_target_discovery.runtime_contract"
+    )
+    assert contract["contract"]["requires"] == []
 
 
 def test_a_contract_the_consumer_schema_rejects_names_the_violation() -> None:
@@ -261,7 +273,7 @@ def test_with_nothing_declared_the_contract_is_the_base_with_no_seed_slots() -> 
 
     contract = declared_runtime_contract(base, seed_slots=[])
 
-    assert contract == {**base, "seed_slots": []}
+    assert _payload(contract) == {**base, "seed_slots": []}
     assert PLANTED_ITEM not in contract["delivery"]
 
 
@@ -272,7 +284,7 @@ def test_a_full_declaration_builds_the_expected_contract() -> None:
         **_slot("helpdesk.kb.article"),
         "carrier_operation": "search_kb",
         "field": "articles[].body",
-        "controller": "operator_insider",
+        "writable_by": ["operator_insider"],
         "content_kind": "policy_document",
         "records": ["KB-210"],
         "max_chars": 4000,
@@ -286,7 +298,7 @@ def test_a_full_declaration_builds_the_expected_contract() -> None:
         limits={"max_turns": 6},
     )
 
-    assert contract == {
+    assert _payload(contract) == {
         **base,
         "delivery": ["direct_user_message", "sequential_user_turns", "planted_item"],
         "limits": {**base["limits"], "max_turns": 6},
@@ -310,3 +322,13 @@ def test_the_base_and_the_inputs_are_not_mutated() -> None:
     assert contract is not base
     assert contract["delivery"] is not base["delivery"]
     assert contract["limits"] is not base["limits"]
+
+
+def test_a_slot_that_still_names_the_v2_scalar_controller_is_refused() -> None:
+    slot = {**_slot(), "controller": "third_party"}
+
+    with pytest.raises(RuntimeContractViolation) as error:
+        declared_runtime_contract(_base(), seed_slots=[slot])
+
+    assert "at seed_slots.0" in str(error.value)
+    assert "controller" in str(error.value)

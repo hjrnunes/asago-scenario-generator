@@ -14,16 +14,13 @@ import json
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from asago_contracts_core import (
-    ContractEnvelopeError,
-    InvalidDocumentError,
-    UnknownFieldError,
-)
 from asago_package.contract_kit import contract_dir, first_schema_error
-from asago_package.runtime_contract_spec import VERSION, read_runtime_contract
+from asago_package.runtime_contract_spec import VERSION, write_runtime_contract
 
 PLANTED_ITEM = "planted_item"
 RUNTIME_CONTRACT_VERSION = VERSION
+RUNTIME_CONTRACT_WRITER = "asago_target_discovery.runtime_contract"
+RUNTIME_CONTRACT_WRITER_VERSION = "0.1.0"
 
 
 class RuntimeContractViolation(ValueError):
@@ -39,23 +36,14 @@ def _schema() -> dict[str, Any]:
 
 
 def _refuse_violation(contract: Mapping[str, Any]) -> None:
-    try:
-        read_runtime_contract(contract)
-    except (InvalidDocumentError, UnknownFieldError):
-        # The hand check words the same schema fault with the location the listener
-        # sees; an unknown top-level field is a schema fault here, so both take it.
-        violation = first_schema_error(_schema(), contract)
-        if violation is None:
-            raise
-        raise RuntimeContractViolation(
-            f"the runtime contract violates {RUNTIME_CONTRACT_VERSION}: {violation}"
-        ) from None
-    except ContractEnvelopeError as error:
-        # The envelope's own refusals: an unsupported version, an unknown `requires`
-        # entry or a mismatched `spec_digest`.
-        raise RuntimeContractViolation(
-            f"the runtime contract violates {RUNTIME_CONTRACT_VERSION}: {error}"
-        ) from None
+    """Refuse a built payload the consumer's schema rejects, naming where and why."""
+
+    violation = first_schema_error(_schema(), contract)
+    if violation is None:
+        return
+    raise RuntimeContractViolation(
+        f"the runtime contract violates {RUNTIME_CONTRACT_VERSION}: {violation}"
+    )
 
 
 def declared_runtime_contract(
@@ -76,10 +64,12 @@ def declared_runtime_contract(
 
     The contract is checked against the consumer's schema before it is returned:
     a target declaration that would build a contract no consumer can load raises
-    :class:`RuntimeContractViolation` instead.
+    :class:`RuntimeContractViolation` instead. The returned contract states
+    ``artifact-runtime-contract-v3`` and carries the self-identifying envelope.
     """
 
     contract = {key: value for key, value in base.items()}
+    contract["schema_version"] = RUNTIME_CONTRACT_VERSION
     chosen = list(delivery) if delivery is not None else base.get("delivery", [])
     offered = [item for item in chosen if item != PLANTED_ITEM]
     if seed_slots:
@@ -88,4 +78,8 @@ def declared_runtime_contract(
     contract["limits"] = {**base.get("limits", {}), **(limits or {})}
     contract["seed_slots"] = [dict(slot) for slot in seed_slots]
     _refuse_violation(contract)
-    return contract
+    return write_runtime_contract(
+        contract,
+        writer=RUNTIME_CONTRACT_WRITER,
+        writer_version=RUNTIME_CONTRACT_WRITER_VERSION,
+    )
