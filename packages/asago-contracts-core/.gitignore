@@ -1,0 +1,8 @@
+# Build and test artifacts stay out of the tree, so the member can move to its
+# own repository without carrying generated files.
+__pycache__/
+*.py[codz]
+*.egg-info/
+.pytest_cache/
+dist/
+build/

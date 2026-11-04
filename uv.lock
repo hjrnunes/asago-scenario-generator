@@ -14,6 +14,7 @@ exclude-newer-span = "P7D"
 
 [manifest]
 members = [
+    "asago-contracts-core",
     "asago-handoff",
     "asago-scenario-generator",
     "asago-target-discovery",
@@ -51,9 +52,9 @@ wheels = [
 ]
 
 [[package]]
-name = "asago-handoff"
+name = "asago-contracts-core"
 version = "0.1.0"
-source = { editable = "packages/asago-handoff" }
+source = { editable = "packages/asago-contracts-core" }
 dependencies = [
     { name = "jsonschema" },
 ]
@@ -65,6 +66,29 @@ dev = [
 
 [package.metadata]
 requires-dist = [{ name = "jsonschema", specifier = ">=4.0" }]
+
+[package.metadata.requires-dev]
+dev = [{ name = "pytest" }]
+
+[[package]]
+name = "asago-handoff"
+version = "0.1.0"
+source = { editable = "packages/asago-handoff" }
+dependencies = [
+    { name = "asago-contracts-core" },
+    { name = "jsonschema" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "pytest" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "asago-contracts-core", editable = "packages/asago-contracts-core" },
+    { name = "jsonschema", specifier = ">=4.0" },
+]
 
 [package.metadata.requires-dev]
 dev = [{ name = "pytest" }]

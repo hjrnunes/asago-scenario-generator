@@ -144,10 +144,16 @@ INVALID: dict[str, tuple[list[str], str | None, bool]] = {
     "taxonomy-llm-scheme-asi-id.json": ([TAXONOMY], "belong", True),
     # The schema cannot state the order; the model and the consumer's hand rule do.
     "taxonomy-unsorted-references.json": ([TAXONOMY], "sorted", False),
+    "taxonomy-duplicate-reference.json": ([TAXONOMY], "sorted", True),
     "failure-call-kind-not-enumerated.json": ([FAILURE_CALL], None, True),
     "failure-call-blank-operation.json": ([FAILURE_CALL], "blank", False),
     "safe-call-argument-value-not-scalar.json": ([SAFE_OUTCOME], None, True),
     "safe-call-argument-blank-name.json": ([SAFE_OUTCOME], "blank", True),
+    "safe-call-duplicate-argument-name.json": (
+        [SAFE_OUTCOME],
+        "each argument once",
+        False,
+    ),
     "safe-call-not-made-with-arguments.json": (
         [SAFE_OUTCOME],
         "call_made false",
@@ -175,7 +181,7 @@ def test_the_kit_holds_exactly_the_listed_fixtures() -> None:
         if not path.name.startswith(("schema-", "v5-"))
     }
     assert listed == set(INVALID)
-    assert len(INVALID) == 50
+    assert len(INVALID) == 52
 
 
 @pytest.mark.parametrize("name", sorted(VALID))

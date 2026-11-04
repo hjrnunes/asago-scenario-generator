@@ -1459,6 +1459,11 @@ TAXONOMY_CASES = {
     "taxonomy-unsorted-references": put(
         "taxonomy.references", list(reversed(TAXONOMY["references"]))
     ),
+    # The first reference twice: still sorted, but no longer unique.
+    "taxonomy-duplicate-reference": put(
+        "taxonomy.references",
+        [TAXONOMY["references"][0], *TAXONOMY["references"]],
+    ),
 }
 
 
@@ -1512,6 +1517,16 @@ def invalid_payloads(valid: dict[str, dict]) -> dict[str, dict]:
     safe_call = valid["valid/safe-call-arguments.json"]
     cases.update(
         {name: resigned(cut(safe_call, m)) for name, m in SAFE_CALL_CASES.items()}
+    )
+    arguments = safe_call["safe_observable_outcome"]["call_arguments"]
+    cases["safe-call-duplicate-argument-name"] = resigned(
+        cut(
+            safe_call,
+            put(
+                "safe_observable_outcome.call_arguments",
+                [*arguments, arguments[0]],
+            ),
+        )
     )
     not_made = valid["valid/safe-call-not-made.json"]
     cases.update(
@@ -1597,6 +1612,7 @@ def conformance_cases(companions: dict[str, dict]) -> dict:
                 "name": "safe-call-arguments",
                 "kind": "handoff",
                 "rule": "A safe observable outcome names each call argument once, with a non-blank name, only when the call is made.",
+                "codes": ["schema_violation:safe_observable_outcome"],
                 "valid": [
                     "valid/safe-call-arguments.json",
                     "valid/safe-call-not-made.json",
@@ -1604,6 +1620,7 @@ def conformance_cases(companions: dict[str, dict]) -> dict:
                 "invalid": [
                     "invalid/safe-call-argument-blank-name.json",
                     "invalid/safe-call-argument-value-not-scalar.json",
+                    "invalid/safe-call-duplicate-argument-name.json",
                     "invalid/safe-call-made-not-boolean.json",
                     "invalid/safe-call-not-made-with-arguments.json",
                 ],
@@ -1612,6 +1629,7 @@ def conformance_cases(companions: dict[str, dict]) -> dict:
                 "name": "procedure-chain",
                 "kind": "handoff",
                 "rule": "Procedure steps are S00, S01, ... in order, each leads to the next, and a step names a tactic exactly when it names a technique.",
+                "codes": ["schema_violation:procedure", "schema_violation:<root>"],
                 "valid": ["valid/adversarial-direct-multi-turn.json"],
                 "invalid": [
                     "invalid/v5-procedure-step-id-out-of-order.json",
@@ -1624,13 +1642,18 @@ def conformance_cases(companions: dict[str, dict]) -> dict:
                 "name": "reference-order",
                 "kind": "handoff",
                 "rule": "Taxonomy references are sorted by scheme and id, and each appears once.",
+                "codes": ["schema_violation:taxonomy"],
                 "valid": ["valid/taxonomy-block.json"],
-                "invalid": ["invalid/taxonomy-unsorted-references.json"],
+                "invalid": [
+                    "invalid/taxonomy-unsorted-references.json",
+                    "invalid/taxonomy-duplicate-reference.json",
+                ],
             },
             {
                 "name": "ownership-walker",
                 "kind": "handoff",
                 "rule": "No mapping key or string names an artifact-design field or hides one in prose.",
+                "codes": ["artifact_design_field:", "prose_hiding:"],
                 "valid": ["valid/adversarial-direct-single.json"],
                 "invalid": [
                     "invalid/narrative-role-serialization.json",
@@ -1653,6 +1676,7 @@ def conformance_cases(companions: dict[str, dict]) -> dict:
                 "name": "feature-companion",
                 "kind": "companion",
                 "rule": "A feature file holds the handoff's feature line, scenario line, given, when and then_expected steps in order, and one comment per unsafe alternative.",
+                "codes": ["feature_companion:"],
                 "valid": [COMPANION_VALID],
                 "invalid": [
                     relative

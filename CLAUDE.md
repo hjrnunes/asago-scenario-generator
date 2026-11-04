@@ -143,7 +143,7 @@ with unit tests under `tests/` and prompt text with rows in
 | --- | --- |
 | Entry points and configuration | `README.md`, CLI `--help` |
 | Pipeline or cross-repository contract change | `docs/architecture/overview.md`, applicable schema in `data/contracts/`, current task spec |
-| Handoff rule validation, conformance and the condition-v2 evaluator | `packages/asago-handoff/README.md` |
+| Handoff rule validation, conformance and the condition-v2 evaluator | `packages/asago-contracts-core/README.md` |
 | Prompt, response, grounding, or review change | The actual prompt builders and their tests; `tests/phrases/*.yaml` pins prompt text |
 
 `AGENTS.md` is a symlink to this file. Edit `CLAUDE.md`; preserve the symlink.
