@@ -82,11 +82,12 @@ The producer also owns what a bound `tool_call_condition` means. The
 the condition's structure, how comparisons combine, how calls are assigned to
 operations, and the three outcomes with their reasons. The vectors of each
 version hold the results of Garak's `validate_condition` and
-`evaluate_condition` at the revision the vector files name; the producer's
-reference evaluator, `evaluate_condition_v2` in
-`stpa.tool_call_condition_eval` (which
-`scripts/gen_tool_call_condition_vectors.py` imports), must agree with every
-v2 evaluate vector. An
+`evaluate_condition` at the revision the vector files name; the one reference
+evaluator, `evaluate_condition_v2` in `packages/asago-handoff`
+(`asago_handoff.condition_eval`, which
+`scripts/gen_tool_call_condition_vectors.py` imports and
+`stpa.tool_call_condition_eval` re-exports), must agree with every
+v2 evaluate vector, and the consumer and the orchestrator read it from there. An
 evaluator, such as the Garak `toolcall` detector, executes the condition and
 must reproduce every vector of the version it implements; the consumer carries the condition unchanged in `tool_call_condition.json`;
 the consumer and the orchestrator mirror the contract byte for byte, as they do

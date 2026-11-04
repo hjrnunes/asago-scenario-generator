@@ -8,6 +8,7 @@ version = "0.1.0"
 description = "LLM-driven red-teaming scenario generator for LLM and agentic AI systems"
 requires-python = ">=3.11"
 dependencies = [
+    "asago-handoff>=0.1,<0.2",
     "jinja2>=3.1",
     "jsonschema>=4.0",
     "pydantic>=2.0",
@@ -39,10 +40,14 @@ dev = [
 [tool.uv]
 exclude-newer = "7 days"
 
+[tool.uv.sources]
+asago-handoff = { workspace = true }
+
 # Keep bulky non-package directories out of mutate4py's workspace
 # discovery and per-worker tree copies (the tool skips excluded dirs in
 # both).
 [tool.uv.workspace]
+members = ["packages/*"]
 exclude = [
     "output",
     "tmp",

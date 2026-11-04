@@ -78,6 +78,8 @@ from typing import Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, StrictStr
 
+from asago_handoff import DETECTED, INCONCLUSIVE, evaluate_condition_v2
+
 from asago_scenario_generator.stpa.models.control_structure import (
     ControlStructure,
     control_action_context_rows,
@@ -86,11 +88,6 @@ from asago_scenario_generator.stpa.models.ica_enumeration import ICAEnumeration
 from asago_scenario_generator.stpa.models.scenario_spec import ScenarioSpec
 from asago_scenario_generator.stpa.observation_contract import SafeObservableOutcome
 from asago_scenario_generator.stpa.tool_call_condition import ToolCallCondition
-from asago_scenario_generator.stpa.tool_call_condition_eval import (
-    DETECTED,
-    INCONCLUSIVE,
-    evaluate_condition_v2,
-)
 
 CROSS_SCENARIO_CONFLICT = "cross_scenario_safe_outcome_conflict"
 CROSS_SCENARIO_CONFLICTS_FILENAME = "cross-scenario-conflicts.yaml"
@@ -323,8 +320,8 @@ def check_cross_scenario_conflicts(
     evaluated = 0
     not_detected = 0
     decided: dict[str, list[CrossScenarioPair]] = {
-        DETECTED[0]: [],
-        INCONCLUSIVE[0]: [],
+        DETECTED: [],
+        INCONCLUSIVE: [],
     }
     for pair in siblings.pairs:
         eligible += 1
@@ -356,13 +353,13 @@ def check_cross_scenario_conflicts(
         )
     for pairs in decided.values():
         pairs.sort(key=lambda item: (item.scenario_id, item.safe_scenario_id))
-    conflicts = decided[DETECTED[0]]
+    conflicts = decided[DETECTED]
     return CrossScenarioCheck(
         eligible_pairs=eligible,
         evaluated_pairs=evaluated,
         not_detected_pairs=not_detected,
         conflicts=conflicts,
-        inconclusive=decided[INCONCLUSIVE[0]],
+        inconclusive=decided[INCONCLUSIVE],
         withdrawn=sorted({item.scenario_id for item in conflicts}),
         contradicting_safe_calls=list(siblings.contradicting_safe_calls),
     )
@@ -389,7 +386,7 @@ def _satisfies_own_condition(
     result, _, _ = evaluate_condition_v2(
         condition.model_dump(mode="json"), [call], False
     )
-    return result == DETECTED[0]
+    return result == DETECTED
 
 
 def write_cross_scenario_check(run_dir: Path, check: CrossScenarioCheck) -> Path:

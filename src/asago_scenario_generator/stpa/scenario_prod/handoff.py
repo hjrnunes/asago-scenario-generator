@@ -24,7 +24,6 @@ byte-for-byte, the same discipline as ``data/contracts/target-profile/``.
 
 from __future__ import annotations
 
-import json
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -43,6 +42,9 @@ from pydantic import (
     model_serializer,
     model_validator,
 )
+
+from asago_handoff import load_ownership_rules as _shared_load_ownership_rules
+from asago_handoff import ownership_violations as _shared_ownership_violations
 
 from asago_scenario_generator.data.paths import DATA_ROOT
 from asago_scenario_generator.models.canonical import compute_framed_digest
@@ -99,7 +101,6 @@ HYPOTHESIS_FRAMING = (
 OWNERSHIP_RULES_PATH = (
     DATA_ROOT / "contracts" / "scenario-handoff" / "ownership-rules.json"
 )
-_REGEX_FLAGS = {"IGNORECASE": re.IGNORECASE}
 
 
 def load_ownership_rules(
@@ -107,23 +108,13 @@ def load_ownership_rules(
 ) -> tuple[frozenset[str], tuple[tuple[str, re.Pattern[str]], ...]]:
     """Read forbidden keys and ``(code, pattern)`` prose rules from one rules file.
 
-    Keys are field names only artifact design may own, at any depth. Each
-    pattern's code is the ``prose_hiding:<code>`` violation it reports; the
-    file order is the report order.
+    The walker and the rules reader live in ``asago_handoff``, the package the
+    consumer and the orchestrator read too, so every reader enforces one
+    boundary. Keys are field names only artifact design may own, at any depth;
+    each pattern's code is the ``prose_hiding:<code>`` violation it reports and
+    the file order is the report order.
     """
-    rules = json.loads(path.read_text(encoding="utf-8"))
-    patterns = []
-    for entry in rules["forbidden_value_patterns"]:
-        unknown = sorted(set(entry["flags"]) - _REGEX_FLAGS.keys())
-        if unknown:
-            raise ValueError(
-                f"ownership rule {entry['code']} has unknown flags: {unknown}"
-            )
-        flags = 0
-        for name in entry["flags"]:
-            flags |= _REGEX_FLAGS[name]
-        patterns.append((entry["code"], re.compile(entry["pattern"], flags)))
-    return frozenset(rules["forbidden_keys"]), tuple(patterns)
+    return _shared_load_ownership_rules(path)
 
 
 _FORBIDDEN_KEYS, _FORBIDDEN_VALUE_PATTERNS = load_ownership_rules(OWNERSHIP_RULES_PATH)
@@ -783,21 +774,6 @@ def verify_handoff_digest(handoff: ScenarioHandoff) -> None:
         raise ValueError("scenario handoff content_digest does not match its content")
 
 
-def _iter_strings(value: Any, path: str = "") -> list[tuple[str, str]]:
-    """Yield ``(path, text)`` for every mapping key and string scalar."""
-    found: list[tuple[str, str]] = []
-    if isinstance(value, dict):
-        for key, item in value.items():
-            found.append((f"{path}.{key}", str(key)))
-            found.extend(_iter_strings(item, f"{path}.{key}"))
-    elif isinstance(value, (list, tuple)):
-        for index, item in enumerate(value):
-            found.extend(_iter_strings(item, f"{path}[{index}]"))
-    elif isinstance(value, str):
-        found.append((path, value))
-    return found
-
-
 def handoff_ownership_violations(payload: dict[str, Any]) -> list[str]:
     """Return every ownership-boundary violation in one handoff payload.
 
@@ -808,16 +784,11 @@ def handoff_ownership_violations(payload: dict[str, Any]) -> list[str]:
     form ``artifact_design_field:<name>`` or ``prose_hiding:<pattern>`` so the
     contract kit can assert an exact expected set. An empty list means the
     boundary holds.
+
+    ``asago_handoff`` walks the payload; this function keeps the producer's
+    code-list interface for its own callers and tests.
     """
-    violations: list[str] = []
-    for path, text in _iter_strings(payload):
-        leaf = path.rsplit(".", 1)[-1].lower()
-        if leaf in _FORBIDDEN_KEYS:
-            _record_violation(violations, f"artifact_design_field:{leaf}")
-        for slug, pattern in _FORBIDDEN_VALUE_PATTERNS:
-            if pattern.search(text):
-                _record_violation(violations, f"prose_hiding:{slug}")
-    return violations
+    return [violation.code for violation in _shared_ownership_violations(payload)]
 
 
 #: The kit's ``schema-unknown-version`` case records these codes, and the kit

@@ -5,12 +5,12 @@
         --garak-checkout <Garak checkout> --garak-python <Garak interpreter> [--check]
 
 The script holds the vector inputs (conditions, calls, completeness) and needs
-only the standard library. The reference evaluator lives in the package
-(``asago_scenario_generator.stpa.tool_call_condition_eval``), which the script
-imports from the source tree; that module needs only the standard library too,
-so any interpreter, Garak's included, can run the script. A child process
-started with the Garak interpreter runs ``validate_condition`` and
-``evaluate_condition`` on the inputs. The checkout must be at ``REVISION``,
+only the standard library. The evaluator lives in the producer's workspace
+package ``asago_handoff`` (``packages/asago-handoff``), which the script imports
+from its source tree; the package depends on the standard library and
+``jsonschema``, which Garak's interpreter has. A child process started with the
+Garak interpreter runs ``validate_condition`` and ``evaluate_condition`` on the
+inputs. The checkout must be at ``REVISION``,
 where Garak evaluates ``tool-call-condition-v2``; every expected value in the
 v2 vector files comes from that run, and the files record that revision.
 
@@ -36,11 +36,10 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+CHECKOUT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(CHECKOUT / "packages/asago-handoff/src"))
 
-from asago_scenario_generator.stpa.tool_call_condition_eval import (  # noqa: E402
-    evaluate_condition_v2,
-)
+from asago_handoff.condition_eval import evaluate_condition_v2  # noqa: E402
 
 REVISION = "4f4917d666feea947731ec1588739d8427bc15d9"
 CONTRACT = "tool-call-condition"

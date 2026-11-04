@@ -25,6 +25,8 @@ from typing import Any, Mapping, Sequence
 
 import yaml
 
+from asago_handoff import validate_handoff
+
 from asago_scenario_generator.stpa.infra.llm import (
     DEFAULT_TEMPERATURE as LLM_DEFAULT_TEMPERATURE,
     LLMClient,
@@ -121,7 +123,6 @@ from .handoff import (
     HandoffTaxonomyInputs,
     ScenarioHandoff,
     Stage1aSource,
-    handoff_ownership_violations,
     write_scenario_handoff,
 )
 from .handoff_v5 import build_scenario_handoff_v5
@@ -1123,7 +1124,7 @@ def _checked_scenario_handoff(
     deduplication: ScenarioDeduplication | None = None,
     taxonomy: HandoffTaxonomyInputs | None = None,
 ) -> ScenarioHandoff:
-    """Build one scenario's handoff and reject artifact-design content."""
+    """Build one scenario's handoff and check the published contract."""
     handoff = build_scenario_handoff_v5(
         envelope,
         loss_analysis=loss_analysis,
@@ -1134,10 +1135,16 @@ def _checked_scenario_handoff(
         deduplication=deduplication,
         taxonomy=taxonomy,
     )
-    violations = handoff_ownership_violations(handoff.model_dump(mode="json"))
+    violations = [
+        violation.code
+        for violation in validate_handoff(
+            handoff.model_dump(mode="json", exclude_none=True)
+        )
+    ]
     if violations:
         raise ValueError(
-            "scenario handoff carries artifact-design content: " + "; ".join(violations)
+            "scenario handoff violates the scenario-handoff-v5 contract: "
+            + "; ".join(violations)
         )
     return handoff
 
