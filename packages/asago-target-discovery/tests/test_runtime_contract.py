@@ -11,7 +11,7 @@ import pytest
 from asago_package.contract_kit import contract_dir
 from jsonschema import Draft202012Validator
 
-from asago_scenario_generator.target_discovery import (
+from asago_target_discovery import (
     PLANTED_ITEM,
     RuntimeContractViolation,
     declared_runtime_contract,

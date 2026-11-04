@@ -10,7 +10,7 @@ import pytest
 
 from tests.cli_helpers import PlainCliRunner
 
-from asago_scenario_generator.target_discovery.cli import app
+from asago_target_discovery.cli import app
 
 
 def _args(tmp_path: Path, *extra: str) -> list[str]:
@@ -36,19 +36,19 @@ def test_profile_option_constructs_interpreter_and_passes_it_to_discovery(
     result = SimpleNamespace(profile=object(), valid=True)
     with (
         patch(
-            "asago_scenario_generator.target_discovery.cli.HttpMcpInventoryAdapter",
+            "asago_target_discovery.cli.HttpMcpInventoryAdapter",
             return_value=adapter,
         ),
         patch(
-            "asago_scenario_generator.target_discovery.cli.TargetDiscoveryLlmInterpreter.from_profile",
+            "asago_target_discovery.cli.TargetDiscoveryLlmInterpreter.from_profile",
             return_value=interpreter,
         ) as from_profile,
         patch(
-            "asago_scenario_generator.target_discovery.cli.discover_mcp_target",
+            "asago_target_discovery.cli.discover_mcp_target",
             return_value=result,
         ) as discover,
         patch(
-            "asago_scenario_generator.target_discovery.cli.write_target_discovery",
+            "asago_target_discovery.cli.write_target_discovery",
             return_value={},
         ),
     ):
@@ -86,18 +86,18 @@ def test_without_profile_does_not_construct_interpreter(tmp_path: Path):
     result = SimpleNamespace(profile=object(), valid=True)
     with (
         patch(
-            "asago_scenario_generator.target_discovery.cli.HttpMcpInventoryAdapter",
+            "asago_target_discovery.cli.HttpMcpInventoryAdapter",
             return_value=adapter,
         ),
         patch(
-            "asago_scenario_generator.target_discovery.cli.TargetDiscoveryLlmInterpreter.from_profile",
+            "asago_target_discovery.cli.TargetDiscoveryLlmInterpreter.from_profile",
         ) as from_profile,
         patch(
-            "asago_scenario_generator.target_discovery.cli.discover_mcp_target",
+            "asago_target_discovery.cli.discover_mcp_target",
             return_value=result,
         ) as discover,
         patch(
-            "asago_scenario_generator.target_discovery.cli.write_target_discovery",
+            "asago_target_discovery.cli.write_target_discovery",
             return_value={},
         ),
     ):
@@ -108,7 +108,7 @@ def test_without_profile_does_not_construct_interpreter(tmp_path: Path):
     assert discover.call_args.kwargs["interpreter_factory"] is None
 
 
-_CLI = "asago_scenario_generator.target_discovery.cli"
+_CLI = "asago_target_discovery.cli"
 
 
 def _scan(tmp_path: Path, *extra: str, result=None, written=None, env=None):

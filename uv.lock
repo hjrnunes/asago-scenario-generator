@@ -16,6 +16,7 @@ exclude-newer-span = "P7D"
 members = [
     "asago-handoff",
     "asago-scenario-generator",
+    "asago-target-discovery",
 ]
 
 [[package]]
@@ -104,11 +105,13 @@ dev = [
     { name = "ruff" },
 ]
 target-discovery = [
+    { name = "asago-target-discovery" },
     { name = "mcp" },
 ]
 
 [package.dev-dependencies]
 dev = [
+    { name = "asago-target-discovery" },
     { name = "hypothesis" },
     { name = "pytest-xdist" },
     { name = "ruff" },
@@ -118,6 +121,7 @@ dev = [
 requires-dist = [
     { name = "asago-handoff", editable = "packages/asago-handoff" },
     { name = "asago-package", editable = "../asago-artifact-generator/packages/asago-package" },
+    { name = "asago-target-discovery", marker = "extra == 'target-discovery'", editable = "packages/asago-target-discovery" },
     { name = "jinja2", specifier = ">=3.1" },
     { name = "jsonschema", specifier = ">=4.0" },
     { name = "mcp", marker = "extra == 'target-discovery'", specifier = ">=1.9.0,<2" },
@@ -132,10 +136,40 @@ provides-extras = ["dev", "target-discovery"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "asago-target-discovery", editable = "packages/asago-target-discovery" },
     { name = "hypothesis", specifier = ">=6.164.0" },
     { name = "pytest-xdist", specifier = ">=3.8.0" },
     { name = "ruff" },
 ]
+
+[[package]]
+name = "asago-target-discovery"
+version = "0.1.0"
+source = { editable = "packages/asago-target-discovery" }
+dependencies = [
+    { name = "asago-package" },
+    { name = "asago-scenario-generator" },
+    { name = "pydantic" },
+    { name = "pyyaml" },
+    { name = "typer" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "pytest" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "asago-package", editable = "../asago-artifact-generator/packages/asago-package" },
+    { name = "asago-scenario-generator", editable = "." },
+    { name = "pydantic", specifier = ">=2.0" },
+    { name = "pyyaml", specifier = ">=6.0" },
+    { name = "typer", specifier = ">=0.12" },
+]
+
+[package.metadata.requires-dev]
+dev = [{ name = "pytest" }]
 
 [[package]]
 name = "attrs"

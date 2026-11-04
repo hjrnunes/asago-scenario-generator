@@ -7,14 +7,14 @@ from typing import Any
 
 import pytest
 
-from asago_scenario_generator.target_discovery import transport
-from asago_scenario_generator.target_discovery.contracts import McpInventoryPage
-from asago_scenario_generator.target_discovery.transport import (
+from asago_target_discovery import transport
+from asago_target_discovery.contracts import McpInventoryPage
+from asago_target_discovery.transport import (
     HttpMcpInventoryAdapter,
     McpTransportError,
 )
-from tests.helpers.target_discovery import FakeMcpSdk as _Sdk
-from tests.helpers.target_discovery import install_fake_mcp_sdk as _install_sdk
+from helpers.target_discovery import FakeMcpSdk as _Sdk
+from helpers.target_discovery import install_fake_mcp_sdk as _install_sdk
 
 
 class TestAdapterConstruction:

@@ -46,12 +46,12 @@ from asago_scenario_generator.stpa.system_model.loss_analysis_repair import (
 from asago_scenario_generator.stpa.system_model.profile import (
     derive_capability_profile,
 )
-from asago_scenario_generator.target_discovery import (
+from asago_target_discovery import (
     TargetDiscoveryLlmInterpreter,
     TargetInterpretationRequest,
     TargetToolPromptView,
 )
-from asago_scenario_generator.target_discovery.llm_interpreter import (
+from asago_target_discovery.llm_interpreter import (
     SEMANTIC_ROLE_VOCABULARY,
 )
 from tests.discovery_call_log import logged
@@ -388,7 +388,7 @@ def _discovery_formats(run_dir, *, guided: bool, count: int = 2) -> tuple[type, 
 
     client = SimpleNamespace(model="fixture-model", use_guided_decoding=guided)
     with patch(
-        "asago_scenario_generator.target_discovery.llm_interpreter.call_with_policy",
+        "asago_target_discovery.llm_interpreter.call_with_policy",
         side_effect=logged(fake_call_with_policy),
     ):
         adapter = TargetDiscoveryLlmInterpreter(client, run_dir=run_dir)

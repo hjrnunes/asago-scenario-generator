@@ -82,7 +82,7 @@ from asago_scenario_generator.pipeline.synthesis_manifest import (
 )
 from asago_scenario_generator.stpa.infra.call_log import jsonl_lines
 from asago_scenario_generator.stpa.models.scenario_context import semantic_digest
-from asago_scenario_generator.target_discovery.prompts import (
+from asago_target_discovery.prompts import (
     _canonical_json as prompt_canonical_json,
 )
 

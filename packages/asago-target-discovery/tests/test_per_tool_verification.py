@@ -19,7 +19,7 @@ from asago_scenario_generator.stpa.models.execution_classification import (
     TargetOperationEffect,
     TargetStateEffect,
 )
-from asago_scenario_generator.target_discovery import (
+from asago_target_discovery import (
     McpTargetDiscoveryInputs,
     TargetDiscoveryLlmError,
     TargetDiscoveryLlmInterpreter,
@@ -31,8 +31,8 @@ from asago_scenario_generator.target_discovery import (
     TargetToolPromptView,
     discover_mcp_target,
 )
-from asago_scenario_generator.target_discovery.prompts import build_verifier_prompt
-from tests.helpers.target_discovery import (
+from asago_target_discovery.prompts import build_verifier_prompt
+from helpers.target_discovery import (
     OBSERVER,
     InMemoryInterpreter,
     InMemoryInventory,
@@ -40,7 +40,7 @@ from tests.helpers.target_discovery import (
 
 
 FIXTURE = (
-    Path(__file__).parents[2] / "data/contracts/target-discovery/mcp-tools-list.json"
+    Path(__file__).parents[3] / "data/contracts/target-discovery/mcp-tools-list.json"
 )
 DISPUTED = "lookup_order"
 REASON = "The description names an identifier lookup, not a free-text search."
@@ -280,7 +280,7 @@ def test_llm_verifier_requests_and_returns_one_verdict_per_handle(tmp_path: Path
         SimpleNamespace(model="fixture-model"), run_dir=tmp_path
     )
     with patch(
-        "asago_scenario_generator.target_discovery.llm_interpreter.call_with_policy",
+        "asago_target_discovery.llm_interpreter.call_with_policy",
         side_effect=logged(fake_call_with_policy),
     ):
         verification = adapter.verify(request, _interpretations(request))
@@ -323,7 +323,7 @@ def test_llm_verifier_rejects_verdicts_that_do_not_cover_each_handle_once(
     )
     with (
         patch(
-            "asago_scenario_generator.target_discovery.llm_interpreter.call_with_policy",
+            "asago_target_discovery.llm_interpreter.call_with_policy",
             side_effect=logged(fake_call_with_policy),
         ),
         pytest.raises(TargetDiscoveryLlmError, match="verification"),

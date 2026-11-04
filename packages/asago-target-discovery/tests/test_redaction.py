@@ -7,7 +7,7 @@ import time
 import pytest
 from hypothesis import given, settings, strategies as st
 
-from asago_scenario_generator.target_discovery import redaction
+from asago_target_discovery import redaction
 
 
 def test_sanitizer_covers_closed_input_shapes():

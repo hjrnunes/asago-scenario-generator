@@ -1,0 +1,41 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "asago-target-discovery"
+version = "0.1.0"
+description = "The MCP target-discovery scanner: inventory a target's tools and write its profile."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "asago-package>=0.1,<0.2",
+    "asago-scenario-generator>=0.1,<0.2",
+    "pydantic>=2.0",
+    "pyyaml>=6.0",
+    "typer>=0.12",
+]
+
+[project.scripts]
+asago-target-scan = "asago_target_discovery.cli:app"
+
+[dependency-groups]
+dev = ["pytest"]
+
+[tool.uv.sources]
+# The scanner reads the producer's STPA models and calls the app's provider
+# client, so this member depends on the workspace root that depends on it.
+asago-scenario-generator = { workspace = true }
+# The runtime-contract builder validates against the schema the consumer owns,
+# so the app and this member read it from the consumer's package member.
+asago-package = { path = "../../../asago-artifact-generator/packages/asago-package", editable = true }
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/asago_target_discovery"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# The fakes the suite shares live beside the tests; the CLI runner, the call log
+# and the scripted client stay in the app's tests/ tree, which the suite reads
+# from the repository root.
+pythonpath = ["tests", "../.."]

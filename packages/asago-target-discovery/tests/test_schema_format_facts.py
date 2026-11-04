@@ -15,14 +15,14 @@ from asago_scenario_generator.stpa.models.value_facts import (
     ValueFormat,
     with_argument_formats,
 )
-from asago_scenario_generator.target_discovery import (
+from asago_target_discovery import (
     McpTargetDiscoveryInputs,
     discover_mcp_target,
 )
-from tests.helpers.target_discovery import InMemoryInterpreter, InMemoryInventory
+from helpers.target_discovery import InMemoryInterpreter, InMemoryInventory
 
 FIXTURE = (
-    Path(__file__).parents[2] / "data/contracts/target-discovery/mcp-tools-list.json"
+    Path(__file__).parents[3] / "data/contracts/target-discovery/mcp-tools-list.json"
 )
 DECLARED = {
     "arguments": [

@@ -15,7 +15,7 @@ from asago_scenario_generator.stpa.models.execution_classification import (
     TargetOperationEffect,
     TargetStateEffect,
 )
-from asago_scenario_generator.target_discovery import (
+from asago_target_discovery import (
     TargetInterpretationDraft,
     TargetInterpretationRequest,
     TargetInterpretationResponse,

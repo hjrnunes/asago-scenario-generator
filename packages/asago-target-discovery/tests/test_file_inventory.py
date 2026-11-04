@@ -18,26 +18,26 @@ from asago_scenario_generator.stpa.models.execution_classification import (
     InventoryAuthority,
     InventoryCompleteness,
 )
-from asago_scenario_generator.target_discovery import (
+from asago_target_discovery import (
     McpInventoryPage,
     McpTargetDiscoveryInputs,
     TargetDiscoveryResult,
     discover_mcp_target,
     write_target_discovery,
 )
-from asago_scenario_generator.target_discovery.cli import app
-from asago_scenario_generator.target_discovery.transport import (
+from asago_target_discovery.cli import app
+from asago_target_discovery.transport import (
     FileMcpInventoryAdapter,
     HttpMcpInventoryAdapter,
     McpToolsListFileError,
     sdk_shaped_tool_row,
 )
 from tests.cli_helpers import PlainCliRunner
-from tests.helpers.target_discovery import FakeMcpSdk, install_fake_mcp_sdk
+from helpers.target_discovery import FakeMcpSdk, install_fake_mcp_sdk
 
 
 FIXTURE = (
-    Path(__file__).parents[2] / "data/contracts/target-discovery/mcp-tools-list.json"
+    Path(__file__).parents[3] / "data/contracts/target-discovery/mcp-tools-list.json"
 )
 ANNOTATIONS = {
     "lookup_order": {"readOnlyHint": True, "openWorldHint": False},
@@ -407,7 +407,7 @@ def test_cli_file_shares_the_mcp_options(tmp_path: Path):
     path = _write(tmp_path / "t.json", {"tools": _recorded_tools()})
     interpreter = SimpleNamespace(model_name="fixture-model")
     result = SimpleNamespace(profile=object(), valid=True)
-    cli = "asago_scenario_generator.target_discovery.cli"
+    cli = "asago_target_discovery.cli"
     with (
         patch(
             f"{cli}.TargetDiscoveryLlmInterpreter.from_profile",

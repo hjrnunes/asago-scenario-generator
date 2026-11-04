@@ -23,7 +23,7 @@ from asago_scenario_generator.stpa.models.execution_classification import (
     TargetOperationEffect,
     TargetStateEffect,
 )
-from asago_scenario_generator.target_discovery import (
+from asago_target_discovery import (
     McpTargetDiscoveryInputs,
     TargetDiscoveryLlmInterpreter,
     TargetDiscoveryLlmError,
@@ -35,7 +35,7 @@ from asago_scenario_generator.target_discovery import (
     write_target_discovery,
     TargetInterpretationRequest,
 )
-from asago_scenario_generator.target_discovery.llm_interpreter import (
+from asago_target_discovery.llm_interpreter import (
     _failure_http_status,
     _provider_response_model,
 )
@@ -115,7 +115,7 @@ def test_profile_backed_adapter_calls_interpreter_and_verifier_with_full_records
         )
 
     with patch(
-        "asago_scenario_generator.target_discovery.llm_interpreter.call_with_policy",
+        "asago_target_discovery.llm_interpreter.call_with_policy",
         side_effect=logged(fake_call_with_policy),
     ):
         adapter = TargetDiscoveryLlmInterpreter(client, run_dir=tmp_path)
@@ -180,7 +180,7 @@ def test_interpreter_rejects_omitted_handle_before_verifier(tmp_path: Path):
 
     with (
         patch(
-            "asago_scenario_generator.target_discovery.llm_interpreter.call_with_policy",
+            "asago_target_discovery.llm_interpreter.call_with_policy",
             side_effect=logged(fake_call_with_policy),
         ),
         pytest.raises(TargetDiscoveryLlmError),
@@ -200,7 +200,7 @@ def _failed_interpretation(tmp_path: Path, error: str, failure: BaseException):
     )
     with (
         patch(
-            "asago_scenario_generator.target_discovery.llm_interpreter.call_with_policy",
+            "asago_target_discovery.llm_interpreter.call_with_policy",
             side_effect=logged(lambda **_: CallOutcome(None, None, error, 0, failure)),
         ),
         pytest.raises(TargetDiscoveryLlmError) as raised,
@@ -316,7 +316,7 @@ def test_discovery_includes_adapter_calls_and_profile_provenance(tmp_path: Path)
         model_name="fixture-model",
     )
     with patch(
-        "asago_scenario_generator.target_discovery.llm_interpreter.call_with_policy",
+        "asago_target_discovery.llm_interpreter.call_with_policy",
         side_effect=logged(fake_call_with_policy),
     ):
         result = discover_mcp_target(
@@ -353,7 +353,7 @@ def test_discovery_includes_adapter_calls_and_profile_provenance(tmp_path: Path)
 def test_from_profile_uses_existing_named_profile_resolver(tmp_path: Path):
     client = SimpleNamespace(model="resolved-model")
     with patch(
-        "asago_scenario_generator.target_discovery.llm_interpreter.resolve_llm_client_from_profile",
+        "asago_target_discovery.llm_interpreter.resolve_llm_client_from_profile",
         return_value=(client, "named-profile"),
     ) as resolver:
         adapter = TargetDiscoveryLlmInterpreter.from_profile(

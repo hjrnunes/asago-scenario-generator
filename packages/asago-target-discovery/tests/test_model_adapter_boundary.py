@@ -15,9 +15,9 @@ import importlib
 import re
 from pathlib import Path
 
-from asago_scenario_generator import target_discovery
+import asago_target_discovery
 
-PACKAGE_ROOT = Path(target_discovery.__file__).resolve().parent
+PACKAGE_ROOT = Path(asago_target_discovery.__file__).resolve().parent
 
 # The adapter modules the asago-dcpl.12 12b close reason names: the seam the
 # scanner uses, plus the provider-aware interpreter that renders its own
@@ -66,12 +66,10 @@ def test_only_the_adapter_modules_import_the_model_facing_modules() -> None:
 
 
 def test_the_adapter_reexports_the_implementation_objects() -> None:
-    adapter = importlib.import_module(
-        "asago_scenario_generator.target_discovery.model_adapter"
-    )
+    adapter = importlib.import_module("asago_target_discovery.model_adapter")
 
     for name, module_name in _REEXPORTS.items():
         implementation = importlib.import_module(
-            f"asago_scenario_generator.target_discovery.{module_name}"
+            f"asago_target_discovery.{module_name}"
         )
         assert getattr(adapter, name) is getattr(implementation, name), name

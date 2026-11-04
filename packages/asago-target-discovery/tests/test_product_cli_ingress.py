@@ -12,7 +12,7 @@ from tests.cli_helpers import PlainCliRunner
 from asago_scenario_generator.cli import app
 
 
-_ROOT = Path(__file__).parents[2]
+_ROOT = Path(__file__).parents[3]
 _PROFILE = (
     _ROOT
     / "data"
@@ -60,9 +60,7 @@ def test_product_run_loads_scanner_profile_without_mcp_transport(
     real_import = builtins.__import__
 
     def reject_mcp_transport(name, *args, **kwargs):  # type: ignore[no-untyped-def]
-        if name == "mcp" or name.startswith(
-            "asago_scenario_generator.target_discovery.transport"
-        ):
+        if name == "mcp" or name.startswith("asago_target_discovery.transport"):
             raise AssertionError("product run must not import MCP transport")
         return real_import(name, *args, **kwargs)
 

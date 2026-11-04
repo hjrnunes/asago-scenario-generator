@@ -9,15 +9,15 @@ from pathlib import Path
 import pytest
 
 from asago_scenario_generator.models.canonical import canonical_json_bytes
-from asago_scenario_generator.target_discovery import discovery as discovery_module
-from asago_scenario_generator.target_discovery import (
+from asago_target_discovery import discovery as discovery_module
+from asago_target_discovery import (
     McpTargetDiscoveryInputs,
     TargetInterpretationResponse,
     TargetInterpretationDraft,
     discover_mcp_target,
     write_target_discovery,
 )
-from asago_scenario_generator.target_discovery.prompts import (
+from asago_target_discovery.prompts import (
     build_interpretation_prompt,
     build_verifier_prompt,
 )
@@ -35,15 +35,15 @@ from asago_scenario_generator.stpa.models.execution_classification import (
     SimulationBehavior,
     TargetProfileResource,
 )
-from asago_scenario_generator.target_discovery.contracts import (
+from asago_target_discovery.contracts import (
     TargetInterpretationRequest,
     TargetToolPromptView,
 )
-from tests.helpers.target_discovery import InMemoryInterpreter, InMemoryInventory
+from helpers.target_discovery import InMemoryInterpreter, InMemoryInventory
 
 
 FIXTURE = (
-    Path(__file__).parents[2] / "data/contracts/target-discovery/mcp-tools-list.json"
+    Path(__file__).parents[3] / "data/contracts/target-discovery/mcp-tools-list.json"
 )
 
 

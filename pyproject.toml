@@ -23,16 +23,19 @@ dev = [
     "pytest",
     "ruff",
 ]
+# The scanner is the workspace member packages/asago-target-discovery; the
+# extra keeps installing it together with the MCP SDK its transport imports.
 target-discovery = [
+    "asago-target-discovery>=0.1,<0.2",
     "mcp>=1.9.0,<2",
 ]
 
 [project.scripts]
 asago-scenario-generator = "asago_scenario_generator.cli:app"
-asago-target-scan = "asago_scenario_generator.target_discovery.cli:app"
 
 [dependency-groups]
 dev = [
+    "asago-target-discovery>=0.1,<0.2",
     "hypothesis>=6.164.0",
     "pytest-xdist>=3.8.0",
     "ruff",
@@ -43,6 +46,10 @@ exclude-newer = "7 days"
 
 [tool.uv.sources]
 asago-handoff = { workspace = true }
+# The scanner's workspace member: the app lists it in its target-discovery extra
+# and in its dev group, and the member depends back on the app for the STPA
+# models it reads.
+asago-target-discovery = { workspace = true }
 # The consumer owns the runtime-contract schema the builder validates against,
 # so the app reads it from the consumer's package member.
 asago-package = { path = "../asago-artifact-generator/packages/asago-package", editable = true }
