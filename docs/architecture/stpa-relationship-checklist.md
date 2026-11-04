@@ -87,12 +87,13 @@ it.
   `slot_filling._governance_errors`. After at most one correction the slot
   becomes unresolved. `ICAEnumeration.validate_against` checks reference
   validity at the end of `slot_filling.fill_synthesis_slots`.
-- *Stage 1a gates.* `loss_analysis_gates.py:check_hazard_graph_density`
-  checks losses without a hazard, hazards without a constraint, and
-  constraints without a hazard. `gate_loss_analysis` and
-  `verify_reviewed_density` make a bounded revision or correction and then
-  raise. A record the Call 3 review marked unresolved is exempt
-  (`_exempt_unresolved`) and is recorded as an advisory line in
+- *Stage 1a gates.*
+  `loss_analysis_gate_checks.py:check_hazard_graph_density` checks losses
+  without a hazard, hazards without a constraint, and constraints without a
+  hazard. `loss_analysis_gates.py:gate_loss_analysis` and
+  `loss_analysis_gates.py:verify_reviewed_density` make a bounded revision
+  or correction and then raise. A record the Call 3 review marked unresolved
+  is exempt (`_exempt_unresolved`) and is recorded as an advisory line in
   `loss-analysis-gates.yaml`.
 
 **Diagnostics column.** (a) `controlled_process_without_feedback`;
