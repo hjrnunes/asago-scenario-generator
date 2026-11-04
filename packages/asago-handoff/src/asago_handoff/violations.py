@@ -37,6 +37,12 @@ OTHER_VERSION_VIOLATIONS = (
 )
 _Break = tuple[str, str] | None
 
+#: The kit's code for a document that is not a JSON object, with the kit's
+#: root pairing's path.
+_ROOT_REFUSAL = Violation(
+    "schema_violation:<root>", "<root>", "a scenario handoff must be a JSON object"
+)
+
 
 def validate_handoff(
     payload: Any, *, contract: Contract | None = None
@@ -62,9 +68,12 @@ def schema_violations(
 
     A payload with any other ``schema_version`` gets
     :data:`OTHER_VERSION_VIOLATIONS`, the codes the kit records for its
-    unknown-version case.
+    unknown-version case. A root that is not a JSON object gets the kit's
+    ``schema_violation:<root>`` code before any key is read.
     """
 
+    if not isinstance(payload, dict):
+        return [_ROOT_REFUSAL]
     contract = contract or packaged_contract()
     if payload.get("schema_version") != HANDOFF_SCHEMA_VERSION_V5:
         return list(OTHER_VERSION_VIOLATIONS)
@@ -120,8 +129,11 @@ def hand_rule_violations(
     the schema has a default, and cross-field pairings. The reported code names
     the top-level field the rule reads; the v5 procedure chain, a rule across
     the steps that the producer checks on the whole handoff, reports ``<root>``.
+    A root that is not a JSON object gets the same code as the schema's.
     """
 
+    if not isinstance(payload, dict):
+        return [_ROOT_REFUSAL]
     contract = contract or packaged_contract()
     for key, rules in _HAND_RULES:
         if payload.get(key) is None:
@@ -211,6 +223,22 @@ def _observation_assessment(value: dict[str, Any], path: str) -> _Break:
         for index, item in enumerate(assessment[key]):
             if not item.strip():
                 return f"{path}.{key}.{index}", "must not be blank"
+    return None
+
+
+def _safe_outcome_reference_uniqueness(value: dict[str, Any], path: str) -> _Break:
+    """List each record and fact reference once, after stripping it.
+
+    The producer strips each reference before it checks uniqueness, so JSON
+    Schema's ``uniqueItems`` alone accepts ``"R-1"`` beside ``" R-1"``. The
+    producer's model refuses that pair; this rule makes the shared validator
+    agree.
+    """
+
+    for key in ("record_refs", "fact_refs"):
+        references = [item.strip() for item in value.get(key) or ()]
+        if len(set(references)) != len(references):
+            return f"{path}.{key}", "must be unique"
     return None
 
 
@@ -304,7 +332,10 @@ _HAND_RULES: tuple[tuple[str, tuple[Any, ...]], ...] = (
         (_observation_contract, _observation_criteria, _observation_assessment),
     ),
     ("semantic_failure_call", (_semantic_failure_call,)),
-    ("safe_observable_outcome", (_safe_outcome_argument_names,)),
+    (
+        "safe_observable_outcome",
+        (_safe_outcome_reference_uniqueness, _safe_outcome_argument_names),
+    ),
     ("deduplication", (_deduplication,)),
     ("tool_call_condition_status", (_tool_call_status_reason,)),
     ("taxonomy", (_taxonomy_references,)),

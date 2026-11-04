@@ -13,7 +13,9 @@ from asago_handoff import (
     HANDOFF_SCHEMA_VERSION_V5,
     OTHER_VERSION_VIOLATIONS,
     Violation,
+    hand_rule_violations,
     load_contract,
+    schema_violations,
     validate_handoff,
 )
 
@@ -135,3 +137,38 @@ def test_the_packaged_contract_states_v5() -> None:
         document["properties"]["schema_version"]["const"] == HANDOFF_SCHEMA_VERSION_V5
     )
     assert isinstance(Violation("c", "p", "r"), tuple)
+
+
+ROOT_REFUSAL = Violation(
+    "schema_violation:<root>", "<root>", "a scenario handoff must be a JSON object"
+)
+
+
+@pytest.mark.parametrize(
+    "payload", [[], None, "text", 3], ids=("list", "null", "string", "number")
+)
+def test_a_non_object_root_reports_the_root_code(payload: Any) -> None:
+    assert validate_handoff(payload) == [ROOT_REFUSAL]
+    assert schema_violations(payload) == [ROOT_REFUSAL]
+    assert hand_rule_violations(payload) == [ROOT_REFUSAL]
+
+
+@pytest.mark.parametrize("key", ("record_refs", "fact_refs"))
+def test_references_repeating_after_stripping_report_the_safe_outcome(key: str) -> None:
+    payload = _document("valid/adversarial-direct-multi-turn.json")
+    references = payload["safe_observable_outcome"][key]
+    payload["safe_observable_outcome"][key] = [references[0], f" {references[0]}"]
+    (violation,) = validate_handoff(payload)
+    assert violation == Violation(
+        "schema_violation:safe_observable_outcome",
+        f"safe_observable_outcome.{key}",
+        "must be unique",
+    )
+
+
+def test_an_exact_reference_repeat_keeps_the_schema_code() -> None:
+    payload = _document("valid/adversarial-direct-multi-turn.json")
+    payload["safe_observable_outcome"]["record_refs"] = ["TARGET-STATE", "TARGET-STATE"]
+    (violation,) = validate_handoff(payload)
+    assert violation.code == "schema_violation:safe_observable_outcome"
+    assert violation.path == "safe_observable_outcome.record_refs"

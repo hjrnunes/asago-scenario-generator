@@ -190,6 +190,16 @@ def test_valid_fixtures_pass_every_check_and_keep_their_digest(name: str) -> Non
     assert "attack_shape" in payload
 
 
+@pytest.mark.parametrize("key", ("record_refs", "fact_refs"))
+def test_the_model_refuses_references_repeating_after_stripping(key: str) -> None:
+    payload = _load("valid/adversarial-direct-multi-turn.json")
+    references = payload["safe_observable_outcome"][key]
+    payload["safe_observable_outcome"][key] = [references[0], f" {references[0]}"]
+
+    with pytest.raises(ValidationError, match=rf"\b{key} must be unique\b"):
+        ScenarioHandoffV5.model_validate(payload)
+
+
 def test_valid_fixtures_cover_each_channel_and_the_downgrade_and_null_cases() -> None:
     shapes = {name: _load(f"valid/{name}")["attack_shape"] for name in VALID}
 
