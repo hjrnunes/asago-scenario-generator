@@ -155,7 +155,7 @@ with exact survivor evidence. Each terminal run writes
 
 ## Install
 
-Asago Scenario Generator requires Python 3.11 or newer. The lock file is the
+Asago Scenario Generator requires Python 3.12 or newer. The lock file is the
 authoritative development environment.
 
 ```bash

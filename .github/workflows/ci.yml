@@ -12,12 +12,27 @@ jobs:
   unit:
     name: Python ${{ matrix.python-version }}
     runs-on: ubuntu-latest
+    # Both checkouts live under repos/ so the consumer sits beside the producer
+    # at the path the asago-package path source names.
+    defaults:
+      run:
+        working-directory: repos/asago-scenario-generator
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11", "3.14"]
+        python-version: ["3.12", "3.14"]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: repos/asago-scenario-generator
+      # The lock resolves asago-package from
+      # ../asago-artifact-generator/packages/asago-package, so the consumer fork
+      # is checked out as the producer's sibling.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: hjrnunes/asago-artifact-generator
+          ref: main
+          path: repos/asago-artifact-generator
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ matrix.python-version }}
@@ -25,4 +40,18 @@ jobs:
       - run: uv sync --locked
       - run: ./scripts/quality.sh
       - run: env -u ASAGO_SCENARIO_GENERATOR_MODEL_BASE_URL uv run pytest tests/ -q
+      # The root run covers tests/ only, and conftest modules shadow each other
+      # across packages, so each workspace member runs in its own session.
+      - name: Package tests
+        run: |
+          status=0
+          for dir in packages/*/; do
+            if [ ! -d "${dir}tests" ]; then
+              echo "::error::${dir} has no tests directory"
+              status=1
+              continue
+            fi
+            uv run pytest "${dir}tests" -q || status=1
+          done
+          exit "$status"
 

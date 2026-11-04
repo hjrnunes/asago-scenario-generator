@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 name = "asago-scenario-generator"
 version = "0.1.0"
 description = "LLM-driven red-teaming scenario generator for LLM and agentic AI systems"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     "asago-handoff>=0.1,<0.2",
     "asago-package>=0.1,<0.2",
