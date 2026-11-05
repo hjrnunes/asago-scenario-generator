@@ -78,7 +78,7 @@ Run the producer from this repository root:
 
 ```bash
 cd <producer-repo-root>
-uv sync --locked
+uv sync --locked --all-extras
 uv run asago-scenario-generator generate \
   --use-case @use-case.txt \
   --risk-extraction risk-extraction.json \
@@ -158,9 +158,18 @@ with exact survivor evidence. Each terminal run writes
 Asago Scenario Generator requires Python 3.12 or newer. The lock file is the
 authoritative development environment.
 
+The lock resolves `asago-package` from
+`../asago-artifact-generator/packages/asago-package`
+(`pyproject.toml`, `[tool.uv.sources]`). Check out the artifact generator
+(the consumer) beside this repository before you sync; the sync fails
+without it.
+
 ```bash
-uv sync --locked
+uv sync --locked --all-extras
 ```
+
+`--all-extras` installs the `target-discovery` extra, which `asago-orch doctor`
+and target-discovery work need. A plain `uv sync --locked` prunes the extra.
 
 The installed command is `asago-scenario-generator` and the Python package is
 `asago_scenario_generator`.
@@ -893,7 +902,16 @@ code-rendered Gherkin when the reply fails, errors, or is refused. The
 `gherkins.json` records each scenario's source, request count, rejections,
 reason, and reply. The handoff signs its digest under the `scenario-handoff-v5`
 domain, and generation fails when a source the six fields need is missing.
-`CONTRACT.lock` pins v5. The handoff retains the semantic failure criterion, the
+`CONTRACT.lock` pins v5.
+
+`generate` writes only v5. The producer also defines `scenario-handoff-v6`
+(`ScenarioHandoffV6` in `stpa/scenario_prod/handoff.py`), the same document
+with `attack_shape.indirect.party_relation.controller` renamed to
+`controlling_party` on the wire and a digest signed under the v6 domain. No
+`generate` path writes it. A v6 document appears in two cases: you call
+`build_scenario_handoff_v6` (`handoff_v5.py`), or you upgrade a saved v5
+handoff with `asago_handoff.HANDOFF_UPGRADE`, which renames the field and
+recomputes `content_digest`. The handoff retains the semantic failure criterion, the
 safe alternative, lineage, identity, and hypothesis framing, and publishes no
 prepared message, prepared history, delivery route, oracle selection, detector
 expression, judge prompt, or executable setup. The artifact generator reads
@@ -917,6 +935,21 @@ uv run pytest tests/ -q
 The unit suite is deterministic and does not require an LLM endpoint. Unit
 tests pin behavior, and the phrase tables in `tests/phrases/*.yaml` pin prompt
 text. Pipeline output and harness state are ignored.
+
+Tests marked `replay_corpus` read the replay corpus, a folder outside every
+repository that is never committed. Set `ASAGO_REPLAY_CORPUS` to its path.
+When the variable is unset, the marked tests in the `asago-contracts-core` and
+`asago-target-discovery` members default to the `replay-corpus` folder beside
+this repository (`../replay-corpus`), and the marked test in
+`tests/test_verify_corpus_digests.py` skips. When the corpus directory does not
+exist, the marked tests fail and name the missing path. CI runs each workspace
+member with `-m 'not replay_corpus'` because it has no corpus. To run a member's
+tests without a corpus, deselect the marker:
+
+```bash
+uv run pytest packages/asago-contracts-core/tests -q -m 'not replay_corpus'
+```
+
 See the [architecture overview](docs/architecture/overview.md).
 
 ## License
