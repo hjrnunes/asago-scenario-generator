@@ -2,11 +2,13 @@
 
 ``<version>/cases/conformance-cases.json`` names, for each rule, the valid
 handoffs or companions that must pass, the invalid ones that must be reported,
-and the violation codes the rule owns. An invalid case passes only when one of
-its violations carries one of those codes, so a violation from another rule
-cannot hide a case that no longer exercises the rule it names. The runner reads
-the kit directory it is given, so it runs the producer's contract tree and a
-consumer's mirror alike, for any published version.
+and the violation codes the rule owns. A code ending in ``:`` names a family and
+matches every violation code that starts with it; every other code matches
+exactly. An invalid case passes only when one of its violations carries one of
+those codes, so a violation from another rule, or a code that merely starts with
+an exact code's text, cannot hide a case that no longer exercises the rule it
+names. The runner reads the kit directory it is given, so it runs the producer's
+contract tree and a consumer's mirror alike, for any published version.
 
 A kit's case files are bare payloads, including for a version whose spec requires
 the envelope, so the runner reads the payload rules alone; the envelope is
@@ -51,17 +53,27 @@ class ConformanceResult:
         """Tell whether the case produced the violations it must.
 
         A valid case passes with none. An invalid case passes only when a
-        violation carries a code the rule names; any other violation leaves it
-        failing, because the case no longer shows what its rule forbids.
+        violation carries a code the rule names: a code ending in ``:`` matches
+        that family, and every other code matches exactly. Any other violation
+        leaves it failing, because the case no longer shows what its rule
+        forbids.
         """
 
         if self.case.valid:
             return not self.violations
         return any(
-            violation.code.startswith(prefix)
+            _names(violation.code, code)
             for violation in self.violations
-            for prefix in self.case.codes
+            for code in self.case.codes
         )
+
+
+def _names(violation_code: str, rule_code: str) -> bool:
+    """Tell whether a violation carries the code, or belongs to the family it names."""
+
+    if rule_code.endswith(":"):
+        return violation_code.startswith(rule_code)
+    return violation_code == rule_code
 
 
 def load_conformance_cases(

@@ -14,6 +14,7 @@ import yaml
 from jsonschema import Draft202012Validator
 
 from asago_scenario_generator.stpa.models.attack_shape import (
+    ItemController,
     ShapeDowngradeReason,
     ShapeSource,
 )
@@ -23,14 +24,20 @@ from asago_scenario_generator.stpa.scenario_prod.handoff import (
     handoff_ownership_violations,
     verify_handoff_digest,
 )
+from asago_scenario_generator.stpa.scenario_prod.handoff_schema import handoff_schema
 from asago_scenario_generator.stpa.scenario_prod.run import SP3RunResult, run_sp3
 from asago_scenario_generator.stpa.scenario_prod.stage5.shape_step import (
     ForgedShapeProposal,
     ShapeProposal,
     ShapeStepConfig,
 )
-from tests.helpers.stpa_builders import make_cs, make_loss_analysis
+from tests.helpers.stpa_builders import (
+    make_capability_profile,
+    make_cs,
+    make_loss_analysis,
+)
 from tests.stpa.sp1_helpers import MockLLMClient
+from tests.stpa.shape_fixtures import profile_with_influence
 from tests.helpers.scenario_handoff_publication import (
     _functional_payload,
     _normal_semantics_payload,
@@ -39,7 +46,32 @@ from tests.helpers.scenario_handoff_publication import (
 from tests.helpers.shape_step_call import DIRECT_REPLY
 from tests.helpers.sp3_run import _make_ets, stage5_and_shape_calls
 
-SCHEMA = ScenarioHandoffV5.model_json_schema()
+SCHEMA = handoff_schema(HANDOFF_SCHEMA_VERSION_V5)
+
+#: The shape reply for a third party that reaches the agent through content.
+INDIRECT_REPLY = {
+    "channel": "indirect",
+    "turn_count": 2,
+    "turn_plan": [
+        {"position": 1, "speaker": "benign_user", "purpose": "establish_context"},
+        {"position": 2, "speaker": "benign_user", "purpose": "ask_to_read_item"},
+    ],
+    "indirect": {
+        "carrier_operation": "get_listing",
+        "content_kind": "listing_content",
+        "controller": "counterparty",
+    },
+}
+
+
+def _indirect_payload() -> dict:
+    """The normal-path wire with a third party that plants content."""
+    payload = _normal_semantics_payload()
+    payload["adversary"] = {
+        "kind": "third_party_via_content",
+        "gain": "Reads a record the assistant was not asked to read.",
+    }
+    return payload
 
 
 def publish(
@@ -91,6 +123,32 @@ def test_an_adversarial_run_publishes_the_validated_shape(
     assert len(calls) == 2
     assert result.stage_errors == []
     assert result.scenario_specs[0].attack_shape == handoff.attack_shape
+
+
+def test_an_indirect_run_publishes_the_controller_under_its_v5_name(
+    tmp_path: Path,
+) -> None:
+    """A v5 reader sees ``party_relation.controller``; the schema must accept it."""
+
+    publish(
+        [_indirect_payload()],
+        tmp_path,
+        shape_reply=INDIRECT_REPLY,
+        capability_profile=make_capability_profile(kc_subcodes=["KC6.3.3"]),
+        execution_target_profile=profile_with_influence({"get_listing": "indirect"}),
+    )
+
+    document = _published_handoff(tmp_path)
+    indirect = document["attack_shape"]["indirect"]
+    assert indirect["party_relation"]["controller"] == "counterparty"
+    handoff = assert_valid(document)
+    assert handoff.attack_shape is not None
+    assert handoff.attack_shape.source is ShapeSource.STAGE5_VALIDATED
+    assert handoff.attack_shape.indirect is not None
+    assert (
+        handoff.attack_shape.indirect.party_relation.controller
+        is ItemController.COUNTERPARTY
+    )
 
 
 def test_a_failing_shape_request_publishes_the_code_default(tmp_path: Path) -> None:

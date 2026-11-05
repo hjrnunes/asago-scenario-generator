@@ -10,7 +10,10 @@ from typing import Any
 import pytest
 
 from asago_contracts_core import (
+    ConformanceCase,
+    ConformanceResult,
     ContractError,
+    Violation,
     feature_violations,
     load_conformance_cases,
     render_feature_text,
@@ -95,6 +98,72 @@ def test_the_manifest_names_the_five_rules() -> None:
     for rule in manifest["rules"]:
         assert rule["valid"] and rule["invalid"]
         assert rule["codes"]
+
+
+def _result(
+    rule: str, codes: tuple[str, ...], violation_codes: tuple[str, ...]
+) -> ConformanceResult:
+    """Build one invalid case whose violations carry exactly the given codes."""
+
+    case = ConformanceCase(
+        rule=rule,
+        kind="handoff",
+        valid=False,
+        path="invalid/taxonomy-unsorted-references.json",
+        handoff={},
+        codes=codes,
+    )
+    violations = tuple(Violation(code, "$", "test") for code in violation_codes)
+    return ConformanceResult(case, violations)
+
+
+def test_a_prefix_collision_on_an_exact_code_does_not_pass_the_case() -> None:
+    """``schema_violation:taxonomy_extra`` is not the ``reference-order`` break.
+
+    ``reference-order`` owns the exact code ``schema_violation:taxonomy``; an
+    extra top-level property produces ``schema_violation:taxonomy_extra``, which
+    names another fault and must not pass this case.
+    """
+
+    result = _result(
+        "reference-order",
+        ("schema_violation:taxonomy",),
+        ("schema_violation:taxonomy_extra",),
+    )
+
+    assert result.passed is False
+
+
+def test_an_invalid_case_passes_on_the_exact_code_its_rule_names() -> None:
+    result = _result(
+        "reference-order",
+        ("schema_violation:taxonomy",),
+        ("schema_violation:taxonomy",),
+    )
+
+    assert result.passed is True
+
+
+def test_a_code_ending_in_a_colon_names_a_family_prefix() -> None:
+    """``ownership-walker`` owns every ``artifact_design_field:`` code."""
+
+    result = _result(
+        "ownership-walker",
+        ("artifact_design_field:", "prose_hiding:"),
+        ("artifact_design_field:controller",),
+    )
+
+    assert result.passed is True
+
+
+def test_a_family_code_does_not_pass_another_rules_violation() -> None:
+    result = _result(
+        "ownership-walker",
+        ("artifact_design_field:", "prose_hiding:"),
+        ("feature_companion:feature_line",),
+    )
+
+    assert result.passed is False
 
 
 def test_a_valid_case_is_checked_by_the_rules_it_names() -> None:

@@ -46,6 +46,8 @@ VERSIONS = (V5, V6)
 _ENVELOPE = {V5: "optional", V6: "required"}
 _CONTRACT_DIR = Path(__file__).resolve().parent / "data" / CONTRACT
 _VERSION_DIRS = {version: _CONTRACT_DIR / version for version in VERSIONS}
+#: The workspace checkout holds the replay corpus beside this repository.
+_REPLAY_CORPUS = Path(__file__).resolve().parents[3].parent / "replay-corpus"
 
 
 def _json(path: Path) -> Any:
@@ -80,14 +82,23 @@ def _enveloped(
     return {**document, ENVELOPE_FIELD: envelope}
 
 
+def _replay_corpus() -> Path:
+    """Return the replay corpus the recorded handoffs live in.
+
+    VAL-SAFETY-006: a test that reads the corpus fails loudly when the
+    configured directory is missing; it must not read nothing and pass.
+    """
+
+    corpus = Path(os.environ.get("ASAGO_REPLAY_CORPUS", _REPLAY_CORPUS))
+    if not corpus.is_dir():
+        pytest.fail(f"the replay corpus directory does not exist: {corpus}")
+    return corpus
+
+
 def _recorded_documents() -> list[Path]:
     """Return every recorded handoff the reader must keep reading."""
 
-    documents = _cases(V5, "valid")
-    corpus = os.environ.get("ASAGO_REPLAY_CORPUS")
-    if corpus:
-        documents = documents + sorted(Path(corpus).rglob("handoff.json"))
-    return documents
+    return _cases(V5, "valid")
 
 
 def _valid_case(version: str) -> dict[str, Any]:
@@ -159,6 +170,27 @@ def test_every_recorded_handoff_still_reads(case: Path) -> None:
 
     assert document.get("schema_version") == V5
     assert read_handoff(document).version == V5
+
+
+def test_every_handoff_the_replay_corpus_records_still_reads() -> None:
+    """Every handoff recorded outside the cases reads as a v5 document."""
+
+    for path in sorted(_replay_corpus().rglob("handoff.json")):
+        document = _json(path)
+        assert document.get("schema_version") == V5, path
+        assert read_handoff(document).version == V5, path
+
+
+def test_a_missing_replay_corpus_fails_and_names_the_path(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    missing = tmp_path / "no-such-corpus"
+    monkeypatch.setenv("ASAGO_REPLAY_CORPUS", str(missing))
+
+    with pytest.raises(pytest.fail.Exception) as raised:
+        _replay_corpus()
+
+    assert str(missing) in str(raised.value)
 
 
 @pytest.mark.parametrize("version", VERSIONS)

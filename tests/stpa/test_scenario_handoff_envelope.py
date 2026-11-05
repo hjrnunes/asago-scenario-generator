@@ -29,6 +29,7 @@ from asago_scenario_generator.stpa.scenario_prod.handoff import (
     handoff_schema_violations,
     verify_handoff_digest,
 )
+from asago_scenario_generator.stpa.scenario_prod.handoff_schema import handoff_schema
 
 KIT_VALID = (
     Path(__file__).resolve().parents[2]
@@ -49,6 +50,26 @@ DIRECT_SHAPE: dict[str, Any] = {
     "indirect": None,
     "threat_label": None,
     "source": "code_default",
+    "downgrade_reason": None,
+}
+
+INDIRECT_SHAPE: dict[str, Any] = {
+    "channel": "indirect",
+    "turn_count": 2,
+    "turn_plan": [
+        {"position": 1, "speaker": "benign_user", "purpose": "establish_context"},
+        {"position": 2, "speaker": "benign_user", "purpose": "ask_to_read_item"},
+    ],
+    "indirect": {
+        "carrier_operation": "get_listing",
+        "data_item": {"content_kind": "listing_content", "record_ref": None},
+        "party_relation": {
+            "controller": "counterparty",
+            "benign_user_actor_ref": None,
+        },
+    },
+    "threat_label": None,
+    "source": "stage5_validated",
     "downgrade_reason": None,
 }
 
@@ -255,8 +276,12 @@ def test_the_schema_requires_the_shape_and_carries_its_pairings() -> None:
 
 
 def _schema_errors(payload: dict[str, Any]) -> list[Any]:
+    """Validate a v5 document against the published v5 schema, not the model's v6 aliases."""
+
     return list(
-        Draft202012Validator(ScenarioHandoffV5.model_json_schema()).iter_errors(payload)
+        Draft202012Validator(handoff_schema(HANDOFF_SCHEMA_VERSION_V5)).iter_errors(
+            payload
+        )
     )
 
 
@@ -277,3 +302,15 @@ def test_the_json_schema_accepts_valid_payloads_and_enforces_the_pairings() -> N
     missing_shape = _adversarial()
     del missing_shape["attack_shape"]
     assert _schema_errors(missing_shape)
+
+
+def test_the_json_schema_accepts_the_party_relation_v5_publishes() -> None:
+    """v5 publishes ``party_relation.controller``; the schema must accept it."""
+
+    document = _finalized(_adversarial(INDIRECT_SHAPE))
+
+    assert (
+        document["attack_shape"]["indirect"]["party_relation"]["controller"]
+        == "counterparty"
+    )
+    assert _schema_errors(document) == []

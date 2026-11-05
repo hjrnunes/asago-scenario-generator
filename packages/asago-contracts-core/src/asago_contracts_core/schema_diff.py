@@ -531,7 +531,12 @@ def _diff_alternatives(
     if old_map.keys() - new_map.keys():
         _add(changes, f"{location}.{keyword}", "alternatives-removed", True)
     if new_map.keys() - old_map.keys():
-        _add(changes, f"{location}.{keyword}", "alternatives-added", False)
+        # A `oneOf` branch can overlap an existing one, so a document that used
+        # to match exactly one branch now matches two and is refused; an `anyOf`
+        # addition only widens what the schema accepts.
+        breaking = keyword == "oneOf"
+        kind = "one-of-alternative-added" if breaking else "alternatives-added"
+        _add(changes, f"{location}.{keyword}", kind, breaking)
     for key in sorted(old_map.keys() & new_map.keys()):
         _diff(old_map[key], new_map[key], f"{location}.{keyword}", changes)
 

@@ -46,10 +46,25 @@ from asago_target_discovery.runtime_contract import (
 
 REPO = Path(__file__).resolve().parents[3]
 _ROOTS = {version: contract_dir(CONTRACT) / version for version in VERSIONS}
+#: The workspace checkout holds the replay corpus beside this repository.
+_REPLAY_CORPUS = REPO.parent / "replay-corpus"
 
 
 def _json(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _replay_corpus() -> Path:
+    """Return the replay corpus the recorded contracts live in.
+
+    VAL-SAFETY-006: a test that reads the corpus fails loudly when the
+    configured directory is missing; it must not read nothing and pass.
+    """
+
+    corpus = Path(os.environ.get("ASAGO_REPLAY_CORPUS", _REPLAY_CORPUS))
+    if not corpus.is_dir():
+        pytest.fail(f"the replay corpus directory does not exist: {corpus}")
+    return corpus
 
 
 def _spec(version: str = VERSION) -> ContractSpec:
@@ -177,13 +192,25 @@ def test_every_contract_the_builder_emits_reads() -> None:
 def test_every_recorded_contract_still_reads() -> None:
     """Every runtime contract recorded outside the cases reads as a v2 or v3 document."""
 
-    corpus = Path(os.environ.get("ASAGO_REPLAY_CORPUS", REPO.parent / "replay-corpus"))
-    recorded = sorted(corpus.rglob("runtime-contract.json")) if corpus.is_dir() else []
+    corpus = _replay_corpus()
+    recorded = sorted(corpus.rglob("runtime-contract.json"))
     if not recorded:
         pytest.skip(f"no recorded runtime contracts under {corpus}")
 
     for path in recorded:
         assert read_runtime_contract(_json(path)).version in VERSIONS, path
+
+
+def test_a_missing_replay_corpus_fails_and_names_the_path(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    missing = tmp_path / "no-such-corpus"
+    monkeypatch.setenv("ASAGO_REPLAY_CORPUS", str(missing))
+
+    with pytest.raises(pytest.fail.Exception) as raised:
+        _replay_corpus()
+
+    assert str(missing) in str(raised.value)
 
 
 @pytest.mark.parametrize(

@@ -134,8 +134,20 @@ def test_diff_schemas_ignores_annotations():
             False,
         ),
         (
+            {"oneOf": [{"type": "string"}]},
+            {"oneOf": [{"type": "string"}, {"type": "integer"}]},
+            "one-of-alternative-added",
+            True,
+        ),
+        (
             {"anyOf": [{"type": "string"}, {"type": "integer"}]},
             {"anyOf": [{"type": "string"}]},
+            "alternatives-removed",
+            True,
+        ),
+        (
+            {"oneOf": [{"type": "string"}, {"type": "integer"}]},
+            {"oneOf": [{"type": "string"}]},
             "alternatives-removed",
             True,
         ),
@@ -192,6 +204,22 @@ def test_check_roots_refuses_a_breaking_change_without_a_major_bump():
     assert "major" in problems[0]
 
 
+def test_check_roots_refuses_an_added_one_of_alternative_without_a_major_bump():
+    """An added ``oneOf`` branch can overlap an existing one and refuses a document.
+
+    ``example-v1.1.0`` adds a branch that matches everything the two existing
+    branches match, so a document that used to match one branch now matches
+    two and fails; the check refuses that change inside the same major version.
+    """
+
+    problems = check_roots([_ROOT / "one-of"])
+
+    assert len(problems) == 1
+    assert "example-v1.1.0" in problems[0]
+    assert "one-of-alternative-added" in problems[0]
+    assert "major" in problems[0]
+
+
 def test_check_roots_refuses_a_root_that_is_not_a_directory(tmp_path):
     with pytest.raises(SchemaDiffError):
         check_roots([tmp_path / "missing"])
@@ -213,6 +241,14 @@ def test_the_cli_exits_one_for_a_breaking_change(capsys):
     assert "major" in err
 
 
+def test_the_cli_exits_one_for_a_same_major_one_of_addition(capsys):
+    assert main([str(_ROOT / "one-of")]) == 1
+
+    err = capsys.readouterr().err
+    assert "example-v1.1.0" in err
+    assert "one-of-alternative-added" in err
+
+
 def test_the_cli_exits_two_for_a_missing_root(tmp_path, capsys):
     assert main([str(tmp_path / "missing")]) == 2
 
@@ -221,7 +257,7 @@ def test_the_cli_exits_two_for_a_missing_root(tmp_path, capsys):
 
 @pytest.mark.parametrize(
     ("fixture", "code"),
-    [("clean", 0), ("breaking", 1)],
+    [("clean", 0), ("breaking", 1), ("one-of", 1)],
 )
 def test_the_documented_command_runs_the_check(fixture, code):
     result = subprocess.run(
