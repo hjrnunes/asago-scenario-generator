@@ -8,6 +8,10 @@ version = "0.1.0"
 description = "LLM-driven red-teaming scenario generator for LLM and agentic AI systems"
 requires-python = ">=3.12"
 dependencies = [
+    # ``stpa/scenario_prod/handoff.py`` reads the handoff contract, the installed spec
+    # set and the envelope writer from the shared core, so the app names it directly
+    # instead of relying on another dependency's resolution.
+    "asago-contracts-core>=0.1,<0.2",
     "asago-handoff>=0.1,<0.2",
     "asago-package>=0.1,<0.2",
     "asago-report-kit>=0.1,<0.2",

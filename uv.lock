@@ -131,6 +131,7 @@ name = "asago-scenario-generator"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "asago-contracts-core" },
     { name = "asago-handoff" },
     { name = "asago-package" },
     { name = "asago-report-kit" },
@@ -162,6 +163,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "asago-contracts-core", editable = "packages/asago-contracts-core" },
     { name = "asago-handoff", editable = "packages/asago-handoff" },
     { name = "asago-package", editable = "../asago-artifact-generator/packages/asago-package" },
     { name = "asago-report-kit", editable = "packages/asago-report-kit" },
