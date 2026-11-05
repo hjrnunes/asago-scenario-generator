@@ -183,7 +183,9 @@ upgrades to its v6 case.
   artifact-design walker alone.
 - `run_conformance(contract_dir)` runs a kit's `conformance-cases.json`. An
   invalid case passes only when a violation carries a code the rule names, so
-  an unrelated violation does not hide a broken case.
+  an unrelated violation does not hide a broken case. A rule code that ends in
+  `:` names a family and matches every violation code that starts with it; any
+  other code matches exactly.
 - `evaluate_condition_v2(condition, calls, complete)` evaluates a
   `tool-call-condition-v2` condition, and `validate_condition(condition)`
   reports a structural problem first. `evaluate_condition` is the same
