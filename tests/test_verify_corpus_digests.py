@@ -60,6 +60,7 @@ def test_a_missing_replay_corpus_fails_and_names_the_path(
     assert str(missing) in str(raised.value)
 
 
+@pytest.mark.replay_corpus
 def test_every_persisted_digest_recomputes(
     capsys: pytest.CaptureFixture[str],
 ) -> None:

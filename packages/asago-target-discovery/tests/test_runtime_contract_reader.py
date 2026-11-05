@@ -189,6 +189,7 @@ def test_every_contract_the_builder_emits_reads() -> None:
         assert read_runtime_contract(contract).version == VERSION
 
 
+@pytest.mark.replay_corpus
 def test_every_recorded_contract_still_reads() -> None:
     """Every runtime contract recorded outside the cases reads as a v2 or v3 document."""
 

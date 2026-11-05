@@ -38,6 +38,9 @@ packages = ["src/asago_target_discovery"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "replay_corpus: reads the replay corpus named by ASAGO_REPLAY_CORPUS (default: the workspace replay-corpus folder); CI deselects it because it has no corpus",
+]
 # The fakes the suite shares, including the CLI runner, the call log and the
 # scripted client, live under tests/helpers; the suite reads nothing from the
 # app's tests/ tree.

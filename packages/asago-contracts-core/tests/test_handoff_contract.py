@@ -172,6 +172,7 @@ def test_every_recorded_handoff_still_reads(case: Path) -> None:
     assert read_handoff(document).version == V5
 
 
+@pytest.mark.replay_corpus
 def test_every_handoff_the_replay_corpus_records_still_reads() -> None:
     """Every handoff recorded outside the cases reads as a v5 document."""
 
