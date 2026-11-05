@@ -3,7 +3,7 @@
   "contract": "scenario-handoff",
   "files": {
     "ownership-rules.json": "d1c57c1298fc4eacf098508cf8294b95366a36041719bd4ebf906fb7f9e4742d",
-    "scenario-handoff-v5/README.md": "87a237144cfeea0d6f4d8376def344f62e4f535d51e0a12a405c6de314258177",
+    "scenario-handoff-v5/README.md": "204eab58299335c952527cb378fadf83a0be9a369d2c3db47e768f602119bda2",
     "scenario-handoff-v5/cases/canonical-digests.json": "a374162975a22e8696241b771686854f96737ddf0a3c0b8c1df0e023db9523b4",
     "scenario-handoff-v5/cases/companions/feature-companion-comments.json": "0875d9a1673c5031ee70933272ad8994a3a44eb62ed2b2fd1278378d06b8595e",
     "scenario-handoff-v5/cases/companions/feature-companion-feature-line.json": "f382bead00448acf962c344304f5d211eab0d1e4b8f9e1b5c11718babb80afd8",
@@ -187,7 +187,7 @@
     "scenario-handoff-v5/cases/valid/taxonomy-block.json": "0a6694ebbcf1462223f40cb367c934f07ae34746606c05b2a44e6f8598424d95",
     "scenario-handoff-v5/schema.json": "5204e71e2d388c4380f246f81e2f1f99c2089ab9cdc253720f30990182d5f3e2",
     "scenario-handoff-v5/spec.json": "9dfc45606e9b8522e99a305a57435c1d2395254244f861fb588451d66ec36eeb",
-    "scenario-handoff-v6/README.md": "469ee2f86dbdee4f110c1038908cba474e7a1c18e72a2232496b3db9223456f6",
+    "scenario-handoff-v6/README.md": "b44fc727a1fb1857dfaecebff628eefdde8f36816a12e9e2874ccd8949564cc2",
     "scenario-handoff-v6/cases/canonical-digests.json": "815d694106f455faf1f3c2f3a655e4cbcb67612cf85da2478d3ee682dfc6c43b",
     "scenario-handoff-v6/cases/companions/feature-companion-comments.json": "0875d9a1673c5031ee70933272ad8994a3a44eb62ed2b2fd1278378d06b8595e",
     "scenario-handoff-v6/cases/companions/feature-companion-feature-line.json": "f382bead00448acf962c344304f5d211eab0d1e4b8f9e1b5c11718babb80afd8",

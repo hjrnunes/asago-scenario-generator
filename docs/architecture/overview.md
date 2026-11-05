@@ -61,8 +61,8 @@ id matching the scheme), sorted by scheme and id, each once.
 `report.risk_tags.merged_risk_tags`, the tags policy coverage reports. It
 reaches no prompt, and a run without SSSOM rows or risk cards omits it. The ownership
 scan reads its forbidden keys and prose patterns from `ownership-rules.json`
-beside the kit; the lock pins that file and the consumer mirrors it, so both
-sides enforce one list. `scripts/gen_handoff_kit.py` regenerates the kit and
+beside the kit; the lock pins that file, and the shared core ships it to the
+consumer, so both sides enforce one list. `scripts/gen_handoff_kit.py` regenerates the kit and
 the lock; every kit file must come out byte-identical. `scenario-handoff-v5/schema.json`
 states the rules JSON Schema can express, composed from the model's own schema,
 so a reader that holds only the schema reaches the verdicts the Pydantic model
@@ -90,8 +90,7 @@ evaluator, `evaluate_condition_v2` in `packages/asago-handoff`
 v2 evaluate vector, and the consumer and the orchestrator read it from there. An
 evaluator, such as the Garak `toolcall` detector, executes the condition and
 must reproduce every vector of the version it implements; the consumer carries the condition unchanged in `tool_call_condition.json`;
-the consumer and the orchestrator mirror the contract byte for byte, as they do
-for `scenario-handoff`. A change to condition semantics is a new contract
+the consumer and the fork readers carry the contract byte for byte. A change to condition semantics is a new contract
 version with new vectors, made here first; no repository redefines the
 semantics in its own prose or tests.
 

@@ -7,7 +7,7 @@ from the same builders: v6 is v5's document with the party field renamed to
 requires. Run from any directory: ``uv run python scripts/gen_handoff_kit.py``.
 Regenerating the kits must leave every byte unchanged, which
 ``git status --porcelain data/contracts`` confirms.
-Downstream repositories mirror the regenerated files byte-identically.
+The shared core carries the regenerated files as byte-identical package data.
 """
 
 from __future__ import annotations
@@ -1736,8 +1736,8 @@ README = """# scenario-handoff
 
 The frozen scenario handoff a producer run publishes as `scenarios/SCN-*.yaml`: the
 narrative, the attack path, the Gherkin, the semantic failure criterion, the safe alternative
-and the metadata the consumer needs. The producer owns this contract; the consumer's
-`contracts/scenario-handoff/` and the shared core's package data carry byte-identical copies.
+and the metadata the consumer needs. The producer owns this contract; the shared core
+carries the whole contract directory as byte-identical package data.
 
 ## The document
 
@@ -1799,16 +1799,18 @@ from this directory. `asago_contracts_core.validate_handoff` reads every handoff
 installed spec before the hand-written rules, so the producer's Stage 6 check and the
 consumer's input adapter keep their existing error wording.
 
-The orchestrator keeps no copy of this contract and reads `schema_version` directly, so its
-handoff reader stays lenient on purpose.
+The orchestrator keeps no copy of this contract and validates no handoff against it. Its
+handoff reader reads only `schema_version`: `HANDOFF_SCHEMA_VERSIONS` pins
+`scenario-handoff-v5`, and a saved generate output whose handoff names any other version is
+refused rather than reused, with a message naming the version authoring reads.
 """
 
 README_V6 = """# scenario-handoff
 
 The frozen scenario handoff a producer run publishes as `scenarios/SCN-*.yaml`: the
 narrative, the attack path, the Gherkin, the semantic failure criterion, the safe alternative
-and the metadata the consumer needs. The producer owns this contract; the consumer's
-`contracts/scenario-handoff/` and the shared core's package data carry byte-identical copies.
+and the metadata the consumer needs. The producer owns this contract; the shared core
+carries the whole contract directory as byte-identical package data.
 
 ## The document
 
@@ -1881,8 +1883,10 @@ from this directory. `asago_contracts_core.validate_handoff` reads every handoff
 installed spec before the hand-written rules, so the producer's Stage 6 check and the
 consumer's input adapter keep their existing error wording.
 
-The orchestrator keeps no copy of this contract and reads `schema_version` directly, so its
-handoff reader stays lenient on purpose.
+The orchestrator keeps no copy of this contract and validates no handoff against it. Its
+handoff reader reads only `schema_version`: `HANDOFF_SCHEMA_VERSIONS` pins
+`scenario-handoff-v5`, and a saved generate output whose handoff names any other version is
+refused rather than reused, with a message naming the version authoring reads.
 """
 
 
