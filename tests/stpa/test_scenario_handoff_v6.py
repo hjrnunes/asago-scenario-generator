@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from jsonschema import Draft202012Validator
 from pydantic import ValidationError
 
 from asago_contracts_core import (
@@ -173,10 +174,27 @@ def test_the_v6_writer_stamps_the_envelope_the_spec_requires(
         HANDOFF_SCHEMA_VERSION_V6,
     )
     assert envelope["spec_digest"] == spec.spec_digest
+    assert envelope["requires"] == []
     assert envelope["provenance"]["writer"] == HANDOFF_WRITER
+    assert envelope["provenance"]["validator_version"].startswith(
+        "asago-contracts-core "
+    )
     assert _relation(document)["controlling_party"] == ItemController.THIRD_PARTY.value
     assert read_handoff(document).version == HANDOFF_SCHEMA_VERSION_V6
     assert feature_path.read_text(encoding="utf-8") == handoff.gherkin.to_feature_text()
+
+
+def test_the_reader_accepts_both_versions(tmp_path: Path) -> None:
+    v5_path, _ = write_scenario_handoff(
+        build_scenario_handoff_v5(_envelope(adversarial())), tmp_path / "v5"
+    )
+    v6_path, _ = write_scenario_handoff(_built(), tmp_path / "v6")
+
+    v5 = yaml.safe_load(v5_path.read_text(encoding="utf-8"))
+    v6 = yaml.safe_load(v6_path.read_text(encoding="utf-8"))
+
+    assert read_handoff(v5).version == HANDOFF_SCHEMA_VERSION_V5
+    assert read_handoff(v6).version == HANDOFF_SCHEMA_VERSION_V6
 
 
 def test_the_v5_writer_keeps_the_recorded_bare_document(tmp_path: Path) -> None:
@@ -266,6 +284,39 @@ def test_the_v5_schema_refuses_controlling_party() -> None:
     assert [violation.code for violation in schema_violations(payload)] == [
         "schema_violation:attack_shape"
     ]
+
+
+def test_the_v5_contract_schema_is_the_one_v5_documents_validate_against() -> None:
+    published = json.loads(
+        (CONTRACT_ROOT / HANDOFF_SCHEMA_VERSION_V5 / "schema.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    default = ScenarioHandoffV5.model_json_schema()
+
+    # ``handoff_schema`` publishes the v5 field names, and its default version is
+    # v5. The model's default schema publishes the v6 serialization alias instead,
+    # so no caller may validate a v5 document against it.
+    assert handoff_schema(HANDOFF_SCHEMA_VERSION_V5) == published
+    assert handoff_schema() == published
+    assert default != published
+    assert "controlling_party" in default["$defs"]["PartyRelation"]["properties"]
+    assert set(published["$defs"]["PartyRelation"]["properties"]) == {
+        "controller",
+        "benign_user_actor_ref",
+    }
+
+    case = json.loads(
+        (
+            CONTRACT_ROOT
+            / HANDOFF_SCHEMA_VERSION_V5
+            / "cases/valid/adversarial-indirect-listing.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert list(Draft202012Validator(published).iter_errors(case)) == []
+    assert list(Draft202012Validator(default).iter_errors(case)), (
+        "the model's default schema must not accept the v5 controller field"
+    )
 
 
 def test_the_alias_never_reaches_the_stage_5_shape_step_schema() -> None:
