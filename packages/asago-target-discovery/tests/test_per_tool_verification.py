@@ -11,7 +11,7 @@ import pytest
 from pydantic import ValidationError
 
 from asago_scenario_generator.stpa.infra.llm_helpers import CallOutcome
-from tests.discovery_call_log import logged
+from helpers.discovery_call_log import logged
 from asago_scenario_generator.stpa.infra.llm import LLMResult
 from asago_scenario_generator.stpa.models.execution_classification import (
     InterpreterVerifierAgreement,

@@ -14,8 +14,8 @@ from pydantic import ValidationError
 
 from asago_scenario_generator.stpa.infra.call_log import jsonl_lines
 from asago_scenario_generator.stpa.infra.llm_helpers import CallOutcome
-from tests.discovery_call_log import logged
-from tests.helpers.scripted_client import ScriptedClient
+from helpers.discovery_call_log import logged
+from helpers.scripted_client import ScriptedClient
 from asago_scenario_generator.stpa.infra.llm import LLMResult
 from asago_scenario_generator.stpa.models.execution_classification import (
     InterpreterVerifierAgreement,

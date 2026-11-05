@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 import pytest
 
-from tests.cli_helpers import PlainCliRunner
+from helpers.cli_helpers import PlainCliRunner
 
 from asago_target_discovery.cli import app
 

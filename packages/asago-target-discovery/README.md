@@ -37,8 +37,5 @@ offline. See the repository README for the full commands and flags.
 - `tests/` holds the suite. The app's `tests/` run does not include it; run it
   in its own pytest session.
 
-`asago_scenario_generator.target_discovery` keeps the package-root names and
-every pre-move child module path importable for one cycle after the move; a
-lazy finder resolves a child path to the same module object in
-`asago_target_discovery`. M9 removes the shim. New code imports
-`asago_target_discovery`.
+The pre-move import path `asago_scenario_generator.target_discovery` is gone;
+import `asago_target_discovery`.

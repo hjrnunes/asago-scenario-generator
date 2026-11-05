@@ -32,7 +32,7 @@ from asago_target_discovery.transport import (
     McpToolsListFileError,
     sdk_shaped_tool_row,
 )
-from tests.cli_helpers import PlainCliRunner
+from helpers.cli_helpers import PlainCliRunner
 from helpers.target_discovery import FakeMcpSdk, install_fake_mcp_sdk
 
 

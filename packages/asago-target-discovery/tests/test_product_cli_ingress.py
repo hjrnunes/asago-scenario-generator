@@ -7,7 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from tests.cli_helpers import PlainCliRunner
+from helpers.cli_helpers import PlainCliRunner
 
 from asago_scenario_generator.cli import app
 

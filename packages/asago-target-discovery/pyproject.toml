@@ -38,7 +38,7 @@ packages = ["src/asago_target_discovery"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-# The fakes the suite shares live beside the tests; the CLI runner, the call log
-# and the scripted client stay in the app's tests/ tree, which the suite reads
-# from the repository root.
-pythonpath = ["tests", "../.."]
+# The fakes the suite shares, including the CLI runner, the call log and the
+# scripted client, live under tests/helpers; the suite reads nothing from the
+# app's tests/ tree.
+pythonpath = ["tests"]
