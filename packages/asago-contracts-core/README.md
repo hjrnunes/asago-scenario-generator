@@ -99,6 +99,12 @@ enum value or opens a closed object. An unknown keyword outside the `x-`
 extensions counts as breaking, so a keyword the classifier does not know never
 passes silently.
 
+An added `oneOf` alternative is breaking too: it can overlap an existing branch
+or repeat one, and a value that used to match a single branch then matches two
+and is refused. An added `anyOf` alternative stays compatible because one match
+is enough. The alternatives are compared as multisets, so a repeated branch
+counts as an addition.
+
 `check_roots(roots)` checks the installed kits under one or more contract roots.
 It walks `<root>/<contract>/<version>/schema.json`, skips a directory whose name
 does not parse as a version, groups the remaining versions by the name's prefix,
@@ -114,8 +120,10 @@ uv run python -m asago_contracts_core.schema_diff_cli data/contracts
 
 The command exits 0 when no version changes its schema incompatibly without a
 major bump, 1 when a problem exists, and 2 when a root or a schema cannot be
-read. `tests/data/schema-diff/` holds a clean fixture and a breaking fixture the
-tests use. The producer and consumer CI workflows run the same command.
+read. `tests/data/schema-diff/` holds the fixture roots the tests use: a clean
+minor change, a breaking property removal, an added overlapping `oneOf` branch
+and an added duplicate `oneOf` branch. The producer and consumer CI workflows run
+the same command.
 
 ## The support window
 

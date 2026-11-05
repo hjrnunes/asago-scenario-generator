@@ -179,6 +179,37 @@ def test_diff_schemas_classifies_a_change(old, new, kind, breaking):
     assert changes[0].location
 
 
+def test_diff_schemas_reports_a_duplicated_one_of_alternative_as_breaking():
+    """A repeated branch is an addition: values then match the branch twice.
+
+    ``oneOf`` refuses a value that matches more than one branch, so repeating an
+    existing branch invalidates every value that branch accepted. The branches
+    are compared as a multiset, not as a set of canonical JSON.
+    """
+
+    old = {"oneOf": [{"type": "string"}, {"type": "integer"}]}
+    new = {"oneOf": [{"type": "string"}, {"type": "integer"}, {"type": "string"}]}
+
+    changes = diff_schemas(old, new)
+
+    assert [(change.kind, change.breaking) for change in changes] == [
+        ("one-of-alternative-added", True)
+    ]
+
+
+def test_diff_schemas_keeps_a_duplicated_any_of_alternative_non_breaking():
+    """An ``anyOf`` duplicate changes nothing: one branch still has to match."""
+
+    old = {"anyOf": [{"type": "string"}]}
+    new = {"anyOf": [{"type": "string"}, {"type": "string"}]}
+
+    changes = diff_schemas(old, new)
+
+    assert [(change.kind, change.breaking) for change in changes] == [
+        ("alternatives-added", False)
+    ]
+
+
 def test_diff_schemas_reads_a_closed_object_removal_from_the_narrowed_side():
     old = {"properties": {"note": {"type": "string"}}}
     new = {"properties": {}, "additionalProperties": False}
@@ -220,6 +251,22 @@ def test_check_roots_refuses_an_added_one_of_alternative_without_a_major_bump():
     assert "major" in problems[0]
 
 
+def test_check_roots_refuses_a_duplicated_one_of_alternative_without_a_major_bump():
+    """An exact duplicate is invisible to a set comparison of the branches.
+
+    ``example-v1.1.0`` repeats a branch of ``example-v1``, so the set of
+    canonical JSON branches is unchanged while every value the branch accepted
+    now matches twice and fails ``oneOf``. The check keeps the multiplicity.
+    """
+
+    problems = check_roots([_ROOT / "one-of-duplicate"])
+
+    assert len(problems) == 1
+    assert "example-v1.1.0" in problems[0]
+    assert "one-of-alternative-added" in problems[0]
+    assert "major" in problems[0]
+
+
 def test_check_roots_refuses_a_root_that_is_not_a_directory(tmp_path):
     with pytest.raises(SchemaDiffError):
         check_roots([tmp_path / "missing"])
@@ -249,6 +296,14 @@ def test_the_cli_exits_one_for_a_same_major_one_of_addition(capsys):
     assert "one-of-alternative-added" in err
 
 
+def test_the_cli_exits_one_for_a_duplicated_one_of_alternative(capsys):
+    assert main([str(_ROOT / "one-of-duplicate")]) == 1
+
+    err = capsys.readouterr().err
+    assert "example-v1.1.0" in err
+    assert "one-of-alternative-added" in err
+
+
 def test_the_cli_exits_two_for_a_missing_root(tmp_path, capsys):
     assert main([str(tmp_path / "missing")]) == 2
 
@@ -257,7 +312,12 @@ def test_the_cli_exits_two_for_a_missing_root(tmp_path, capsys):
 
 @pytest.mark.parametrize(
     ("fixture", "code"),
-    [("clean", 0), ("breaking", 1), ("one-of", 1)],
+    [
+        ("clean", 0),
+        ("breaking", 1),
+        ("one-of", 1),
+        ("one-of-duplicate", 1),
+    ],
 )
 def test_the_documented_command_runs_the_check(fixture, code):
     result = subprocess.run(

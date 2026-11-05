@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "factor": {
+      "properties": {
+        "kind": {
+          "const": "factor"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "value": {
+      "properties": {
+        "kind": {
+          "const": "value"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "comparison": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/value"
+        },
+        {
+          "$ref": "#/$defs/factor"
+        }
+      ]
+    }
+  },
+  "required": [
+    "comparison"
+  ],
+  "type": "object"
+}

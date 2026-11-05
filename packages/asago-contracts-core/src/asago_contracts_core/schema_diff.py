@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from collections import Counter
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -526,18 +527,23 @@ def _diff_alternatives(
     if not isinstance(old_values, list) or not isinstance(new_values, list):
         _add(changes, f"{location}.{keyword}", "keyword-changed", True)
         return
+    # Compare the alternatives as multisets: a second copy of an existing branch
+    # is a distinct alternative to `oneOf`, because every value that the branch
+    # matches then matches two branches and is refused.
+    old_counts = Counter(canonical_json(value) for value in old_values)
+    new_counts = Counter(canonical_json(value) for value in new_values)
     old_map = {canonical_json(value): value for value in old_values}
     new_map = {canonical_json(value): value for value in new_values}
-    if old_map.keys() - new_map.keys():
+    if old_counts - new_counts:
         _add(changes, f"{location}.{keyword}", "alternatives-removed", True)
-    if new_map.keys() - old_map.keys():
+    if new_counts - old_counts:
         # A `oneOf` branch can overlap an existing one, so a document that used
         # to match exactly one branch now matches two and is refused; an `anyOf`
         # addition only widens what the schema accepts.
         breaking = keyword == "oneOf"
         kind = "one-of-alternative-added" if breaking else "alternatives-added"
         _add(changes, f"{location}.{keyword}", kind, breaking)
-    for key in sorted(old_map.keys() & new_map.keys()):
+    for key in sorted(old_counts.keys() & new_counts.keys()):
         _diff(old_map[key], new_map[key], f"{location}.{keyword}", changes)
 
 
