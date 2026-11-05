@@ -49,6 +49,7 @@ from typing import Any
 from jsonschema import Draft202012Validator
 
 from .canonical import PRODUCER_ENCODING, framed_digest, sha256_hex
+from .semver import InvalidVersionNameError, SemVer, parse_version_name
 
 ENVELOPE_FIELD = "contract"
 ENVELOPE_SCHEMA_ID = "asago-contract-envelope-v1"
@@ -161,6 +162,17 @@ class ContractSpec:
     @property
     def name(self) -> str:
         return f"{self.contract} {self.version}"
+
+    @property
+    def semver(self) -> SemVer:
+        """The semantic version the version's name carries.
+
+        The name's prefix is not required to equal the contract's name: an
+        installed kit may keep a historical prefix such as
+        ``artifact-runtime-contract-v2`` for the ``runtime-contract`` contract.
+        """
+
+        return parse_version_name(self.version).version
 
     @property
     def allows_legacy(self) -> bool:
@@ -475,6 +487,10 @@ def _load_spec(path: Path) -> ContractSpec:
     for field in ("contract", "version"):
         if not isinstance(document[field], str) or not document[field]:
             raise InvalidSpecError(f"{path}: spec {field!r} must be text")
+    try:
+        parse_version_name(document["version"])
+    except InvalidVersionNameError as error:
+        raise InvalidSpecError(f"{path}: {error}") from error
     if path.parent.name != document["version"]:
         raise InvalidSpecError(
             f"{path}: the version's directory must be {document['version']!r}"

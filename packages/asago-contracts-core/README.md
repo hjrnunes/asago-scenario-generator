@@ -1,10 +1,11 @@
 # asago-contracts-core
 
 The contracts machinery the producer, the consumer and the orchestrator share:
-scenario-handoff validation, the self-identifying contract envelope, the
-artifact-design boundary walker, canonical JSON and framed digests in both
-persisted encodings, and the conformance runner that checks a contract kit's
-cases.
+scenario-handoff validation, the self-identifying contract envelope, semantic
+version names, the schema-diff check, the support window, saved-artifact
+upgrades, the artifact-design boundary walker, canonical JSON and framed digests
+in both persisted encodings, and the conformance runner that checks a contract
+kit's cases.
 
 The package needs the standard library and `jsonschema` only. It imports
 nothing from producer, consumer or orchestrator code, and every schema or data
@@ -62,6 +63,109 @@ A document without an envelope is a legacy document of the version its
 `schema_version` names; a spec with `"envelope": "required"` refuses one.
 `write_envelope(document, spec, writer=..., writer_version=..., requires=...)`
 gives a document the envelope its spec's reader accepts.
+
+## Version names and semver
+
+A version directory carries the version number in its name. The name is a prefix
+and a semantic version, usually the contract name and `-v`: `<contract>-v<major>`,
+`<contract>-v<major>.<minor>` or `<contract>-v<major>.<minor>.<patch>`. Some
+installed kits keep a historical prefix (`artifact-runtime-contract-v2` belongs
+to `runtime-contract`) or use the bare `<prefix>-<major>.<minor>.<patch>` form
+(`attack-flow-2.0.0`). A missing minor or patch reads as 0, so
+`scenario-handoff-v5` is 5.0.0 and `example-v1.1.0` is 1.1.0. `v1`, `1.`,
+`1.2.3.4` and prereleases do not parse. The loader, the support window and the
+upgrade hook accept any prefix; `parse_version_name(name, contract=...)` is
+available when a caller wants to require the contract's own prefix.
+
+`ContractSpec.semver` returns the version numbers of an installed spec, and
+`SemVer` orders versions and renders them as `major.minor.patch`.
+
+The directory name is the only place the number lives. Do not add a semver field
+to `spec.json`: `spec_digest` covers the spec's bytes, and saved artifacts pin
+that digest, so a new key would retire every artifact that names the spec. Add a
+version by adding its directory and spec, and let the code derive the number.
+
+## Schema changes
+
+`diff_schemas(old, new)` compares two JSON Schemas and returns a `SchemaChange`
+for each structural difference, with the `location` as a JSON Pointer, a `kind`
+and a `breaking` flag. A change breaks an old reader when it can reject a
+document the old schema accepted or read it differently: a removed property under
+a closed object, a new required property, a narrowed type or bound, a removed
+enum value, a changed constant, a removed alternative, and closing
+`additionalProperties` on an object that accepted unknown properties. A change is
+compatible when it adds an optional property, widens a type or bound, adds an
+enum value or opens a closed object. An unknown keyword outside the `x-`
+extensions counts as breaking, so a keyword the classifier does not know never
+passes silently.
+
+`check_roots(roots)` checks the installed kits under one or more contract roots.
+It walks `<root>/<contract>/<version>/schema.json`, skips a directory whose name
+does not parse as a version, groups the remaining versions by the name's prefix,
+orders them by `SemVer` and compares each consecutive pair. A breaking change
+without a new major version is a problem; compatible changes may share a major
+version.
+
+Run the check directly:
+
+```bash
+uv run python -m asago_contracts_core.schema_diff_cli data/contracts
+```
+
+The command exits 0 when no version changes its schema incompatibly without a
+major bump, 1 when a problem exists, and 2 when a root or a schema cannot be
+read. `tests/data/schema-diff/` holds a clean fixture and a breaking fixture the
+tests use. The producer and consumer CI workflows run the same command.
+
+## The support window
+
+`SUPPORT_POLICY` records the rule the code enforces: support follows actual
+readers and saved artifacts, not a calendar. The dcpl.2 retirement is the
+precedent. The owner retired `artifact-package-v4` reading and
+`tool-call-condition-v1` because nothing that must still load used them, and
+re-locked every copy.
+
+`support_window(contract, versions, read_by=..., retired=...)` returns the
+support status of each installed version, oldest first:
+
+- A version that a newer installed version still reads is supported.
+- The newest installed major and the major before it are supported.
+- A version the change names in `retired` is retired, even inside the major
+  window; a retired version may not also have a reader.
+- Every other installed version is retired.
+
+`read_by` maps an installed version to the newer version that still reads it; the
+reader may not be older than the version it reads. `retired` names only installed
+versions, and never the newest. `check_support_window` raises
+`UnsupportedVersionError` when the window retires a version, so a change that
+drops support says so and updates the saved artifacts first.
+
+## Upgrading a saved artifact
+
+`Upgrade(contract, from_version, to_version, step)` declares one hop between
+installed versions, and `register_upgrade` validates and records it in the
+process-wide registry. `upgrade(document, specs=None, steps=None)` reads the
+document through the installed specs, walks every hop from its version to the
+newest installed version, and returns the upgraded document with a fresh
+envelope. Each step receives the document body and returns a mapping that sets
+`specs.version_key` to the hop's target version; the envelope keeps the
+`requires` the source document declared. The call refuses a document already at
+the newest version, a missing hop (and names the next version), a step that
+leaves the document on another version, and a requirement the target spec does
+not support.
+
+The contract's owner registers its hops. The handoff package does this on import:
+
+```python
+from asago_handoff import HANDOFF_UPGRADE, installed_specs, upgrade
+
+current = upgrade(saved_v5_handoff, installed_specs())
+```
+
+`HANDOFF_UPGRADE` renames `attack_shape.indirect.party_relation.controller` to
+`controlling_party`, advances `schema_version` to `scenario-handoff-v6` and
+recomputes `content_digest` under the v6 domain, so every v5 conformance case
+upgrades to its v6 case.
 
 ## Rules
 

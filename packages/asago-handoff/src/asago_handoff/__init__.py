@@ -47,9 +47,12 @@ from asago_contracts_core import (
     render_feature_text,
     run_conformance,
     schema_violations,
+    upgrade,
     validate_condition,
     validate_handoff,
 )
+
+from .migrations import HANDOFF_UPGRADE
 
 __all__ = [
     "CASES_NAME",
@@ -61,6 +64,7 @@ __all__ = [
     "DETECTED",
     "HANDOFF_SCHEMA_VERSION_V5",
     "HANDOFF_SCHEMA_VERSION_V6",
+    "HANDOFF_UPGRADE",
     "INCONCLUSIVE",
     "KIT_V5",
     "KIT_V6",
@@ -91,6 +95,7 @@ __all__ = [
     "render_feature_text",
     "run_conformance",
     "schema_violations",
+    "upgrade",
     "validate_condition",
     "validate_handoff",
 ]

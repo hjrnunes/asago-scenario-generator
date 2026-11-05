@@ -1,7 +1,7 @@
 # asago-handoff
 
-The scenario-handoff-v5 name that the producer, the consumer and the
-orchestrator import. The rules moved to the shared
+The scenario-handoff name that the producer, the consumer and the orchestrator
+import. The rules moved to the shared
 [`asago-contracts-core`](../asago-contracts-core/README.md) package, and this
 package re-exports them, so `asago_handoff` keeps working without a second copy
 of the code or the contract data.
@@ -12,6 +12,11 @@ of the code or the contract data.
 - `evaluate_condition_v2(condition, calls, complete)` evaluates a
   `tool-call-condition-v2` condition. `evaluate_condition` is the same function
   under the consumer's name.
+- `HANDOFF_UPGRADE` is the registered `scenario-handoff-v5` to
+  `scenario-handoff-v6` saved-artifact hop, and `upgrade(doc, installed_specs())`
+  applies it. The migration renames
+  `attack_shape.indirect.party_relation.controller` to `controlling_party` and
+  recomputes `content_digest` under the v6 domain.
 
 The package needs the standard library, `jsonschema` and
 `asago-contracts-core` only. The schema and ownership rules live in the core
