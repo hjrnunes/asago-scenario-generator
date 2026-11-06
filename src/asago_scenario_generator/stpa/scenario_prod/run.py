@@ -400,6 +400,7 @@ def run_sp3(
         scenario_envelopes,
         functional_test_specs,
         functional_handoffs,
+        published_scenario_envelopes,
     ) = _run_stages_5_and_6(inputs, stage_errors, candidate_builders)
     all_validation_errors = _stage7_outputs(
         scenario_envelopes,
@@ -414,7 +415,7 @@ def run_sp3(
         enriched_threat_set=enriched_threat_set,
         control_structure=control_structure,
         loss_analysis=loss_analysis,
-        scenario_envelopes=scenario_envelopes,
+        scenario_envelopes=published_scenario_envelopes,
         functional_test_count=len(functional_handoffs),
         validation_errors=all_validation_errors,
         max_workers=max_workers,
@@ -594,14 +595,21 @@ def _run_stages_5_and_6(
     inputs: _SP3Inputs,
     stage_errors: list[str],
     candidate_builders: list[_CandidateOutcomeBuilder],
-) -> tuple[list[ScenarioSpec], list[Any], list[ScenarioSpec], list[ScenarioEnvelope]]:
+) -> tuple[
+    list[ScenarioSpec],
+    list[Any],
+    list[ScenarioSpec],
+    list[ScenarioEnvelope],
+    list[ScenarioEnvelope],
+]:
     """Generate Stage 5 specs, persist functional tests, and build envelopes.
 
     The cross-scenario check runs on every spec, functional tests included,
     before any is published. Returns the published non-functional scenario
-    specs, their Stage 6 envelopes, the published functional-test specs and
-    the functional handoffs the run wrote; no list holds a spec the check
-    withdraws, and a functional handoff appears only once written.
+    specs, their Stage 6 envelopes, the published functional-test specs, the
+    functional handoffs the run wrote, and the adversarial envelopes whose
+    publication completed; no list holds a spec the check withdraws, and a
+    handoff appears only once written.
     """
     run_dir = inputs.run_dir
     profile = inputs.execution_target_profile
@@ -713,7 +721,7 @@ def _run_stages_5_and_6(
         taxonomy=inputs.handoff_taxonomy,
     )
     published_specs = publishable_specs(shaped_specs, cross_check)
-    scenario_envelopes = _collect_stage6_artifacts(
+    scenario_envelopes, published_scenario_envelopes = _collect_stage6_artifacts(
         published_specs,
         inputs.loss_analysis,
         inputs.scenarios_dir,
@@ -734,6 +742,7 @@ def _run_stages_5_and_6(
         scenario_envelopes,
         functional_test_specs,
         functional_handoffs,
+        published_scenario_envelopes,
     )
 
 
@@ -1173,8 +1182,12 @@ def _publish_stage6_artifacts(
     stage_1a_source: Stage1aSource | None = None,
     deduplication: ScenarioDeduplication | None = None,
     taxonomy: HandoffTaxonomyInputs | None = None,
-) -> None:
-    """Write one scenario companion set and assign its publication status."""
+) -> bool:
+    """Write one scenario companion set and assign its publication status.
+
+    Returns True when the companion set was written, so a caller counts a
+    handoff only after its .feature and YAML were both published.
+    """
     try:
         _write_scenario_handoff_artifacts(
             envelope,
@@ -1198,10 +1211,11 @@ def _publish_stage6_artifacts(
             SP3CandidateStatus.publication_failed,
             tuple(stage_errors[prior_error_count:]),
         )
-        return
+        return False
     if builder is not None:
         builder.status = SP3CandidateStatus.published
         builder.diagnostics.extend(stage_errors[prior_error_count:])
+    return True
 
 
 def _persist_functional_test_candidates(
@@ -1294,8 +1308,12 @@ def _render_stage6_candidate(
     tree_siblings: SiblingIndex | None = None,
     gherkin: GherkinSpec | None = None,
     taxonomy: HandoffTaxonomyInputs | None = None,
-) -> ScenarioEnvelope | None:
-    """Render and persist one Stage 6 candidate, isolating all failure kinds."""
+) -> tuple[ScenarioEnvelope | None, bool]:
+    """Render and persist one Stage 6 candidate, isolating all failure kinds.
+
+    Returns the envelope and whether its publication completed. The envelope
+    stays available to Stage 7 even when publication failed.
+    """
     prior_error_count = len(stage_errors)
     try:
         envelope = _run_stage6_for_spec(spec, narrative, tree_siblings, gherkin)
@@ -1308,9 +1326,9 @@ def _render_stage6_candidate(
             SP3CandidateStatus.rendering_failed,
             tuple(stage_errors[prior_error_count:]),
         )
-        return None
+        return None, False
     builder = _candidate_builder_for(candidate_builders, spec.scenario_id)
-    _publish_stage6_artifacts(
+    published = _publish_stage6_artifacts(
         envelope,
         scenarios_dir,
         stage_errors,
@@ -1328,7 +1346,7 @@ def _render_stage6_candidate(
         ),
         taxonomy=taxonomy,
     )
-    return envelope
+    return envelope, published
 
 
 def _mark_unresolved_stage6_candidates(
@@ -1361,11 +1379,16 @@ def _collect_stage6_artifacts(
     tree_siblings: SiblingIndex | None = None,
     gherkins: Mapping[str, GherkinSpec] | None = None,
     taxonomy: HandoffTaxonomyInputs | None = None,
-) -> list[ScenarioEnvelope]:
-    """Concretize specs and write each accepted scenario companion set."""
+) -> tuple[list[ScenarioEnvelope], list[ScenarioEnvelope]]:
+    """Concretize specs and write each accepted scenario companion set.
+
+    Returns every rendered envelope for Stage 7 and the subset whose
+    publication completed, so a failed write is not counted as a handoff.
+    """
     envelopes: list[ScenarioEnvelope] = []
+    published_envelopes: list[ScenarioEnvelope] = []
     for spec in scenario_specs:
-        envelope = _render_stage6_candidate(
+        envelope, published = _render_stage6_candidate(
             spec,
             loss_analysis,
             scenarios_dir,
@@ -1383,8 +1406,10 @@ def _collect_stage6_artifacts(
         )
         if envelope is not None:
             envelopes.append(envelope)
+            if published:
+                published_envelopes.append(envelope)
     _mark_unresolved_stage6_candidates(candidate_builders)
-    return envelopes
+    return envelopes, published_envelopes
 
 
 def _candidate_builder_for(
@@ -1974,7 +1999,12 @@ def _write_manifest(
     target_observations: TargetObservationSnapshot | None = None,
     functional_test_count: int = 0,
 ) -> None:
-    """Write the run manifest YAML."""
+    """Write the run manifest YAML.
+
+    ``scenario_envelopes`` holds the handoffs whose publication completed, so
+    a candidate whose write failed stays out and the counts match the YAML
+    files under ``scenarios/``.
+    """
     preserved = _preserved_stage_keys(run_dir)
     input_hashes = _manifest_input_hashes(
         enriched_threat_set,

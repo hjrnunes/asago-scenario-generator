@@ -480,6 +480,104 @@ class TestErrorPaths:
             for item in result.candidate_outcomes[0].diagnostics
         )
 
+    def test_adversarial_publication_oserror_is_not_counted(
+        self, monkeypatch, tmp_path
+    ):
+        """A failed adversarial write counts no handoff in the manifest."""
+        from asago_scenario_generator.stpa.scenario_prod import run as run_module
+
+        client = _setup_mock_client(1)
+
+        def fail_write(*_args, **_kwargs):
+            raise OSError("artifact sink unavailable")
+
+        monkeypatch.setattr(run_module, "_write_scenario_handoff_artifacts", fail_write)
+        result = run_sp3(
+            llm_client=client,
+            enriched_threat_set=_make_ets(num_threats=1),
+            control_structure=make_cs(),
+            loss_analysis=make_loss_analysis(),
+            run_dir=tmp_path,
+        )
+
+        assert (
+            result.candidate_outcomes[0].status is SP3CandidateStatus.publication_failed
+        )
+        manifest = yaml.safe_load((tmp_path / "run-manifest.yaml").read_text())
+        assert manifest["adversarial_scenario_count"] == 0
+        assert manifest["functional_test_count"] == 0
+        assert manifest["handoff_count"] == 0
+        assert "scenario_count" not in manifest
+        assert sorted((tmp_path / "scenarios").glob("*.yaml")) == []
+
+    def test_adversarial_contract_rejection_is_not_counted(self, monkeypatch, tmp_path):
+        """A handoff rejected by the v5 contract counts no handoff."""
+        from asago_scenario_generator.stpa.scenario_prod import run as run_module
+
+        def reject_handoff(*_args, **_kwargs):
+            raise ValueError(
+                "scenario handoff violates the scenario-handoff-v5 contract: "
+                "missing_field"
+            )
+
+        monkeypatch.setattr(run_module, "_checked_scenario_handoff", reject_handoff)
+        result = run_sp3(
+            llm_client=_setup_mock_client(1),
+            enriched_threat_set=_make_ets(num_threats=1),
+            control_structure=make_cs(),
+            loss_analysis=make_loss_analysis(),
+            run_dir=tmp_path,
+        )
+
+        assert (
+            result.candidate_outcomes[0].status is SP3CandidateStatus.publication_failed
+        )
+        assert any(
+            "scenario-handoff-v5 contract" in item
+            for item in result.candidate_outcomes[0].diagnostics
+        )
+        manifest = yaml.safe_load((tmp_path / "run-manifest.yaml").read_text())
+        assert manifest["adversarial_scenario_count"] == 0
+        assert manifest["functional_test_count"] == 0
+        assert manifest["handoff_count"] == 0
+        assert "scenario_count" not in manifest
+        assert sorted((tmp_path / "scenarios").glob("*.yaml")) == []
+
+    def test_only_the_published_adversarial_handoff_is_counted(
+        self, monkeypatch, tmp_path
+    ):
+        """With one failed write, the manifest counts the one handoff written."""
+        from asago_scenario_generator.stpa.scenario_prod import run as run_module
+
+        original = run_module._write_scenario_handoff_artifacts
+
+        def fail_one(envelope, *args, **kwargs):
+            if envelope.scenario_id == "SCN-001":
+                raise OSError("artifact sink unavailable")
+            return original(envelope, *args, **kwargs)
+
+        monkeypatch.setattr(run_module, "_write_scenario_handoff_artifacts", fail_one)
+        result = run_sp3(
+            llm_client=_setup_mock_client(2),
+            enriched_threat_set=_make_ets(num_threats=2),
+            control_structure=make_cs(),
+            loss_analysis=make_loss_analysis(),
+            run_dir=tmp_path,
+        )
+
+        # Stage 7 still sees every rendered envelope.
+        assert len(result.scenario_envelopes) == 2
+        assert [outcome.status for outcome in result.candidate_outcomes] == [
+            SP3CandidateStatus.publication_failed,
+            SP3CandidateStatus.published,
+        ]
+        manifest = yaml.safe_load((tmp_path / "run-manifest.yaml").read_text())
+        handoffs = sorted((tmp_path / "scenarios").glob("*.yaml"))
+        assert manifest["adversarial_scenario_count"] == 1
+        assert manifest["functional_test_count"] == 0
+        assert manifest["handoff_count"] == len(handoffs) == 1
+        assert [path.stem for path in handoffs] == ["SCN-002"]
+
     def test_stage5_validation_failure_does_not_reach_stage6(self):
         """A structurally invalid Stage 5 result remains an unresolved scenario."""
         cs = make_cs()

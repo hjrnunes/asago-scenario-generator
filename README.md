@@ -754,9 +754,10 @@ temperature, `top_p`, `top_k`, thinking control, guided-decoding state, and
 request timeout. It counts the scenarios the run published:
 `adversarial_scenario_count` for adversarial handoffs, `functional_test_count`
 for functional-test handoffs, and `handoff_count` for both together. A handoff
-whose write failed is not counted, so `handoff_count` equals the handoff YAML
-files under `scenarios/`. API keys and header values are never included. For
-Qwen on vLLM, `enable_thinking: false` is sent inside
+counts only when its `.feature` companion and its YAML were both written; a
+failed write is not counted and leaves no YAML, so `handoff_count` equals the
+handoff YAML files under `scenarios/`. API keys and header values are never
+included. For Qwen on vLLM, `enable_thinking: false` is sent inside
 `chat_template_kwargs`, while guided decoding uses the standard top-level
 `response_format: {type: json_schema, ...}` request shape. Profiles that omit
 `enable_thinking`, including the Gemma examples, retain their existing request

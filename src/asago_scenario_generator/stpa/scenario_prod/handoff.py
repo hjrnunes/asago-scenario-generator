@@ -1371,13 +1371,17 @@ def write_scenario_handoff(
     handoff: ScenarioHandoffV5,
     scenarios_dir: Path,
 ) -> tuple[Path, Path]:
-    """Write the handoff YAML and its declarative ``.feature`` companion."""
+    """Write the ``.feature`` companion first and the handoff YAML last.
+
+    A YAML on disk therefore means the whole publication completed; a failed
+    companion write leaves no YAML for a downstream stage to read.
+    """
     verify_handoff_digest(handoff)
     scenarios_dir.mkdir(parents=True, exist_ok=True)
     handoff_path = scenarios_dir / f"{handoff.scenario_id}.yaml"
     feature_path = scenarios_dir / f"{handoff.scenario_id}.feature"
-    write_yaml_document(handoff_document(handoff), handoff_path)
     feature_path.write_text(handoff.gherkin.to_feature_text(), encoding="utf-8")
+    write_yaml_document(handoff_document(handoff), handoff_path)
     return handoff_path, feature_path
 
 

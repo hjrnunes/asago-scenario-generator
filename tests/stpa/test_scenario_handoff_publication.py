@@ -24,6 +24,7 @@ from asago_scenario_generator.stpa.scenario_prod.handoff import (
     ScenarioHandoffV5,
     handoff_ownership_violations,
     verify_handoff_digest,
+    write_scenario_handoff,
 )
 from asago_scenario_generator.stpa.scenario_prod.handoff_v5 import (
     build_scenario_handoff_v5,
@@ -401,6 +402,50 @@ def test_run_manifest_counts_each_handoff_kind(tmp_path: Path) -> None:
     assert manifest["functional_test_count"] == 1
     assert manifest["handoff_count"] == len(handoffs) == 2
     assert "scenario_count" not in manifest
+
+
+def test_functional_test_whose_write_fails_is_not_counted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failed functional-test write leaves no handoff and no count."""
+    from asago_scenario_generator.stpa.scenario_prod import run as run_module
+
+    def fail_write(*_args, **_kwargs):
+        raise OSError("artifact sink unavailable")
+
+    monkeypatch.setattr(run_module, "_write_scenario_handoff_artifacts", fail_write)
+    result = _publish([_functional_payload()], tmp_path)
+
+    assert [outcome.status for outcome in result.candidate_outcomes] == [
+        SP3CandidateStatus.publication_failed
+    ]
+    manifest = yaml.safe_load((tmp_path / "run-manifest.yaml").read_text())
+    assert manifest["adversarial_scenario_count"] == 0
+    assert manifest["functional_test_count"] == 0
+    assert manifest["handoff_count"] == 0
+    assert "scenario_count" not in manifest
+    assert sorted((tmp_path / "scenarios").glob("*.yaml")) == []
+
+
+def test_a_failed_feature_write_leaves_no_handoff_yaml(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A companion write that fails leaves no YAML that downstream reads."""
+    result = _publish([_normal_semantics_payload()], tmp_path / "run")
+    handoff = build_scenario_handoff_v5(result.scenario_envelopes[0])
+    original_write_text = Path.write_text
+
+    def fail_feature_write(self, data, *args, **kwargs):
+        if self.suffix == ".feature":
+            raise OSError("feature sink unavailable")
+        return original_write_text(self, data, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", fail_feature_write)
+    with pytest.raises(OSError, match="feature sink unavailable"):
+        write_scenario_handoff(handoff, tmp_path / "published")
+
+    assert not (tmp_path / "published" / "SCN-001.yaml").exists()
+    assert not (tmp_path / "published" / "SCN-001.feature").exists()
 
 
 def test_run_manifest_records_artifact_digests_and_no_mode_field(

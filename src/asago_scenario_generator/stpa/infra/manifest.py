@@ -38,7 +38,9 @@ class STPARunManifest(BaseModel):
     fill_rate: float = 0.0  # non_na / total_slots
     adversarial_scenario_count: int = 0
     functional_test_count: int = 0
-    handoff_count: int = 0  # every scenario handoff the run published
+    # A handoff counts when its .feature and YAML were both written; a failed
+    # write is not counted and leaves no YAML.
+    handoff_count: int = 0
     critic_findings: list[str] = Field(
         default_factory=list,
         description="Gaps identified by the completeness critic.",
