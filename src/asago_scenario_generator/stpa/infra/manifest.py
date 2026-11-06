@@ -36,7 +36,9 @@ class STPARunManifest(BaseModel):
     slot_count: int = 0
     na_count: int = 0
     fill_rate: float = 0.0  # non_na / total_slots
-    scenario_count: int = 0
+    adversarial_scenario_count: int = 0
+    functional_test_count: int = 0
+    handoff_count: int = 0  # every scenario handoff the run published
     critic_findings: list[str] = Field(
         default_factory=list,
         description="Gaps identified by the completeness critic.",

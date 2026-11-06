@@ -382,9 +382,25 @@ def test_functional_scenario_is_persisted_not_rejected(tmp_path: Path) -> None:
     manifest = yaml.safe_load((tmp_path / "run-manifest.yaml").read_text())
     assert manifest["stage_errors"] == []
     # A functional scenario is persisted evidence, never a generated or
-    # bundled adversarial scenario.
-    assert manifest["scenario_count"] == 0
+    # bundled adversarial scenario. It is still a handoff file the run wrote.
+    assert manifest["adversarial_scenario_count"] == 0
+    assert manifest["functional_test_count"] == 1
+    handoffs = sorted((tmp_path / "scenarios").glob("*.yaml"))
+    assert manifest["handoff_count"] == len(handoffs) == 1
+    assert "scenario_count" not in manifest
     assert (tmp_path / "scenarios" / "SCN-001.feature").is_file()
+
+
+def test_run_manifest_counts_each_handoff_kind(tmp_path: Path) -> None:
+    """The run manifest counts adversarial and functional handoffs apart."""
+    _publish([_normal_semantics_payload(), _functional_payload()], tmp_path)
+
+    manifest = yaml.safe_load((tmp_path / "run-manifest.yaml").read_text())
+    handoffs = sorted((tmp_path / "scenarios").glob("*.yaml"))
+    assert manifest["adversarial_scenario_count"] == 1
+    assert manifest["functional_test_count"] == 1
+    assert manifest["handoff_count"] == len(handoffs) == 2
+    assert "scenario_count" not in manifest
 
 
 def test_run_manifest_records_artifact_digests_and_no_mode_field(

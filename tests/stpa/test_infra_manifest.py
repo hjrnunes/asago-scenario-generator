@@ -34,7 +34,10 @@ class TestInfraManifest:
         assert manifest.slot_count == 0
         assert manifest.na_count == 0
         assert manifest.fill_rate == 0.0
-        assert manifest.scenario_count == 0
+        assert manifest.adversarial_scenario_count == 0
+        assert manifest.functional_test_count == 0
+        assert manifest.handoff_count == 0
+        assert "scenario_count" not in STPARunManifest.model_fields
         assert manifest.critic_findings == []
         assert manifest.revised is False
         assert manifest.post_revision_warnings == []
@@ -47,12 +50,16 @@ class TestInfraManifest:
         data["slot_count"] = 10
         data["na_count"] = 2
         data["fill_rate"] = 0.8
-        data["scenario_count"] = 5
+        data["adversarial_scenario_count"] = 5
+        data["functional_test_count"] = 2
+        data["handoff_count"] = 7
         manifest = STPARunManifest(**data)
         assert manifest.slot_count == 10
         assert manifest.na_count == 2
         assert manifest.fill_rate == 0.8
-        assert manifest.scenario_count == 5
+        assert manifest.adversarial_scenario_count == 5
+        assert manifest.functional_test_count == 2
+        assert manifest.handoff_count == 7
 
     def test_manifest_03_with_critic_findings(self):
         """InfraManifest-03: manifest with critic findings passes."""

@@ -395,9 +395,12 @@ def run_sp3(
         handoff_taxonomy=handoff_taxonomy,
         ica_process_model_contexts=ica_process_model_contexts,
     )
-    scenario_specs, scenario_envelopes, functional_test_specs = _run_stages_5_and_6(
-        inputs, stage_errors, candidate_builders
-    )
+    (
+        scenario_specs,
+        scenario_envelopes,
+        functional_test_specs,
+        functional_handoffs,
+    ) = _run_stages_5_and_6(inputs, stage_errors, candidate_builders)
     all_validation_errors = _stage7_outputs(
         scenario_envelopes,
         enriched_threat_set,
@@ -412,6 +415,7 @@ def run_sp3(
         control_structure=control_structure,
         loss_analysis=loss_analysis,
         scenario_envelopes=scenario_envelopes,
+        functional_test_count=len(functional_handoffs),
         validation_errors=all_validation_errors,
         max_workers=max_workers,
         temperature=temperature,
@@ -590,13 +594,14 @@ def _run_stages_5_and_6(
     inputs: _SP3Inputs,
     stage_errors: list[str],
     candidate_builders: list[_CandidateOutcomeBuilder],
-) -> tuple[list[ScenarioSpec], list[Any], list[ScenarioSpec]]:
+) -> tuple[list[ScenarioSpec], list[Any], list[ScenarioSpec], list[ScenarioEnvelope]]:
     """Generate Stage 5 specs, persist functional tests, and build envelopes.
 
     The cross-scenario check runs on every spec, functional tests included,
     before any is published. Returns the published non-functional scenario
-    specs, their Stage 6 envelopes, and the published functional-test specs;
-    neither list holds a spec the check withdraws.
+    specs, their Stage 6 envelopes, the published functional-test specs and
+    the functional handoffs the run wrote; no list holds a spec the check
+    withdraws, and a functional handoff appears only once written.
     """
     run_dir = inputs.run_dir
     profile = inputs.execution_target_profile
@@ -691,7 +696,7 @@ def _run_stages_5_and_6(
     write_cross_scenario_check(run_dir, cross_check)
     _withdraw_conflicting_candidates(cross_check, candidate_builders)
     functional_test_specs = publishable_specs(functional_test_specs, cross_check)
-    _persist_functional_test_candidates(
+    functional_handoffs = _persist_functional_test_candidates(
         functional_test_specs,
         inputs.scenarios_dir,
         stage_errors,
@@ -724,7 +729,12 @@ def _run_stages_5_and_6(
         gherkins=gherkins,
         taxonomy=inputs.handoff_taxonomy,
     )
-    return published_specs, scenario_envelopes, functional_test_specs
+    return (
+        published_specs,
+        scenario_envelopes,
+        functional_test_specs,
+        functional_handoffs,
+    )
 
 
 def _not_applicable_entries(
@@ -1210,7 +1220,7 @@ def _persist_functional_test_candidates(
     tree_siblings: SiblingIndex | None = None,
     gherkins: Mapping[str, GherkinSpec] | None = None,
     taxonomy: HandoffTaxonomyInputs | None = None,
-) -> None:
+) -> list[ScenarioEnvelope]:
     """Persist ``kind: none`` candidates without any execution projection.
 
     A functional test is retained in the run for the owner's information.
@@ -1220,8 +1230,10 @@ def _persist_functional_test_candidates(
     ``narratives`` publishes that narrative instead of the rendered one,
     and one in ``gherkins`` that Gherkin. ``tree_siblings`` names the
     run's scenarios by hazard for the ``and-or-tree-v1`` tree; without it
-    the tree names this scenario alone.
+    the tree names this scenario alone. Returns the handoffs written, so a
+    failed write is not counted as one.
     """
+    handoffs: list[ScenarioEnvelope] = []
     for spec in specs:
         prior_error_count = len(stage_errors)
         try:
@@ -1258,10 +1270,12 @@ def _persist_functional_test_candidates(
                 tuple(stage_errors[prior_error_count:]),
             )
             continue
+        handoffs.append(envelope)
         builder = _candidate_builder_for(candidate_builders, spec.scenario_id)
         if builder is not None:
             builder.status = SP3CandidateStatus.functional_test
             builder.diagnostics.append(f"adversary kind none: {spec.adversary.gain}")
+    return handoffs
 
 
 def _render_stage6_candidate(
@@ -1958,6 +1972,7 @@ def _write_manifest(
     run_identity: ExecutionRunIdentity,
     run_started: datetime,
     target_observations: TargetObservationSnapshot | None = None,
+    functional_test_count: int = 0,
 ) -> None:
     """Write the run manifest YAML."""
     preserved = _preserved_stage_keys(run_dir)
@@ -1982,7 +1997,9 @@ def _write_manifest(
         "input_hashes": input_hashes,
         "prompt_hashes": prompt_hashes,
         "stage_summary": stage_summary,
-        "scenario_count": len(scenario_envelopes),
+        "adversarial_scenario_count": len(scenario_envelopes),
+        "functional_test_count": functional_test_count,
+        "handoff_count": len(scenario_envelopes) + functional_test_count,
         "validation_error_count": len(validation_errors),
         "validation_errors": validation_errors,
         "max_workers": max_workers,

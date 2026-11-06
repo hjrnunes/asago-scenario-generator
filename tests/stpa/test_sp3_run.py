@@ -298,7 +298,11 @@ class TestFullRun:
             assert "prompt_hashes" in manifest
             assert "stage5_context_system.j2" in manifest["prompt_hashes"]
             assert "stage5_context_user.j2" in manifest["prompt_hashes"]
-            assert manifest["scenario_count"] == 2
+            assert manifest["adversarial_scenario_count"] == 2
+            assert manifest["functional_test_count"] == 0
+            handoffs = sorted((Path(tmpdir) / "scenarios").glob("*.yaml"))
+            assert manifest["handoff_count"] == len(handoffs) == 2
+            assert "scenario_count" not in manifest
 
     def test_scenario_yaml_loads_as_handoff(self):
         cs = make_cs()
@@ -314,7 +318,7 @@ class TestFullRun:
                 handoff = read_yaml(yaml_file, ScenarioHandoffV5)
                 verify_handoff_digest(handoff)
 
-    def test_scenario_count_equals_threats(self):
+    def test_adversarial_scenario_count_equals_threats(self):
         cs = make_cs()
         la = make_loss_analysis()
         ets = _make_ets(num_threats=3)

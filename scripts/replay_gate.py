@@ -251,6 +251,12 @@ RETIRED_FIELDS: tuple[RetiredField, ...] = (
         "stage_summary.stage_1a.target_evidence.artifact",
         "the name of target-evidence.yaml, which the run no longer writes",
     ),
+    RetiredField(
+        "run-manifest.yaml",
+        "scenario_count",
+        "the count of adversarial scenario handoffs, which the run now reports "
+        "as adversarial_scenario_count and totals in handoff_count",
+    ),
 )
 
 
@@ -664,6 +670,22 @@ ADDED_FIELDS: tuple[AddedField, ...] = (
         "stage_summary.stage_2.critic_revision.unresolved_gaps",
         "the Stage 2 critic gaps the revision reply neither changed nor set "
         "aside, each with its reason",
+    ),
+    AddedField(
+        "run-manifest.yaml",
+        "adversarial_scenario_count",
+        "the number of adversarial scenario handoffs the run published, which "
+        "older recordings hold as scenario_count",
+    ),
+    AddedField(
+        "run-manifest.yaml",
+        "functional_test_count",
+        "the number of functional-test handoffs the run published",
+    ),
+    AddedField(
+        "run-manifest.yaml",
+        "handoff_count",
+        "every scenario handoff the run published, adversarial and functional",
     ),
 )
 

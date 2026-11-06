@@ -1485,6 +1485,51 @@ def test_a_replay_that_writes_a_retired_field_fails(trees) -> None:
     assert "stage_summary.stage_1a.target_evidence.artifact" in differences[0].detail
 
 
+def _run_manifest_counts(root: Path, **counts: Any) -> None:
+    document = yaml.safe_load((root / "run-manifest.yaml").read_text())
+    document.update(counts)
+    (root / "run-manifest.yaml").write_text(yaml.safe_dump(document))
+
+
+def test_a_recorded_scenario_count_is_compared_without_it(trees) -> None:
+    """A recording before the rename holds scenario_count; the replay omits it."""
+    recorded, replayed, path_map = trees
+    _run_manifest_counts(recorded, scenario_count=11)
+    _run_manifest_counts(
+        replayed,
+        adversarial_scenario_count=11,
+        functional_test_count=19,
+        handoff_count=30,
+    )
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert differences == []
+
+
+def test_a_replay_that_writes_scenario_count_fails(trees) -> None:
+    recorded, replayed, path_map = trees
+    _run_manifest_counts(recorded, adversarial_scenario_count=11)
+    _run_manifest_counts(replayed, scenario_count=11)
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert [d.path for d in differences] == ["run-manifest.yaml"]
+    assert "scenario_count" in differences[0].detail
+
+
+def test_a_recorded_handoff_count_is_compared(trees) -> None:
+    """An added field the recording holds is compared, not ignored."""
+    recorded, replayed, path_map = trees
+    _run_manifest_counts(recorded, handoff_count=30)
+    _run_manifest_counts(replayed, handoff_count=29)
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert [d.path for d in differences] == ["run-manifest.yaml"]
+    assert "handoff_count" in differences[0].detail
+
+
 def _testability(root: Path, **blocks: Any) -> None:
     document = {"summary": {"total": 0}, **blocks}
     (root / "testability.yaml").write_text(yaml.safe_dump(document))
