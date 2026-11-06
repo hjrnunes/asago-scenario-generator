@@ -531,7 +531,14 @@ with the reason `prompt_contract_failures: <n> calls failed the prompt
 contract check before dispatch`. A manifest records the count as
 `prompt_contract_failures` only when it is above zero, so a run that keeps
 candidates despite such failures keeps its status and still shows the count,
-and a run without them keeps its manifest shape. A second exception covers a
+and a run without them keeps its manifest shape. A call its prompt budget
+stopped before dispatch is counted apart, as `prompt_budget_failures`, and
+never fails a run that requested no candidate: the profile could not fit the
+prompt, so the empty analysis stays `no_candidates` with the reason
+`prompt_budget_exceeded: <n> calls were stopped by the prompt budget before
+dispatch`, and the command exits zero. Both counts are omitted at zero, so a
+run without either keeps its manifest shape, and a run that keeps candidates
+keeps its status while showing the budget count. A second exception covers a
 provider that rejects the ICA slot-fill request schema itself. Each HTTP 400
 anywhere in the failure's cause chain is judged by three steps, the first that
 applies deciding. First, structured body fields: `param` naming the response

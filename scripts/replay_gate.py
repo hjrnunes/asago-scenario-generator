@@ -687,6 +687,12 @@ ADDED_FIELDS: tuple[AddedField, ...] = (
         "handoff_count",
         "every scenario handoff the run published, adversarial and functional",
     ),
+    AddedField(
+        "synthesis-manifest.yaml",
+        "prompt_budget_failures",
+        "the calls the prompt budget stopped before dispatch, which the "
+        "m1-baseline-a recording does not count",
+    ),
 )
 
 # Successive versions of one artifact, in step order, each ending with its

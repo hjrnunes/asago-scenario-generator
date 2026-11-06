@@ -811,6 +811,11 @@ The product `generate`
 command writes and reports all diagnostics and accounting artifacts before
 returning a non-zero result for the attempted zero-yield `failed` case;
 no-candidate analysis and partial yield remain successful command outcomes.
+The manifest's `prompt_contract_failures` and `prompt_budget_failures` count
+the calls the prompt check stopped before dispatch, each omitted at zero. A
+zero-candidate run fails only on a prompt-contract failure; a run whose
+prompt budget stopped its calls stays `no_candidates`, names the budget in
+`run_status_reason`, and exits zero.
 
 The product manifest and report retain baseline analysis and post-revision
 warnings even after later stages finish. The report's Analysis diagnostics

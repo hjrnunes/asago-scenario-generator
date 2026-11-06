@@ -1,9 +1,12 @@
-"""A synthesis run that loses every candidate to the prompt check fails.
+"""A synthesis run that loses every candidate to its prompt budget does not fail.
 
 A recorded OcciAI run generated no scenario and exited 0: all 119 synthesis
 calls failed the prompt-reference check (``PromptContractError``) before
 any request was sent, every slot became unresolved, and the manifest read
-``no_candidates``.
+``no_candidates``.  That run failed a check the prompt itself broke, so it is
+now ``failed``.  A call its prompt budget stopped is a different loss: the
+profile could not fit the rendered prompt, no request was sent, and a run
+that requested no candidate stays a valid empty analysis.
 """
 
 from __future__ import annotations
@@ -60,6 +63,31 @@ _OTHER_FAILURE = {
     "success": False,
     "error": "ValidationError: 1 validation error for SynthesisSlotResponse",
 }
+# Two calls the prompt budget stopped before dispatch, as the m1-baseline-a
+# recording logs one at ICA verification.  The budget error is a
+# ``PromptContractError`` subclass, but its recorded text names its own class.
+_BUDGET_FAILURES = (
+    {
+        "stage": "synthesis_obligation_aware_icas",
+        "step": "RESP-1",
+        "success": False,
+        "error": (
+            "PromptBudgetExceeded: prompt_budget_exceeded: rendered prompt uses "
+            "24676 input tokens, budget allows 21299 (context_window=32768, "
+            "maximum_completion_tokens=8192, safety_margin=3277)"
+        ),
+    },
+    {
+        "stage": "synthesis_obligation_aware_routing",
+        "step": "initial-batch-2",
+        "success": False,
+        "error": (
+            "PromptBudgetExceeded: prompt_budget_exceeded: rendered prompt uses "
+            "23018 input tokens, budget allows 21299 (context_window=32768, "
+            "maximum_completion_tokens=8192, safety_margin=3277)"
+        ),
+    },
+)
 _PUBLISHED = (
     SimpleNamespace(
         scenario_id="SCN-001",
@@ -171,6 +199,34 @@ class TestZeroCandidatesAfterContractFailures:
         assert "after attempting candidates" not in cli.stderr
 
 
+class TestZeroCandidatesAfterBudgetOverflow:
+    def test_the_run_reports_no_candidates_and_names_the_budget(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        result = _run(tmp_path, monkeypatch, (*_BUDGET_FAILURES, _OTHER_FAILURE))
+
+        manifest = yaml.safe_load(
+            (tmp_path / "synthesis-manifest.yaml").read_text(encoding="utf-8")
+        )
+        assert result.run_status == "no_candidates"
+        assert manifest["run_status"] == "no_candidates"
+        assert manifest["run_status_reason"].startswith("prompt_budget_exceeded: 2 ")
+        assert manifest["prompt_budget_failures"] == 2
+        assert "prompt_contract_failures" not in manifest
+        assert manifest["scenario_counts"]["requested"] == 0
+
+    def test_the_cli_exits_zero_and_reports_no_candidates(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        result = _run(tmp_path / "run", monkeypatch, _BUDGET_FAILURES)
+
+        cli = _invoke_cli(tmp_path, result)
+
+        assert cli.exit_code == 0
+        assert "Scenario generation: no_candidates" in cli.stdout
+        assert cli.stderr == ""
+
+
 class TestZeroCandidatesWithoutContractFailures:
     def test_the_run_keeps_no_candidates_and_the_cli_exits_zero(
         self, tmp_path, monkeypatch
@@ -202,6 +258,20 @@ class TestSomeCandidatesDespiteContractFailures:
             "all_requested_candidates_resolved"
         )
         assert result.manifest["prompt_contract_failures"] == 2
+
+
+class TestSomeCandidatesDespiteBudgetOverflow:
+    def test_the_status_is_unchanged_and_the_budget_failures_are_counted(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        result = _run(tmp_path, monkeypatch, _BUDGET_FAILURES, published=True)
+
+        assert result.run_status == "completed"
+        assert result.manifest["run_status_reason"] == (
+            "all_requested_candidates_resolved"
+        )
+        assert result.manifest["prompt_budget_failures"] == 2
+        assert "prompt_contract_failures" not in result.manifest
 
 
 @pytest.mark.parametrize(
@@ -240,3 +310,31 @@ def test_the_status_helper_fails_only_a_zero_candidate_run(
     assert ("prompt_contract_failures" in reason) == (
         expected == SynthesisRunStatus.FAILED
     )
+
+
+@pytest.mark.parametrize(
+    ("contract_failures", "budget_failures", "expected"),
+    [
+        (0, 2, SynthesisRunStatus.NO_CANDIDATES),
+        (0, 0, SynthesisRunStatus.NO_CANDIDATES),
+        (2, 0, SynthesisRunStatus.FAILED),
+        (2, 1, SynthesisRunStatus.FAILED),
+        (1, 3, SynthesisRunStatus.FAILED),
+    ],
+)
+def test_the_status_helper_does_not_fail_a_zero_request_budget_overflow(
+    contract_failures, budget_failures, expected
+) -> None:
+    status, reason = _scenario_generation_status(
+        {"requested": 0, "attempted": 0, "generated": 0},
+        prompt_contract_failures=contract_failures,
+        prompt_budget_failures=budget_failures,
+    )
+
+    assert status == expected
+    if status == SynthesisRunStatus.FAILED:
+        assert reason.startswith("prompt_contract_failures: ")
+    elif budget_failures:
+        assert reason.startswith("prompt_budget_exceeded: ")
+    else:
+        assert reason == "no_eligible_candidates"

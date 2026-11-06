@@ -20,7 +20,10 @@ from asago_scenario_generator.pipeline.synthesis_types import (
     SynthesisRunStatus,
 )
 from asago_scenario_generator.pipeline.synthesis_values import _dump
-from asago_scenario_generator.stpa.infra.prompt_preflight import PromptContractError
+from asago_scenario_generator.stpa.infra.prompt_preflight import (
+    PromptBudgetExceeded,
+    PromptContractError,
+)
 from asago_scenario_generator.stpa.obligation_aware.slot_hazard_ownership import (
     SLOT_HAZARD_MISMATCH_CODE,
     UNINVOKED_HAZARD_OPERATION_CODE,
@@ -90,10 +93,11 @@ def _build_manifest(
         scenario_result=scenario_result,
     )
     scenario_counts = _manifest_scenario_counts(scenario_result, len(scenarios))
-    contract_failures = _prompt_contract_failure_count(call_records)
+    contract_failures, budget_failures = _prompt_failure_counts(call_records)
     run_status, run_status_reason = _scenario_generation_status(
         scenario_counts,
         prompt_contract_failures=contract_failures,
+        prompt_budget_failures=budget_failures,
         fill_failure=getattr(ica_enumeration, "fill_failure", None),
     )
     payload: dict[str, Any] = {
@@ -138,7 +142,7 @@ def _build_manifest(
         ),
         "run_status": run_status.value,
         "run_status_reason": run_status_reason,
-        **_prompt_contract_block(contract_failures),
+        **_prompt_failure_block(contract_failures, budget_failures),
         "scenario_counts": scenario_counts,
         "candidate_outcomes": _manifest_candidate_outcomes(scenario_result),
         "scenario_errors": list(scenario_result.stage_errors),
@@ -152,26 +156,45 @@ def _build_manifest(
 
 
 _PROMPT_CONTRACT_ERROR_PREFIX = f"{PromptContractError.__name__}:"
+_PROMPT_BUDGET_ERROR_PREFIX = f"{PromptBudgetExceeded.__name__}:"
 PROMPT_CONTRACT_REASON = "prompt_contract_failures"
+PROMPT_BUDGET_REASON = "prompt_budget_exceeded"
 
 
-def _prompt_contract_failure_count(
+def _prompt_failure_counts(
     call_records: list[dict[str, Any]] | None,
-) -> int:
-    """Count the call records the prompt contract check stopped before dispatch."""
-    return sum(
-        str(record.get("error") or "").startswith(_PROMPT_CONTRACT_ERROR_PREFIX)
-        for record in call_records or ()
-    )
+) -> tuple[int, int]:
+    """Count the calls the prompt check stopped before dispatch, by kind.
 
-
-def _prompt_contract_block(failures: int) -> dict[str, int]:
-    """Return the manifest's contract-failure count, empty when there is none.
-
-    A run without contract failures keeps its manifest shape, so replays
-    compare byte for byte.
+    A budget overflow is a ``PromptContractError`` subclass, but its recorded
+    text names ``PromptBudgetExceeded`` and its cause differs: the profile
+    could not fit the prompt, not the prompt broke its contract.  The two
+    counts stay apart so the status can treat the losses differently.
     """
-    return {"prompt_contract_failures": failures} if failures else {}
+    contract = budget = 0
+    for record in call_records or ():
+        error = str(record.get("error") or "")
+        if error.startswith(_PROMPT_BUDGET_ERROR_PREFIX):
+            budget += 1
+        elif error.startswith(_PROMPT_CONTRACT_ERROR_PREFIX):
+            contract += 1
+    return contract, budget
+
+
+def _prompt_failure_block(
+    contract_failures: int, budget_failures: int
+) -> dict[str, int]:
+    """Return the manifest's pre-dispatch failure counts, empty when there are none.
+
+    A run without either failure keeps its manifest shape, so replays compare
+    byte for byte.
+    """
+    block: dict[str, int] = {}
+    if contract_failures:
+        block["prompt_contract_failures"] = contract_failures
+    if budget_failures:
+        block["prompt_budget_failures"] = budget_failures
+    return block
 
 
 def _replay_fill_block(replay_fill: Mapping[str, Any] | None) -> dict[str, Any]:
@@ -593,13 +616,26 @@ def _manifest_scenario_counts(result: Any, generated: int) -> dict[str, int | No
 
 def _zero_request_status(
     prompt_contract_failures: int,
+    prompt_budget_failures: int = 0,
 ) -> tuple[SynthesisRunStatus, str]:
-    """Return the status of a run that requested no candidate."""
+    """Return the status of a run that requested no candidate.
+
+    A call the contract check stopped never asked for the candidates and its
+    prompt is defective, so the run failed.  A call the prompt budget stopped
+    found no candidate under a profile that cannot fit the prompt: the run
+    reports the empty analysis and names the budget.
+    """
     if prompt_contract_failures > 0:
         return (
             SynthesisRunStatus.FAILED,
             f"{PROMPT_CONTRACT_REASON}: {prompt_contract_failures} calls "
             "failed the prompt contract check before dispatch",
+        )
+    if prompt_budget_failures > 0:
+        return (
+            SynthesisRunStatus.NO_CANDIDATES,
+            f"{PROMPT_BUDGET_REASON}: {prompt_budget_failures} calls were "
+            "stopped by the prompt budget before dispatch",
         )
     return (SynthesisRunStatus.NO_CANDIDATES, "no_eligible_candidates")
 
@@ -608,13 +644,16 @@ def _scenario_generation_status(
     counts: Mapping[str, int | None],
     *,
     prompt_contract_failures: int = 0,
+    prompt_budget_failures: int = 0,
     fill_failure: Any | None = None,
 ) -> tuple[SynthesisRunStatus, str]:
     """Derive a truthful product status from candidate lifecycle counts.
 
     Zero requested candidates is a valid analysis unless the prompt contract
     check stopped calls before dispatch: those calls never asked for the
-    candidates, so the run failed rather than found none.  A not-applicable
+    candidates, so the run failed rather than found none.  Calls the prompt
+    budget stopped are counted apart and keep the empty analysis, naming the
+    budget as the reason.  A not-applicable
     candidate is resolved without an attempt: it counts towards completion
     but is not yield.  A failure that
     stopped the ICA fill, such as the provider rejecting its request schema
@@ -645,7 +684,10 @@ def _scenario_generation_status(
         )
     resolved = (generated or 0) + functional_test + not_applicable
     choices = (
-        (requested == 0, _zero_request_status(prompt_contract_failures)),
+        (
+            requested == 0,
+            _zero_request_status(prompt_contract_failures, prompt_budget_failures),
+        ),
         (
             attempted > 0 and generated == 0 and functional_test == 0,
             (SynthesisRunStatus.FAILED, "zero_yield_after_attempts"),
