@@ -121,6 +121,8 @@ with unit tests under `tests/` and prompt text with rows in
     - Obligation and governance routing re-ask the whole batch. A partial
       second routing reply is merged route by route with the first.
     - An unchanged ICA correction is asked again.
+    - ICA hazard verification splits a group the prompt budget rejects in two
+      and retries each half.
     - Stage 5 sends its concise retry after a stop at the completion cap and
       its condition correction.
     - Target realization runs its correction and verifier retries.

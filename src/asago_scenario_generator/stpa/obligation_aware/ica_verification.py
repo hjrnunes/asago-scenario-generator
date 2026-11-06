@@ -43,6 +43,9 @@ from asago_scenario_generator.stpa.infra.llm_helpers import (
     RequestTally,
     count_requests,
 )
+from asago_scenario_generator.stpa.infra.prompt_preflight import (
+    is_prompt_budget_exceeded,
+)
 from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
 from asago_scenario_generator.stpa.obligation_aware.calls import call_evidence
 from asago_scenario_generator.stpa.obligation_aware.slot_hazard_ownership import (
@@ -1646,22 +1649,57 @@ def _verify_initial_request_groups(
     diagnostics: list[ConsiderationDiagnostic] = []
     call_evidence: list[ConsiderationCallEvidence] = []
     for index, group in enumerate(_verification_request_groups(requests), 1):
-        sent = RequestTally()
-        try:
-            with count_requests(sent):
-                raw = _invoke_verification_method(method, group)
-            verdicts = _coerce_provider_result(raw, group)
-            group_records, group_unsupported, group_diagnostics = (
-                _collect_initial_results(group, verdicts)
-            )
-            records.update(group_records)
-            unsupported.extend(group_unsupported)
-            diagnostics.extend(group_diagnostics)
-            outcome = "accepted"
-        except Exception as exc:  # noqa: BLE001 - isolate this target batch
-            detail = (
-                f"initial ICA hazard verification failed: {type(exc).__name__}: {exc}"
-            )
+        _verify_initial_group(
+            method,
+            group,
+            batch_id=batch_id,
+            label=f"initial:{index}",
+            records=records,
+            unsupported=unsupported,
+            diagnostics=diagnostics,
+            call_evidence=call_evidence,
+        )
+    return records, unsupported, diagnostics, call_evidence
+
+
+def _verify_initial_group(
+    method: Any,
+    group: tuple[IcaHazardVerificationRequest, ...],
+    *,
+    batch_id: str,
+    label: str,
+    records: dict[str, IcaHazardVerificationRecord],
+    unsupported: list[
+        tuple[IcaHazardVerificationRequest, IcaHazardVerificationVerdict]
+    ],
+    diagnostics: list[ConsiderationDiagnostic],
+    call_evidence: list[ConsiderationCallEvidence],
+) -> None:
+    """Verify one request group, retrying an over-budget prompt as two halves.
+
+    A prompt the budget rejects is never dispatched, so no reply was refused:
+    the group is split in two and each half is retried under its own call.
+    A lone request the budget still rejects cannot shrink, so it fails with a
+    reason that names the budget.  Every other failure keeps its own handling.
+    """
+    sent = RequestTally()
+    split = False
+    try:
+        with count_requests(sent):
+            raw = _invoke_verification_method(method, group)
+        verdicts = _coerce_provider_result(raw, group)
+        group_records, group_unsupported, group_diagnostics = _collect_initial_results(
+            group, verdicts
+        )
+        records.update(group_records)
+        unsupported.extend(group_unsupported)
+        diagnostics.extend(group_diagnostics)
+        outcome = "accepted"
+    except Exception as exc:  # noqa: BLE001 - isolate this target batch
+        budget_rejected = is_prompt_budget_exceeded(exc)
+        split = budget_rejected and len(group) > 1
+        if not split:
+            detail = _initial_failure_detail(exc, unsplittable_budget=budget_rejected)
             for request in group:
                 records[request.ica_id] = _provider_failure_record(
                     request,
@@ -1674,11 +1712,43 @@ def _verify_initial_request_groups(
                         "ica_hazard_verification_provider_failure", request, detail
                     )
                 )
-            outcome = "technical_failure"
-        call_evidence.append(
-            _call_evidence(batch_id, f"initial:{index}", outcome, sent.requests)
+        outcome = "technical_failure"
+    # One row per attempt: a split names its halves by their path in the split.
+    call_evidence.append(_call_evidence(batch_id, label, outcome, sent.requests))
+    if split:
+        for position, half in enumerate(_verification_halves(group), 1):
+            _verify_initial_group(
+                method,
+                half,
+                batch_id=batch_id,
+                label=f"{label}.{position}",
+                records=records,
+                unsupported=unsupported,
+                diagnostics=diagnostics,
+                call_evidence=call_evidence,
+            )
+
+
+def _verification_halves(
+    group: tuple[IcaHazardVerificationRequest, ...],
+) -> tuple[tuple[IcaHazardVerificationRequest, ...], ...]:
+    """Split *group* into two non-empty halves, so each retry is smaller."""
+    middle = len(group) // 2
+    return group[:middle], group[middle:]
+
+
+def _initial_failure_detail(
+    exc: BaseException,
+    *,
+    unsplittable_budget: bool,
+) -> str:
+    """Name an initial-verification failure, and an over-budget lone request."""
+    if unsplittable_budget:
+        return (
+            "initial ICA hazard verification failed: this request's prompt alone "
+            f"exceeds the prompt budget: {type(exc).__name__}: {exc}"
         )
-    return records, unsupported, diagnostics, call_evidence
+    return f"initial ICA hazard verification failed: {type(exc).__name__}: {exc}"
 
 
 def _verification_request_groups(

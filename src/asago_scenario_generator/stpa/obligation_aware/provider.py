@@ -1999,7 +1999,7 @@ class ObligationAwareLLMAdapter:
         if outcome.error is not None or outcome.value is None:
             raise ValueError(
                 outcome.error or "ICA hazard verification provider returned no payload"
-            )
+            ) from outcome.failure
         result = _compile_ica_review_payload(outcome.value, request_by_ref)
         mark_call_published(
             self.run_dir,

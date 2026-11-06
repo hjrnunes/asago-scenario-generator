@@ -118,7 +118,7 @@ default.
 | Structural revision | `provider.py` `revise` | A schema failure | The original prompt, then the feedback and the error | `validation_retries` per request | The baseline structure is kept. |
 | ICA slot filling | `provider.py` `fill` | A schema failure or a slot-rule failure | The original prompt, then the feedback, the prior reply and the error | `validation_retries` per target | The slot is unresolved. |
 | Context-coverage supplement | `provider.py` `_supplement_context_coverage` | A schema failure or a supplement-rule failure. The supplement is a follow-up request about source contexts the slot reply left unanalyzed; it is not itself a re-ask. | The original prompt, then the feedback and the error | `validation_retries` per target that has gaps | The validated slot payload is kept. |
-| ICA hazard verification | `provider.py` `verify_ica_hazards` | A schema failure, or a hazardous absence whose losses or consequence are missing | The original prompt and the error | 1 per verification call | An absence that is still unproven is downgraded. On a schema failure, every ICA in the group is a `provider_failure`: unverified, and kept out of Stage 5. |
+| ICA hazard verification | `provider.py` `verify_ica_hazards` | A schema failure, or a hazardous absence whose losses or consequence are missing | The original prompt and the error | 1 per verification call | An absence that is still unproven is downgraded. On a schema failure, every ICA in the group is a `provider_failure`: unverified, and kept out of Stage 5. A group the budget rejects is split in two before dispatch instead, as described below. |
 | Unchanged ICA correction | `obligation_aware/ica_verification.py` `_prepare_one_correction` | A correction left the ICA request content unchanged | The correction prompt again, with a block saying the first answer changed nothing | 1 per ICA | The ICA is kept unsupported, with its first verdict. |
 
 Two follow-ups are planned and are not re-asks. An ICA the first verdict does
@@ -128,6 +128,17 @@ and stops at `ica_hazard_correct_action_without_effect`. When that correction
 revises the ICA, it is verified once more, under the step `correction`; that
 call can make its own verification re-ask. The second verification is built
 as the first was, from the corrected ICA alone: the first verdict is not sent.
+
+A group whose prompt exceeds the budget is not a re-ask either. As the
+preamble says, the attempt sends nothing, so no reply was refused and no
+request reached the provider. `ica_verification.py` `_verify_initial_group`
+splits the group in two and sends each half under its own attempt, recursing
+until a prompt fits, so a budget stop no longer marks the whole group a
+`provider_failure`. A lone request whose prompt still exceeds the budget
+cannot shrink, so it stays a `provider_failure` whose reason names the
+budget, and the split ends there. Each attempt keeps its own call-evidence
+row, labelled by its path in the split (`initial:1`, then `initial:1.1` and
+`initial:1.2`).
 
 ## Stage 5 and scenario production
 

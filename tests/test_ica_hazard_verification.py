@@ -2,6 +2,9 @@
 
 import pytest
 
+from asago_scenario_generator.stpa.infra.prompt_preflight import (
+    PromptBudgetExceeded,
+)
 from asago_scenario_generator.stpa.obligation_aware.ica_verification import (
     IcaHazardVerificationBatch,
     IcaHazardVerificationCorrection,
@@ -1223,3 +1226,233 @@ def test_reverification_sends_the_initial_prompt_under_the_correction_step(
         "initial",
         "correction",
     ]
+
+
+def _many_ica_inputs(
+    count: int,
+) -> tuple[ICAEnumeration, LossAnalysis, ControlStructure]:
+    """Return one responsibility slot holding *count* ICAs, verified as one group."""
+    enumeration, loss_analysis, control_structure = _stpa_inputs()
+    slot = enumeration.slots[0]
+    template = slot.icas[0]
+    prefix = template.ica_id.rsplit(":", 1)[0]
+    icas = [
+        template.model_copy(
+            update={
+                "ica_id": f"{prefix}:{index}",
+                "ica_text": f"{template.ica_text} ({index})",
+            }
+        )
+        for index in range(1, count + 1)
+    ]
+    return (
+        enumeration.model_copy(
+            update={"slots": [slot.model_copy(update={"icas": icas})]}
+        ),
+        loss_analysis,
+        control_structure,
+    )
+
+
+class _BudgetLimitedVerifier:
+    """Answer a group up to *limit* requests; reject a larger prompt as over budget."""
+
+    def __init__(self, limit: int, run_dir=None) -> None:
+        self.limit = limit
+        self.run_dir = run_dir
+        self.calls: list[tuple[str, ...]] = []
+
+    def verify_ica_hazards(self, requests, *, correction=False):
+        self.calls.append(tuple(request.ica_id for request in requests))
+        if len(requests) > self.limit:
+            raise PromptBudgetExceeded(
+                input_tokens=2,
+                usable_input_tokens=1,
+                context_window=1,
+                maximum_completion_tokens=1,
+                safety_margin=0,
+            )
+        if self.run_dir is not None:
+            dispatch_requests(self.run_dir, len(requests))
+        return [
+            {
+                "ica_id": request.ica_id,
+                "verdict": "supported",
+                "rationale": "The supplied STPA path is coherent.",
+            }
+            for request in requests
+        ]
+
+
+def test_an_oversize_verification_group_is_split_until_every_request_is_answered(
+    tmp_path,
+) -> None:
+    enumeration, loss_analysis, control_structure = _many_ica_inputs(5)
+    verifier = _BudgetLimitedVerifier(limit=2, run_dir=tmp_path)
+
+    _, batch = verify_final_ica_batch(
+        verifier,
+        enumeration,
+        loss_analysis=loss_analysis,
+        control_structure=control_structure,
+    )
+
+    expected = [ica.ica_id for ica in enumeration.slots[0].icas]
+    assert batch.supported_count == len(expected)
+    assert batch.provider_failure_count == 0
+    # The whole group is tried once, then split in half until each prompt fits.
+    assert [len(group) for group in verifier.calls] == [5, 2, 3, 1, 2]
+    assert [
+        ica_id
+        for group in verifier.calls
+        if len(group) <= verifier.limit
+        for ica_id in group
+    ] == expected
+    # Splitting halves strictly smaller groups, so the attempts stay bounded.
+    assert len(verifier.calls) <= 2 * len(expected) - 1
+    # One call-evidence row per attempt, labelled by its split path.
+    assert _sent_by_call(batch) == {
+        "initial:1": 0,
+        "initial:1.1": 2,
+        "initial:1.2": 0,
+        "initial:1.2.1": 1,
+        "initial:1.2.2": 2,
+    }
+    assert [call.outcome for call in batch.call_evidence] == [
+        "technical_failure",
+        "accepted",
+        "technical_failure",
+        "accepted",
+        "accepted",
+    ]
+
+
+def test_a_lone_request_over_the_prompt_budget_is_a_failure() -> None:
+    enumeration, loss_analysis, control_structure = _single_ica_inputs()
+    verifier = _BudgetLimitedVerifier(limit=0)
+
+    filtered, batch = verify_final_ica_batch(
+        verifier,
+        enumeration,
+        loss_analysis=loss_analysis,
+        control_structure=control_structure,
+    )
+
+    [record] = batch.records
+    assert verifier.calls == [(record.ica_id,)]
+    assert record.disposition == "provider_failure"
+    assert record.final_verdict is None
+    assert batch.provider_failure_count == 1 and batch.supported_count == 0
+    assert "prompt alone exceeds the prompt budget" in record.attempts[0].error
+    assert "PromptBudgetExceeded" in record.attempts[0].error
+    assert any(
+        "ica_hazard_verification_provider_failure" == item.code
+        and "prompt alone exceeds the prompt budget" in item.detail
+        for item in batch.diagnostics
+    )
+    assert filtered.slots[0].icas == []
+
+
+def test_a_verification_failure_that_is_not_a_budget_failure_is_not_split() -> None:
+    enumeration, loss_analysis, control_structure = _many_ica_inputs(5)
+
+    class Unavailable:
+        def __init__(self) -> None:
+            self.calls: list[int] = []
+
+        def verify_ica_hazards(self, requests, *, correction=False):
+            self.calls.append(len(requests))
+            raise RuntimeError("verifier unavailable")
+
+    verifier = Unavailable()
+
+    _, batch = verify_final_ica_batch(
+        verifier,
+        enumeration,
+        loss_analysis=loss_analysis,
+        control_structure=control_structure,
+    )
+
+    assert verifier.calls == [5]
+    assert batch.provider_failure_count == 5
+    assert all(
+        "RuntimeError: verifier unavailable" in record.attempts[0].error
+        for record in batch.records
+    )
+    assert any(
+        "RuntimeError: verifier unavailable" in item.detail
+        for item in batch.diagnostics
+    )
+
+
+def _blocked_adapter(tmp_path, monkeypatch):
+    """A real verification adapter whose every prompt the budget rejects."""
+    from asago_scenario_generator.stpa.obligation_aware.contracts import (
+        AnalysisControls,
+    )
+    from asago_scenario_generator.stpa.obligation_aware.provider import (
+        ObligationAwareLLMAdapter,
+    )
+    from tests.helpers.prompt_budget import block_every_prompt
+
+    class Client:
+        model = "blocked-budget-test"
+
+        def complete(self, **kwargs):
+            raise AssertionError("a blocked prompt must not be dispatched")
+
+    block_every_prompt(monkeypatch)
+    return ObligationAwareLLMAdapter(
+        Client(),
+        run_dir=tmp_path,
+        controls=AnalysisControls(
+            model_profile="offline",
+            model_name=Client.model,
+            temperature=0.0,
+            deadline_seconds=30.0,
+        ),
+    )
+
+
+def test_the_provider_adapter_keeps_the_prompt_budget_failure_as_the_cause(
+    tmp_path, monkeypatch
+) -> None:
+    adapter = _blocked_adapter(tmp_path, monkeypatch)
+
+    with pytest.raises(ValueError, match="prompt_budget_exceeded") as excinfo:
+        adapter.verify_ica_hazards((_request(),))
+
+    assert isinstance(excinfo.value.__cause__, PromptBudgetExceeded)
+
+
+def test_the_real_verification_adapter_splits_a_group_the_budget_rejects(
+    tmp_path, monkeypatch
+) -> None:
+    from tests.helpers.calls_log import read_calls_jsonl
+
+    enumeration, loss_analysis, control_structure = _stpa_inputs()
+    adapter = _blocked_adapter(tmp_path, monkeypatch)
+
+    _, batch = verify_final_ica_batch(
+        adapter,
+        enumeration,
+        loss_analysis=loss_analysis,
+        control_structure=control_structure,
+    )
+
+    # The group is tried, split in two, and each lone request is tried once.
+    assert [entry["step"] for entry in read_calls_jsonl(tmp_path)] == [
+        "initial",
+        "initial",
+        "initial",
+    ]
+    assert [call.outcome for call in batch.call_evidence] == [
+        "technical_failure",
+        "technical_failure",
+        "technical_failure",
+    ]
+    assert batch.provider_failure_count == 2 and batch.supported_count == 0
+    assert all(
+        "prompt alone exceeds the prompt budget" in record.attempts[0].error
+        for record in batch.records
+    )

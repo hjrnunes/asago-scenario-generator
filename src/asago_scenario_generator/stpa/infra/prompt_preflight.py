@@ -193,6 +193,18 @@ class PromptBudgetExceeded(PromptContractError):
         )
 
 
+def is_prompt_budget_exceeded(error: BaseException | None) -> bool:
+    """Tell whether a failure is, or was caused by, a prompt-budget rejection.
+
+    The adapter's own preflight raises the budget failure itself; a rejection
+    inside the provider call reaches the caller as the failure's cause.
+    """
+    return error is not None and (
+        isinstance(error, PromptBudgetExceeded)
+        or isinstance(error.__cause__, PromptBudgetExceeded)
+    )
+
+
 @dataclass(frozen=True)
 class PromptAudit:
     """Deterministic evidence recorded for one rendered prompt."""
@@ -838,6 +850,7 @@ __all__ = [
     "audit_prompt_contract",
     "enforce_prompt_audit",
     "estimate_prompt_tokens",
+    "is_prompt_budget_exceeded",
     "prohibited_view_field_errors",
     "resolve_adapter_prompt_budget",
     "resolve_prompt_budget",

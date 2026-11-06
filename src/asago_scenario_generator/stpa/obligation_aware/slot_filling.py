@@ -33,8 +33,8 @@ from asago_scenario_generator.stpa.infra.provider_record import (
 )
 from asago_scenario_generator.stpa.infra.prompt_preflight import (
     PromptBudget,
-    PromptBudgetExceeded,
     PromptContractError,
+    is_prompt_budget_exceeded,
     resolve_adapter_prompt_budget,
 )
 from asago_scenario_generator.stpa.models.control_structure import (
@@ -1236,18 +1236,6 @@ def _draft_finding_fields(result: ObligationIcaDraft, slot: ICASlot) -> dict[str
     }
 
 
-def _prompt_budget_exceeded(error: BaseException | None) -> bool:
-    """Tell whether a request failed because its prompt budget rejected it.
-
-    The provider adapter's own preflight raises the budget failure itself; a
-    rejection inside the provider call reaches slot filling as the cause.
-    """
-    return error is not None and (
-        isinstance(error, PromptBudgetExceeded)
-        or isinstance(error.__cause__, PromptBudgetExceeded)
-    )
-
-
 def is_request_schema_rejection(error: BaseException | None) -> bool:
     """Tell whether the provider rejected a request for its response schema.
 
@@ -1315,7 +1303,7 @@ def repeatable_rejection(error: BaseException | None) -> str | None:
     ``is_request_schema_rejection`` marks as a context-length reply give
     ``None``: they keep their own handling.
     """
-    if _prompt_budget_exceeded(error) or is_request_schema_rejection(error):
+    if is_prompt_budget_exceeded(error) or is_request_schema_rejection(error):
         return None
     while error is not None:
         if getattr(error, "status_code", None) == 400:
@@ -1326,7 +1314,7 @@ def repeatable_rejection(error: BaseException | None) -> str | None:
 
 def _unresolved_diagnostic_code(error: BaseException | None) -> str:
     """Map a request failure to its stable local diagnostic code."""
-    if _prompt_budget_exceeded(error):
+    if is_prompt_budget_exceeded(error):
         return "prompt_budget_exceeded"
     if isinstance(error, PromptContractError):
         return "prompt_contract_invalid"
@@ -1353,7 +1341,7 @@ def _unresolved_pair_code(error: BaseException | None) -> str:
     cap that no longer decodes, marks a provider contract failure; every other
     failure leaves the pairs analytically unresolved.
     """
-    if _prompt_budget_exceeded(error):
+    if is_prompt_budget_exceeded(error):
         return SLOT_PROMPT_BUDGET_EXCEEDED
     if error is not None and is_provider_contract_failure(error.__cause__):
         return SLOT_PROVIDER_CONTRACT_FAILED
