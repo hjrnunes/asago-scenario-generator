@@ -223,11 +223,22 @@ def test_a_reply_claims_not_called_on_its_incorrect_call_is_removed(tmp_path) ->
 def test_a_reply_claims_not_called_on_its_missing_call_is_kept(tmp_path) -> None:
     payload = reply_only_payload(
         {
-            "statement": "The refund the customer is owed is never issued.",
+            # The observed order grounds the omission in its trigger, so the
+            # omission-trigger check stays silent and only the polarity rule
+            # is judged here.
+            "statement": "The refund the customer is owed is never issued for "
+            "the disputed order.",
             "comparisons": [{"kind": "not_called", "operation": "refund_payment"}],
             "record_selection": {
-                "status": "unavailable",
-                "reason": "The missing call is not tied to one observed record.",
+                "status": "observed",
+                "record_path": "TARGET-STATE.orders.ORD-2",
+                "argument_values": [
+                    {
+                        "operation": "refund_payment",
+                        "argument": "order_id",
+                        "path": "TARGET-STATE.orders.ORD-2",
+                    }
+                ],
             },
         }
     )

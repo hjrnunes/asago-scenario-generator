@@ -950,6 +950,19 @@ def _descriptive_literal_condition() -> dict:
     return _placeholder_payload()["unsafe_outcome"]["discriminating_condition"]
 
 
+def _bare_not_called_condition() -> dict:
+    """A bare ``not_called`` whose omission states no trigger."""
+
+    return {
+        "statement": "The refund is issued for an order the customer does not own.",
+        "comparisons": [{"kind": "not_called", "operation": "refund_payment"}],
+        "record_selection": {
+            "status": "unavailable",
+            "reason": "The unsafe call is not tied to one observed record.",
+        },
+    }
+
+
 def _stage5_correction(condition: Callable[[], dict | None]) -> Callable[[str], str]:
     """Render the Stage 5 correction request that follows a refused condition."""
 
@@ -1144,6 +1157,9 @@ CASES: dict[str, Callable[[str], str]] = {
     "missing-condition-correction": _stage5_correction(lambda: None),
     "literal-unsupported-correction": _stage5_correction(
         _descriptive_literal_condition
+    ),
+    "omission-trigger-missing-correction": _stage5_correction(
+        _bare_not_called_condition
     ),
     "condition-operation-inventory": _stage5_request_schema,
     "two-failing-authority-bases": _call_2b_authority_correction,

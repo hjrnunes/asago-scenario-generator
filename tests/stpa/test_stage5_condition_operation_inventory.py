@@ -81,14 +81,24 @@ def _flat_condition(*operations: str) -> dict:
 
 
 def _condition(*operations: str) -> dict:
+    # The observed record grounds the omission in its trigger, so the
+    # condition passes the omission-trigger check.
     return {
-        "statement": "The required ticket is never opened for the gadget.",
+        "statement": "The required ticket is never opened for the gadget "
+        "that is due for service.",
         "comparisons": [
             {"kind": "not_called", "operation": name} for name in operations
         ],
         "record_selection": {
-            "status": "unavailable",
-            "reason": "The failure is a missing call, not a call on a record.",
+            "status": "observed",
+            "record_path": "TARGET-STATE.gadgets.G-1",
+            "argument_values": [
+                {
+                    "operation": "open_ticket",
+                    "argument": "gadget_id",
+                    "path": "TARGET-STATE.gadgets.G-1",
+                }
+            ],
         },
     }
 

@@ -27,7 +27,19 @@ it decides:
   (`discriminating_condition_polarity_inverted`) in every control-action
   category, whether or not the action maps to an operation, and whatever the
   safe outcome claims (a reply-level condition so refused is removed rather
-  than corrected, as every failing reply-level condition is).
+  than corrected, as every failing reply-level condition is);
+- a `not_called` whose condition states no trigger is refused
+  (`discriminating_condition_omission_trigger_missing`): a bare
+  `not_called` covers the whole conversation, so it fires whenever the agent
+  answers without calling the operation, flagging correct replies. The
+  condition states its trigger when any other comparison (a value comparison
+  over a supplied fact, or an order comparison after the triggering call) or
+  an observed `record_selection` grounds the omission in supplied material.
+  The condition language cannot scope an omission to its trigger, so a
+  scenario whose trigger no supplied fact or named operation states is
+  analytical-only. The consumer's omission gate refuses the plan that cites
+  no trigger observation; scoping an omission to a trigger needs the
+  contract change tracked as asago-7bt8.9.
 
 When the observation contract captures tool calls, a Stage 5 reply must
 carry `unsafe_outcome.failure_call`: the object, or `null` when the failure

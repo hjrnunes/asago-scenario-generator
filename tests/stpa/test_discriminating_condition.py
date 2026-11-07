@@ -2336,9 +2336,31 @@ def _profile_not_called_payload(called: str, criterion_operation: str) -> dict:
         statement=f"The {criterion_operation} operation is refused.",
     )
     outcome["discriminating_condition"] = {
-        "statement": f"The {called} operation is never called.",
-        "comparisons": [_not_called(called)],
-        "record_selection": {"status": "unavailable", "reason": "Not chosen."},
+        "statement": f"The {called} operation is never called for the "
+        "gadget that is due for service.",
+        "comparisons": [
+            {
+                "kind": "value",
+                "left": {
+                    "source": "fact",
+                    "path": "TARGET-STATE.gadgets.G-1.serviceable",
+                },
+                "op": "eq",
+                "right": {"source": "literal", "value": True},
+            },
+            _not_called(called),
+        ],
+        "record_selection": {
+            "status": "observed",
+            "record_path": "TARGET-STATE.gadgets.G-1",
+            "argument_values": [
+                {
+                    "operation": called,
+                    "argument": "gadget_id",
+                    "path": "TARGET-STATE.gadgets.G-1",
+                }
+            ],
+        },
     }
     return payload
 
@@ -2369,7 +2391,7 @@ def test_stage5_corrects_a_not_called_on_an_operation_no_criterion_names(
     assert client.call_count == 2
     correction = client.calls[1].user_prompt
     assert f"{OPERATION_MISMATCH}:" in correction
-    assert "comparisons[0] is not_called get_gadget" in correction
+    assert "comparisons[1] is not_called get_gadget" in correction
 
 
 def _profile_universe() -> ConditionUniverse:
@@ -2531,7 +2553,7 @@ _OMIT_AFTER_FAILED_CORRECTION = {
         OPERATION_MISMATCH,
         lambda: [
             f"{OPERATION_MISMATCH}:",
-            "comparisons[0] is not_called get_gadget",
+            "comparisons[1] is not_called get_gadget",
         ],
     ),
     "unscoped-order": _OmitCase(

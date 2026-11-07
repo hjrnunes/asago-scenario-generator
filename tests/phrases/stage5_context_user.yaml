@@ -182,6 +182,12 @@ cases:
         "op":"ne","right":{"source":"fact","path":"TARGET-STATE.session_user_id"}
       - never compare two literals
       - '{"kind":"not_called","operation":<name>}'
+      - >-
+        State the trigger that makes the call due beside the omission: add a
+        comparison over the supplied fact that establishes the trigger, an
+        order comparison after the call that triggers it, or an observed
+        `record_selection` of the record the trigger concerns.
+      - A `not_called` alone fires whenever the agent answers without calling
       - Reply text is not an operand
       - only when no listed record meets the comparisons
       - >-

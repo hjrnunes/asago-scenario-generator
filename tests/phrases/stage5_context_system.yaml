@@ -203,6 +203,9 @@ cases:
       - *call-precondition
       - *call-boundary
       - *reply-null-condition
+      - >-
+        A `not_called` alone states only that the operation is omitted, so
+        ground the omission in its trigger
   realistic-no-tool-call:
     required:
       - *reply-null-condition

@@ -16,7 +16,8 @@ recorded as a normalization, unless the condition check would refuse that
 ``not_called`` as detecting the safe behavior (``not_called_inversion``): an
 INCORRECT action that provides the same operation. An incorrect call says
 only that the call is wrong, not what makes it wrong, so code derives
-nothing for it.
+nothing for it. A derived ``not_called`` carries no trigger, so the
+consumer's omission gate judges the plan it lands in, not this routing.
 """
 
 from __future__ import annotations
@@ -189,7 +190,9 @@ def _failure_call_route(draft: BaseModel, claim: ConditionClaim) -> RoutedDraft:
     The caller has checked that the target records the operation and that
     the contract captures tool calls at ``command_attempt``. Code derives no
     ``not_called`` the condition check refuses for ``claim``: the draft then
-    publishes without a condition, as an incorrect call does.
+    publishes without a condition, as an incorrect call does. A derived
+    ``not_called`` carries no trigger either, so the consumer's omission gate
+    judges the plan it lands in, not the routing here.
     """
 
     failure_call: FailureCall = claim.failure_call

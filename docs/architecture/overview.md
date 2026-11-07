@@ -913,6 +913,16 @@ wrong, so code derives nothing either. A scenario on the `failure_call`
 route without a derived condition is published without one
 (`tool_call_condition_status` `not_executable`, reason `no_condition`), and
 the consumer rejects that command attempt as `tool_call_condition_missing`.
+The derived `not_called` carries no trigger: `not_called` covers the whole
+conversation, so it fires whenever the agent answers without calling the
+operation. Stage 5 refuses a provider-authored condition whose only
+call-level content is such a bare `not_called`
+(`discriminating_condition_omission_trigger_missing`) unless another
+comparison or an observed record selection grounds the omission in supplied
+material. The derived form itself is still bound, because the missing call
+is the scenario's stated failure; the consumer's omission gate refuses the
+plan that cites no trigger observation, and scoping an omission to its
+trigger is the contract change tracked as asago-7bt8.9.
 
 Binding normally turns each `record_selection` argument into an `eq` on the
 selected value. An ownership selection is bound differently, because its

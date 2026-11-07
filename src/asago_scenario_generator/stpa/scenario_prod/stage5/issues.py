@@ -49,6 +49,9 @@ class IssueCode(StrEnum):
         "discriminating_condition_polarity_inverted"
     )
     discriminating_condition_no_call = "discriminating_condition_no_call"
+    discriminating_condition_omission_trigger_missing = (
+        "discriminating_condition_omission_trigger_missing"
+    )
     discriminating_condition_record_kind_mismatch = (
         "discriminating_condition_record_kind_mismatch"
     )
@@ -76,6 +79,7 @@ CONDITION_FAILURE_CODES = (
     IssueCode.discriminating_condition_self_comparison,
     IssueCode.discriminating_condition_polarity_inverted,
     IssueCode.discriminating_condition_no_call,
+    IssueCode.discriminating_condition_omission_trigger_missing,
     IssueCode.discriminating_condition_record_kind_mismatch,
     IssueCode.discriminating_condition_ordering_not_numeric,
 )

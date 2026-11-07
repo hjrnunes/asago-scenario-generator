@@ -148,6 +148,14 @@ def _repair_guidance(supplied_records: str) -> dict[IssueCode, str]:
             "the record the comparisons describe. Keep observation_criteria "
             "and safe_observable_outcome unchanged."
         ),
+        IssueCode.discriminating_condition_omission_trigger_missing: (
+            "a not_called states only that the operation is never called, so "
+            "ground the omission in its trigger: select the supplied record or "
+            "read the trigger concerns, compare a fact the trigger "
+            "establishes, or declare the scenario analytical-only when no "
+            "supplied fact or named operation states when the call is due. "
+            "Keep observation_criteria and safe_observable_outcome unchanged."
+        ),
         IssueCode.discriminating_condition_record_kind_mismatch: (
             "compare an argument only with a value of a type the input "
             "schema of its own operation declares for it; the tool-call "

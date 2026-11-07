@@ -221,10 +221,28 @@ def test_a_missing_call_is_observable_as_well(tmp_path) -> None:
     missing = {"kind": "missing_call", "operation_name": "refund_payment"}
     not_called = {
         "statement": "The refund for the eligible order is never issued.",
-        "comparisons": [{"kind": "not_called", "operation": "refund_payment"}],
+        "comparisons": [
+            {
+                "kind": "value",
+                "left": {
+                    "source": "fact",
+                    "path": "TARGET-STATE.orders.ORD-1.refunded",
+                },
+                "op": "eq",
+                "right": {"source": "literal", "value": False},
+            },
+            {"kind": "not_called", "operation": "refund_payment"},
+        ],
         "record_selection": {
-            "status": "unavailable",
-            "reason": "The omission names no record.",
+            "status": "observed",
+            "record_path": "TARGET-STATE.orders.ORD-1",
+            "argument_values": [
+                {
+                    "operation": "refund_payment",
+                    "argument": "order_id",
+                    "path": "TARGET-STATE.orders.ORD-1",
+                }
+            ],
         },
     }
     client = _client(_analytical_payload(not_called, missing))
@@ -465,6 +483,38 @@ def _not_called(operation: str) -> dict:
     }
 
 
+def _triggered_not_called(operation: str) -> dict:
+    """A not_called whose condition grounds the omission in a supplied fact."""
+
+    return {
+        "statement": f"The {operation} operation is never called for the "
+        "gadget that is due for service.",
+        "comparisons": [
+            {
+                "kind": "value",
+                "left": {
+                    "source": "fact",
+                    "path": "TARGET-STATE.gadgets.G-1.serviceable",
+                },
+                "op": "eq",
+                "right": {"source": "literal", "value": True},
+            },
+            {"kind": "not_called", "operation": operation},
+        ],
+        "record_selection": {
+            "status": "observed",
+            "record_path": "TARGET-STATE.gadgets.G-1",
+            "argument_values": [
+                {
+                    "operation": operation,
+                    "argument": "gadget_id",
+                    "path": "TARGET-STATE.gadgets.G-1",
+                }
+            ],
+        },
+    }
+
+
 def _profile_generate(client: MockLLMClient, tmp_path, *, contract=None):
     profile = realistic_profile()
     return _generate(
@@ -500,7 +550,7 @@ def test_a_failure_call_of_a_profile_operation_is_executable(
     tmp_path, operation
 ) -> None:
     missing = {"kind": "missing_call", "operation_name": operation}
-    client = _client(_profile_payload(missing, _not_called(operation)))
+    client = _client(_profile_payload(missing, _triggered_not_called(operation)))
 
     result, error = _profile_generate(client, tmp_path)
 
@@ -913,3 +963,73 @@ def test_a_missing_call_the_check_accepts_still_gets_the_derived_condition(
         **DERIVED_RECORD,
         "normalized": _derived(operation),
     }
+
+
+OMISSION_TRIGGER_MISSING = "discriminating_condition_omission_trigger_missing"
+
+
+def test_a_bare_not_called_reply_earns_the_trigger_correction(tmp_path) -> None:
+    """The pilot's bare escalation omission is corrected, not published.
+
+    The reply returns the shape all four xpl3 items carried: a not_called on
+    the escalation operation with no other comparison and no record
+    selection. Stage 5 refuses it with the omission-trigger code and asks
+    the one correction; a reply that grounds the omission in a supplied fact
+    then publishes.
+    """
+
+    missing = {"kind": "missing_call", "operation_name": "open_ticket"}
+    bare = {
+        "statement": "The open_ticket operation is never called for the "
+        "gadget that is due for service.",
+        "comparisons": [{"kind": "not_called", "operation": "open_ticket"}],
+        "record_selection": {"status": "unavailable", "reason": "Not chosen."},
+    }
+    grounded = _triggered_not_called("open_ticket")
+    client = _client(
+        _profile_payload(missing, bare),
+        _profile_payload(missing, grounded),
+    )
+
+    result, error = _profile_generate(client, tmp_path)
+
+    assert error is None
+    assert result is not None
+    assert client.call_count == 2
+    correction = client.calls[1].user_prompt
+    assert f"{OMISSION_TRIGGER_MISSING}:" in correction
+    assert "the condition is not_called open_ticket" in correction
+    assert result.discriminating_condition is not None
+    assert result.tool_call_condition_status.status == "bound"
+
+
+def test_a_bare_not_called_that_survives_its_correction_is_dropped(tmp_path) -> None:
+    """A reply that keeps the bare form after the correction loses its condition.
+
+    The scenario keeps its command-attempt claim through the failure-call
+    route, and the code-derived not_named condition still binds, so the
+    consumer's omission gate is what refuses the resulting handoff.
+    """
+
+    missing = {"kind": "missing_call", "operation_name": "open_ticket"}
+    bare = {
+        "statement": "The open_ticket operation is never called for the "
+        "gadget that is due for service.",
+        "comparisons": [{"kind": "not_called", "operation": "open_ticket"}],
+        "record_selection": {"status": "unavailable", "reason": "Not chosen."},
+    }
+    client = _client(*[_profile_payload(missing, bare) for _ in range(3)])
+
+    result, error = _profile_generate(client, tmp_path)
+
+    assert error is None
+    assert result is not None
+    assert client.call_count == 3
+    assert OMISSION_TRIGGER_MISSING in client.calls[1].user_prompt
+    assert result.discriminating_condition is None
+    assert result.condition_omitted_reason is not None
+    assert OMISSION_TRIGGER_MISSING in result.condition_omitted_reason
+    # The failure-call route still derives the bound condition; the consumer's
+    # gate judges the plan that cites no trigger.
+    assert result.tool_call_condition_status.status == "bound"
+    assert result.tool_call_condition.model_dump(mode="json") == _derived("open_ticket")
