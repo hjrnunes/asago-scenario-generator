@@ -55,13 +55,25 @@ def _payload(criteria: list[dict], safe_outcome: dict, not_called: str) -> dict:
     outcome["observation_criteria"] = criteria
     outcome["failure_call"] = None
     outcome["safe_observable_outcome"] = safe_outcome
-    # The observed record grounds the omission in its trigger, so the
-    # omission-trigger check stays silent and the coerced safe outcome is
-    # judged alone here.
+    # The value comparison names the triggering operation (search_manual), so
+    # the bound condition states a trigger and the omission-trigger check
+    # stays silent; the coerced safe outcome is judged alone here.
     outcome["discriminating_condition"] = {
-        "statement": f"The {not_called} operation is never called for the "
-        "gadget that is due for service.",
-        "comparisons": [{"kind": "not_called", "operation": not_called}],
+        "statement": f"The {not_called} operation is never called after the "
+        "manual lookup for the gadget that is due for service.",
+        "comparisons": [
+            {"kind": "not_called", "operation": not_called},
+            {
+                "kind": "value",
+                "left": {
+                    "source": "argument",
+                    "operation": "search_manual",
+                    "argument": "query",
+                },
+                "op": "eq",
+                "right": {"source": "literal", "value": "service"},
+            },
+        ],
         "record_selection": {
             "status": "observed",
             "record_path": "TARGET-STATE.gadgets.G-1",

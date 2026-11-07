@@ -915,14 +915,16 @@ route without a derived condition is published without one
 the consumer rejects that command attempt as `tool_call_condition_missing`.
 The derived `not_called` carries no trigger: `not_called` covers the whole
 conversation, so it fires whenever the agent answers without calling the
-operation. Stage 5 refuses a provider-authored condition whose only
-call-level content is such a bare `not_called`
-(`discriminating_condition_omission_trigger_missing`) unless another
-comparison or an observed record selection grounds the omission in supplied
-material. The derived form itself is still bound, because the missing call
-is the scenario's stated failure; the consumer's omission gate refuses the
-plan that cites no trigger observation, and scoping an omission to its
-trigger is the contract change tracked as asago-7bt8.9.
+operation. Stage 5 refuses a provider-authored condition whose bound form
+states no trigger (`discriminating_condition_omission_trigger_missing`):
+the trigger is a bound value or order comparison naming an operation besides
+the omitted one, and a comparison on the omitted operation itself is refused
+as contradicting the omission. A condition the corrections cannot ground is
+dropped; the derived form itself is still bound, because the missing call
+is the scenario's stated failure. The consumer's omission gate reads the
+bound condition when the handoff publishes no authored one, and refuses the
+plan that states no trigger; scoping an omission to its trigger is the
+contract change tracked as asago-7bt8.9.
 
 Binding normally turns each `record_selection` argument into an `eq` on the
 selected value. An ownership selection is bound differently, because its

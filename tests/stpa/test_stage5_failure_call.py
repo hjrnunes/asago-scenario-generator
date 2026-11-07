@@ -221,27 +221,32 @@ def test_a_reply_claims_not_called_on_its_incorrect_call_is_removed(tmp_path) ->
 
 
 def test_a_reply_claims_not_called_on_its_missing_call_is_kept(tmp_path) -> None:
-    payload = reply_only_payload(
-        {
-            # The observed order grounds the omission in its trigger, so the
-            # omission-trigger check stays silent and only the polarity rule
-            # is judged here.
-            "statement": "The refund the customer is owed is never issued for "
-            "the disputed order.",
-            "comparisons": [{"kind": "not_called", "operation": "refund_payment"}],
-            "record_selection": {
-                "status": "observed",
-                "record_path": "TARGET-STATE.orders.ORD-2",
-                "argument_values": [
-                    {
-                        "operation": "refund_payment",
-                        "argument": "order_id",
-                        "path": "TARGET-STATE.orders.ORD-2",
-                    }
-                ],
-            },
-        }
-    )
+    """A reply-level not_called on a missing call is not inverted.
+
+    The polarity rule refuses nothing here, which is what this test pins.
+    The universe offers only refund_payment, so the not_called cannot state
+    an in-conversation trigger: the reply-level condition is removed with
+    the omission-trigger code, and the failure-call route still derives the
+    bound not_called.
+    """
+
+    condition = {
+        "statement": "The refund the customer is owed is never issued for "
+        "the disputed order.",
+        "comparisons": [{"kind": "not_called", "operation": "refund_payment"}],
+        "record_selection": {
+            "status": "observed",
+            "record_path": "TARGET-STATE.orders.ORD-2",
+            "argument_values": [
+                {
+                    "operation": "refund_payment",
+                    "argument": "order_id",
+                    "path": "TARGET-STATE.orders.ORD-2",
+                }
+            ],
+        },
+    }
+    payload = reply_only_payload(condition)
     payload["unsafe_outcome"]["failure_call"] = {
         "kind": "missing_call",
         "operation_name": "refund_payment",
@@ -252,8 +257,11 @@ def test_a_reply_claims_not_called_on_its_missing_call_is_kept(tmp_path) -> None
     result, error = _generate(client, tmp_path)
 
     assert error is None
-    assert result.discriminating_condition is not None
-    assert result.condition_omitted_reason is None
+    assert client.call_count == 1
+    assert result.discriminating_condition is None
+    assert result.condition_omitted_reason == reply_only_dropped_note(
+        IssueCode.discriminating_condition_omission_trigger_missing.value
+    )
 
 
 def test_a_reply_without_the_failure_call_goes_through_the_correction(

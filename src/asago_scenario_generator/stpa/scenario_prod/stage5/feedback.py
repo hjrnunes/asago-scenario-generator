@@ -150,11 +150,13 @@ def _repair_guidance(supplied_records: str) -> dict[IssueCode, str]:
         ),
         IssueCode.discriminating_condition_omission_trigger_missing: (
             "a not_called states only that the operation is never called, so "
-            "ground the omission in its trigger: select the supplied record or "
-            "read the trigger concerns, compare a fact the trigger "
-            "establishes, or declare the scenario analytical-only when no "
-            "supplied fact or named operation states when the call is due. "
-            "Keep observation_criteria and safe_observable_outcome unchanged."
+            "ground the omission in its trigger: compare an argument of the "
+            "operation whose result makes the call due, or order that "
+            "operation after its trigger. A comparison on the omitted "
+            "operation itself needs a captured call the omission requires "
+            "absent. When no supplied operation can state the trigger, set "
+            "safe_observable_outcome.observable to false and declare the "
+            "scenario analytical-only. Keep observation_criteria unchanged."
         ),
         IssueCode.discriminating_condition_record_kind_mismatch: (
             "compare an argument only with a value of a type the input "

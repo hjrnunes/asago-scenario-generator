@@ -219,20 +219,13 @@ def test_the_normalization_record_names_what_code_added_and_coerced(
 
 def test_a_missing_call_is_observable_as_well(tmp_path) -> None:
     missing = {"kind": "missing_call", "operation_name": "refund_payment"}
+    # A single-operation universe gives the condition no other operation to
+    # name, so the not_called cannot state an in-conversation trigger; it is
+    # corrected and dropped, and the failure-call route derives the bound
+    # not_called. The scenario stays executable on that criterion.
     not_called = {
         "statement": "The refund for the eligible order is never issued.",
-        "comparisons": [
-            {
-                "kind": "value",
-                "left": {
-                    "source": "fact",
-                    "path": "TARGET-STATE.orders.ORD-1.refunded",
-                },
-                "op": "eq",
-                "right": {"source": "literal", "value": False},
-            },
-            {"kind": "not_called", "operation": "refund_payment"},
-        ],
+        "comparisons": [{"kind": "not_called", "operation": "refund_payment"}],
         "record_selection": {
             "status": "observed",
             "record_path": "TARGET-STATE.orders.ORD-1",
@@ -245,7 +238,9 @@ def test_a_missing_call_is_observable_as_well(tmp_path) -> None:
             ],
         },
     }
-    client = _client(_analytical_payload(not_called, missing))
+    client = _client(
+        *[_analytical_payload(not_called, missing) for _ in range(3)]
+    )
 
     result, error = _generate(client, tmp_path)
 
@@ -257,6 +252,8 @@ def test_a_missing_call_is_observable_as_well(tmp_path) -> None:
         "refund_payment is not called where the failure criterion states the "
         "call is required."
     )
+    assert result.discriminating_condition is None
+    assert result.tool_call_condition_status.status == "bound"
 
 
 def test_a_promoted_reply_without_a_condition_is_asked_for_one(tmp_path) -> None:
@@ -484,20 +481,27 @@ def _not_called(operation: str) -> dict:
 
 
 def _triggered_not_called(operation: str) -> dict:
-    """A not_called whose condition grounds the omission in a supplied fact."""
+    """A not_called whose bound condition states its trigger.
+
+    The value comparison names the triggering operation (search_manual), so
+    the bound condition keeps a call-level comparison on an operation
+    besides the omitted one. The record selection is on the omitted
+    operation's own argument, so it binds to a where scope, not a trigger.
+    """
 
     return {
-        "statement": f"The {operation} operation is never called for the "
-        "gadget that is due for service.",
+        "statement": f"The {operation} operation is never called after the "
+        "manual lookup for the gadget that is due for service.",
         "comparisons": [
             {
                 "kind": "value",
                 "left": {
-                    "source": "fact",
-                    "path": "TARGET-STATE.gadgets.G-1.serviceable",
+                    "source": "argument",
+                    "operation": "search_manual",
+                    "argument": "query",
                 },
                 "op": "eq",
-                "right": {"source": "literal", "value": True},
+                "right": {"source": "literal", "value": "service"},
             },
             {"kind": "not_called", "operation": operation},
         ],
@@ -1007,8 +1011,10 @@ def test_a_bare_not_called_that_survives_its_correction_is_dropped(tmp_path) -> 
     """A reply that keeps the bare form after the correction loses its condition.
 
     The scenario keeps its command-attempt claim through the failure-call
-    route, and the code-derived not_named condition still binds, so the
-    consumer's omission gate is what refuses the resulting handoff.
+    route, and the code-derived not_called condition still binds, so the
+    handoff publishes no authored condition and a bound bare not_called:
+    the consumer's omission gate reads that bound condition and refuses the
+    plan that states no trigger.
     """
 
     missing = {"kind": "missing_call", "operation_name": "open_ticket"}

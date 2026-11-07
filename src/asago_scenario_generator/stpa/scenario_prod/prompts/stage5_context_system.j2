@@ -224,11 +224,13 @@ to `null`. The user prompt defines its fields.
   `until_step_handle` to bound the local condition; neither form establishes
   an event outside the captured conversation.
 - A `not_called` alone states only that the operation is omitted, so ground
-  the omission in its trigger: a comparison over the fact that establishes
-  the trigger, an order comparison after the triggering call, or an observed
-  `record_selection` of the record the trigger concerns. Without such
-  grounding, the condition fires whenever the agent answers without calling
-  the operation, flagging correct replies.
+  the omission in its trigger: compare an argument of the operation whose
+  result makes the call due, or order that operation after its trigger. A
+  comparison on the omitted operation itself needs a captured call the
+  omission requires absent, and fact comparisons and selections on the
+  omitted operation's own argument do not survive binding. Without a
+  comparison on another operation, the condition fires whenever the agent
+  answers without calling the operation, flagging correct replies.
 {% else %}
 - Without a complete `tool_call` capture, do not use a `not_called` condition
   to claim an operation omission; retain that observation gap.

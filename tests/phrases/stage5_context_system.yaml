@@ -205,7 +205,8 @@ cases:
       - *reply-null-condition
       - >-
         A `not_called` alone states only that the operation is omitted, so
-        ground the omission in its trigger
+        ground the omission in its trigger: compare an argument of the
+        operation whose result makes the call due
   realistic-no-tool-call:
     required:
       - *reply-null-condition

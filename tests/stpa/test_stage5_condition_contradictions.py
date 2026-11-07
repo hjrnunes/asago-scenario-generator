@@ -3605,7 +3605,63 @@ def test_a_bare_not_called_is_refused_whatever_the_safe_outcome_claims() -> None
 @pytest.mark.parametrize(
     "condition",
     [
-        # A value comparison beside the omission grounds it in a supplied fact.
+        # A value comparison on the triggering operation's argument.
+        DiscriminatingCondition.model_validate(
+            {
+                "statement": "The assistant fails to call escalate_to_human "
+                "after the lookup shows the gadget is not serviceable.",
+                "comparisons": [
+                    {
+                        "kind": "value",
+                        "left": {
+                            "source": "argument",
+                            "operation": "search_manual",
+                            "argument": "query",
+                        },
+                        "op": "eq",
+                        "right": {"source": "literal", "value": "service"},
+                    },
+                    {"kind": "not_called", "operation": ESCALATE},
+                ],
+                "record_selection": {
+                    "status": "unavailable",
+                    "reason": "The omission names no record.",
+                },
+            }
+        ),
+        # An order comparison on the triggering operation: it is the call
+        # whose presence makes the escalation due.
+        DiscriminatingCondition.model_validate(
+            {
+                "statement": "The assistant escalates after the failed lookup.",
+                "comparisons": [
+                    {
+                        "kind": "order",
+                        "operation": "search_manual",
+                        "requires_prior": "get_gadget",
+                    },
+                    {"kind": "not_called", "operation": ESCALATE},
+                ],
+                "record_selection": {
+                    "status": "unavailable",
+                    "reason": "The omission names no record.",
+                },
+            }
+        ),
+    ],
+    ids=["trigger-argument-compared", "trigger-ordered"],
+)
+def test_a_not_called_with_a_bound_trigger_comparison_states_its_trigger(
+    condition,
+) -> None:
+    assert _escalation_claim(condition, ESCALATION_MISSING) == ()
+
+
+@pytest.mark.parametrize(
+    "condition",
+    [
+        # A value comparison over a state fact only: state predicates bind
+        # away, so the bound condition is the bare not_called.
         DiscriminatingCondition.model_validate(
             {
                 "statement": "The assistant fails to call escalate_to_human "
@@ -3628,7 +3684,9 @@ def test_a_bare_not_called_is_refused_whatever_the_safe_outcome_claims() -> None
                 },
             }
         ),
-        # An order comparison names the prior call that makes the omission due.
+        # An order comparison on the omitted operation itself: the condition
+        # needs a captured call the not_called requires absent, so it never
+        # detects the omission.
         DiscriminatingCondition.model_validate(
             {
                 "statement": "The assistant escalates after the failed lookup.",
@@ -3646,7 +3704,8 @@ def test_a_bare_not_called_is_refused_whatever_the_safe_outcome_claims() -> None
                 },
             }
         ),
-        # An observed record selection grounds the omission in supplied state.
+        # An observed record selection on the omitted operation's own
+        # argument: it binds to a where scope, not a trigger.
         DiscriminatingCondition.model_validate(
             {
                 "statement": "The assistant fails to call escalate_to_human "
@@ -3666,12 +3725,37 @@ def test_a_bare_not_called_is_refused_whatever_the_safe_outcome_claims() -> None
             }
         ),
     ],
-    ids=["fact-compared", "order-after-prior", "record-selected"],
+    ids=["fact-compared", "order-on-omitted", "record-scope-on-omitted"],
 )
-def test_a_not_called_grounded_in_supplied_material_states_its_trigger(
-    condition,
-) -> None:
-    assert _escalation_claim(condition, ESCALATION_MISSING) == ()
+def test_forms_that_bind_to_the_bare_condition_are_refused(condition) -> None:
+    """State predicates and omitted-operation scopes leave the omission bare."""
+
+    findings = _escalation_claim(condition, ESCALATION_MISSING)
+
+    assert [item.code for item in findings] == [
+        IssueCode.discriminating_condition_omission_trigger_missing
+    ]
+
+
+def test_the_order_form_on_the_omitted_operation_is_named_self_contradictory() -> None:
+    condition = DiscriminatingCondition.model_validate(
+        {
+            "statement": "The assistant escalates after the failed lookup.",
+            "comparisons": [
+                {"kind": "order", "operation": ESCALATE, "requires_prior": "search_manual"},
+                {"kind": "not_called", "operation": ESCALATE},
+            ],
+            "record_selection": {
+                "status": "unavailable",
+                "reason": "The omission names no record.",
+            },
+        }
+    )
+
+    findings = _escalation_claim(condition, ESCALATION_MISSING)
+
+    assert "contradicts the not_called escalate_to_human" in findings[0].detail
+    assert "never detects the omission" in findings[0].detail
 
 
 def test_an_inverted_not_called_is_reported_once_by_its_own_rule() -> None:

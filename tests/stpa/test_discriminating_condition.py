@@ -2336,17 +2336,18 @@ def _profile_not_called_payload(called: str, criterion_operation: str) -> dict:
         statement=f"The {criterion_operation} operation is refused.",
     )
     outcome["discriminating_condition"] = {
-        "statement": f"The {called} operation is never called for the "
-        "gadget that is due for service.",
+        "statement": f"The {called} operation is never called after the "
+        "manual lookup for the gadget that is due for service.",
         "comparisons": [
             {
                 "kind": "value",
                 "left": {
-                    "source": "fact",
-                    "path": "TARGET-STATE.gadgets.G-1.serviceable",
+                    "source": "argument",
+                    "operation": "search_manual",
+                    "argument": "query",
                 },
                 "op": "eq",
-                "right": {"source": "literal", "value": True},
+                "right": {"source": "literal", "value": "service"},
             },
             _not_called(called),
         ],

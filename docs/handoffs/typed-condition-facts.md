@@ -28,18 +28,22 @@ it decides:
   category, whether or not the action maps to an operation, and whatever the
   safe outcome claims (a reply-level condition so refused is removed rather
   than corrected, as every failing reply-level condition is);
-- a `not_called` whose condition states no trigger is refused
+- a `not_called` whose bound condition states no trigger is refused
   (`discriminating_condition_omission_trigger_missing`): a bare
   `not_called` covers the whole conversation, so it fires whenever the agent
   answers without calling the operation, flagging correct replies. The
-  condition states its trigger when any other comparison (a value comparison
-  over a supplied fact, or an order comparison after the triggering call) or
-  an observed `record_selection` grounds the omission in supplied material.
-  The condition language cannot scope an omission to its trigger, so a
-  scenario whose trigger no supplied fact or named operation states is
-  analytical-only. The consumer's omission gate refuses the plan that cites
-  no trigger observation; scoping an omission to a trigger needs the
-  contract change tracked as asago-7bt8.9.
+  trigger is judged on the bound condition, because that is the form the run
+  evaluates. A condition states its trigger when a bound value or order
+  comparison names an operation besides the omitted one; a comparison on
+  the omitted operation itself contradicts the omission (it needs a
+  captured call the `not_called` requires absent), and state predicates and
+  selections on the omitted operation's own arguments bind away or become a
+  `where` scope, so none of them grounds the omission. A condition the
+  corrections cannot ground is dropped; when its failure call is a
+  `missing_call` of a recorded operation the routing still derives the
+  bound `not_called`, and the consumer's omission gate judges the plan
+  against it. Scoping an omission to its trigger needs the contract change
+  tracked as asago-7bt8.9.
 
 When the observation contract captures tool calls, a Stage 5 reply must
 carry `unsafe_outcome.failure_call`: the object, or `null` when the failure
