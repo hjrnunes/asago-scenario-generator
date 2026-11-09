@@ -90,7 +90,8 @@ def _condition(*operations: str) -> dict:
         "lookup for the gadget that is due for service.",
         "comparisons": [
             {"kind": "not_called", "operation": name} for name in operations
-        ] + [
+        ]
+        + [
             {
                 "kind": "value",
                 "left": {

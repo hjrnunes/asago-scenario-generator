@@ -96,7 +96,9 @@ def condition_claim_findings(
         if isinstance(comparison, NotCalledComparison)
         and not_called_inversion(comparison.operation, claim) is not None
     }
-    untriggered = tuple(_omission_without_trigger(condition, fact_values, inverted_operations))
+    untriggered = tuple(
+        _omission_without_trigger(condition, fact_values, inverted_operations)
+    )
     if not _claims_command_attempt(safe_outcome):
         return (*inverted, *untriggered)
     return (
@@ -239,7 +241,11 @@ def _omission_without_trigger(
             continue
         outside.update(names)
     omitted = ", ".join(
-        sorted(operation for operation in not_called if operation not in inverted_operations)
+        sorted(
+            operation
+            for operation in not_called
+            if operation not in inverted_operations
+        )
     )
     for description in self_contradictions:
         yield ConditionFinding(

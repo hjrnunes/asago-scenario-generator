@@ -238,9 +238,7 @@ def test_a_missing_call_is_observable_as_well(tmp_path) -> None:
             ],
         },
     }
-    client = _client(
-        *[_analytical_payload(not_called, missing) for _ in range(3)]
-    )
+    client = _client(*[_analytical_payload(not_called, missing) for _ in range(3)])
 
     result, error = _generate(client, tmp_path)
 

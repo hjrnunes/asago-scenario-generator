@@ -226,11 +226,8 @@ def _inverted_payload() -> dict:
 
     return _payload_with(
         {
-            "statement": "The refund is issued for an order the customer "
-            "does not own.",
-            "comparisons": [
-                {"kind": "not_called", "operation": "refund_payment"}
-            ],
+            "statement": "The refund is issued for an order the customer does not own.",
+            "comparisons": [{"kind": "not_called", "operation": "refund_payment"}],
             "record_selection": {
                 "status": "observed",
                 "record_path": "TARGET-STATE.orders.ORD-2",

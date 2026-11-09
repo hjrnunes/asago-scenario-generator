@@ -73,9 +73,10 @@ def _sync_tree(source: Path, target: Path) -> None:
     source_files = _files(source)
     for relative in sorted(source_files):
         destination = target / relative
-        if destination.is_file() and destination.read_bytes() == (
-            source / relative
-        ).read_bytes():
+        if (
+            destination.is_file()
+            and destination.read_bytes() == (source / relative).read_bytes()
+        ):
             continue
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source / relative, destination)
@@ -94,7 +95,9 @@ def _sync_tree(source: Path, target: Path) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--check", action="store_true", help="report drift, write nothing")
+    parser.add_argument(
+        "--check", action="store_true", help="report drift, write nothing"
+    )
     args = parser.parse_args(argv)
 
     drifted: list[Path] = []

@@ -3742,7 +3742,11 @@ def test_the_order_form_on_the_omitted_operation_is_named_self_contradictory() -
         {
             "statement": "The assistant escalates after the failed lookup.",
             "comparisons": [
-                {"kind": "order", "operation": ESCALATE, "requires_prior": "search_manual"},
+                {
+                    "kind": "order",
+                    "operation": ESCALATE,
+                    "requires_prior": "search_manual",
+                },
                 {"kind": "not_called", "operation": ESCALATE},
             ],
             "record_selection": {
