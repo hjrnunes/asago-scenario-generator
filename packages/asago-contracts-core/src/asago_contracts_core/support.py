@@ -2,9 +2,8 @@
 
 A published version is immortal: saved artifacts still name it, so a reader must
 keep reading it. Support therefore follows actual readers and saved artifacts,
-not a calendar. The dcpl.2 retirement is the precedent: the owner retired
-``artifact-package-v4`` reading and ``tool-call-condition-v1`` because nothing
-that must still load used them, and re-locked every copy.
+not a calendar. ``SUPPORT_POLICY`` records the rule and the dcpl.2 retirement
+precedent that set it.
 
 The rules make that decision reviewable:
 
@@ -14,7 +13,7 @@ The rules make that decision reviewable:
 * Every other installed version is retired.
 
 ``check_support_window`` fails when the set contains a retired version. Retire a
-version by naming it in the change that removes it, as dcpl.2 did, and by
+version by naming it in the change that removes it, and by
 dropping its reader; do not let it linger unreadable.
 """
 

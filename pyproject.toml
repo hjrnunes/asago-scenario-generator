@@ -79,6 +79,16 @@ exclude = [
     "ai",
 ]
 
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+
+[tool.ruff.lint]
+# Cleanup C2 turns on exactly these two rules: unused imports (F401) and
+# unused local variables (F841). The narrow select keeps the check an
+# advisory sweep for dead code, not a style pass; widen it deliberately.
+select = ["F401", "F841"]
+
 [tool.hatch.build.targets.wheel.force-include]
 "data" = "asago_scenario_generator/data/bundled"
 
