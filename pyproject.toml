@@ -84,10 +84,12 @@ line-length = 88
 target-version = "py312"
 
 [tool.ruff.lint]
-# Cleanup C2 turns on exactly these two rules: unused imports (F401) and
-# unused local variables (F841). The narrow select keeps the check an
-# advisory sweep for dead code, not a style pass; widen it deliberately.
-select = ["F401", "F841"]
+# Cleanup C2 (asago-5h8j.3.2) names F401 (unused import) and F841 (unused
+# local) explicitly, so the requirement lives in config instead of in ruff's
+# defaults. extend-select keeps every default rule (E4, E7, E9, F) in the
+# blocking scripts/quality.sh gate; a plain `select` would replace the
+# defaults and narrow the gate, so do not use one here.
+extend-select = ["F401", "F841"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "data" = "asago_scenario_generator/data/bundled"

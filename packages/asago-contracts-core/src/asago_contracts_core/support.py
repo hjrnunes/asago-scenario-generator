@@ -13,8 +13,8 @@ The rules make that decision reviewable:
 * Every other installed version is retired.
 
 ``check_support_window`` fails when the set contains a retired version. Retire a
-version by naming it in the change that removes it, and by
-dropping its reader; do not let it linger unreadable.
+version by naming it in the change that removes it and by dropping its reader;
+do not let it linger unreadable.
 """
 
 from __future__ import annotations
