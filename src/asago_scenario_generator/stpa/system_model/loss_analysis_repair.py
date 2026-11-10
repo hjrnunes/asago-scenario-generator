@@ -3483,7 +3483,7 @@ def _record_dropped_references(
             if item.kept
             else f"; {item.owner_id} had no other valid ID and was dropped"
         )
-        _record_warnings(
+        record_warnings(
             (
                 f"{step} reference {item.identity} dropped "
                 + ", ".join(item.dropped_entries)
@@ -3559,13 +3559,6 @@ class _RepairValidation:
     authoritative_merge: Callable[[LossAnalysisDraft], LossAnalysisDraft] | None
     normalization_warnings: list[str] | None
     provider_draft_model: type[BaseModel]
-
-
-def _record_warnings(
-    warnings: Iterable[str],
-    normalization_warnings: list[str] | None,
-) -> None:
-    record_warnings(warnings, normalization_warnings)
 
 
 def _finish_merged_draft(
@@ -3662,7 +3655,7 @@ def _record_corrected_span_repairs(
     normalization_warnings: list[str] | None,
 ) -> None:
     """Record each corrected span the merge mapped onto its rule."""
-    _record_warnings(
+    record_warnings(
         rule_span_repair_warnings(step, span_repairs), normalization_warnings
     )
     record_rule_span_repairs(
@@ -3684,7 +3677,7 @@ def _record_dropped_obligations(
 ) -> None:
     """Record each obligation dropped for a span outside its rule."""
     for item in dropped:
-        _record_warnings(
+        record_warnings(
             (
                 f"{step} rule_span {item.identity} dropped: "
                 f"{item.rule_span!r} does not occur in the rule",
@@ -3957,7 +3950,7 @@ def _disposition_cleanup_recorder(
     def record() -> None:
         if not plan.removed_unknown:
             return
-        _record_warnings(
+        record_warnings(
             (
                 "removed risk_dispositions rows for unsupplied risk references: "
                 + ", ".join(reference for reference, _ in plan.removed_unknown),
@@ -4010,7 +4003,7 @@ def run_targeted_repair(
     verdicts: list[_RepairVerdict] = []
     # The deterministic salvage that produced this plan is recorded evidence:
     # it names exactly which rows or entries were dropped before the repair.
-    _record_warnings(plan.salvage_warnings, normalization_warnings)
+    record_warnings(plan.salvage_warnings, normalization_warnings)
     if isinstance(plan, DispositionRepairPlan):
         request = _disposition_request(
             plan,
