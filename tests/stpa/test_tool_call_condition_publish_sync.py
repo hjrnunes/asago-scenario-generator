@@ -23,7 +23,7 @@ SYNC_PATH = Path(__file__).resolve().parents[2] / (
     "scripts/sync_tool_call_condition.py"
 )
 PRODUCER = Path(__file__).resolve().parents[2] / "data/contracts/tool-call-condition"
-V2 = "tool-call-condition-v2"
+VERSION = "tool-call-condition-v2"
 
 
 def _load_sync() -> Any:
@@ -66,7 +66,7 @@ def test_the_committed_producer_tree_matches_its_lock() -> None:
 def test_the_lock_names_the_contract_and_its_version() -> None:
     lock = json.loads((PRODUCER / "CONTRACT.lock").read_text(encoding="utf-8"))
 
-    assert (lock["contract"], lock["version"]) == ("tool-call-condition", V2)
+    assert (lock["contract"], lock["version"]) == ("tool-call-condition", VERSION)
 
 
 def test_check_passes_without_checkouts_and_reads_only_the_producer(
@@ -75,7 +75,7 @@ def test_check_passes_without_checkouts_and_reads_only_the_producer(
     assert _main("--check") == 0
 
     out = capsys.readouterr().out
-    assert f"producer {PRODUCER}: verified ({V2}" in out
+    assert f"producer {PRODUCER}: verified ({VERSION}" in out
     assert "no copies checked" in out
     assert "copy" not in out.replace("no copies checked", "")
 
@@ -104,14 +104,14 @@ def test_check_verifies_every_copy_it_is_given(
         ("midojo", midojo),
         ("garak", garak),
     ):
-        assert f"{name} copy {checkout / SYNC.COPIES[name]}: verified ({V2}" in out
+        assert f"{name} copy {checkout / SYNC.COPIES[name]}: verified ({VERSION}" in out
 
 
 def test_check_fails_on_a_changed_vector_byte(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     garak = _checkout(tmp_path, "garak")
-    vector = garak / SYNC.COPIES["garak"] / V2 / "vectors/evaluate.json"
+    vector = garak / SYNC.COPIES["garak"] / VERSION / "vectors/evaluate.json"
     vector.write_bytes(
         vector.read_bytes().replace(b'"outcome": "detected"', b'"outcome": "x"', 1)
     )
@@ -121,7 +121,7 @@ def test_check_fails_on_a_changed_vector_byte(
     out = capsys.readouterr().out
     assert "garak copy" in out
     assert "differs from the producer's file" in out
-    assert f"{V2}/vectors/evaluate.json" in out
+    assert f"{VERSION}/vectors/evaluate.json" in out
 
 
 def test_check_fails_when_a_copy_has_no_reference(
@@ -152,25 +152,25 @@ def test_check_fails_when_the_reference_names_another_version(
     out = capsys.readouterr().out
     assert "midojo copy" in out
     assert "reference names tool-call-condition-v9" in out
-    assert V2 in out
+    assert VERSION in out
 
 
 def test_check_fails_on_a_missing_file(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     garak = _checkout(tmp_path, "garak")
-    (garak / SYNC.COPIES["garak"] / V2 / "schema.json").unlink()
+    (garak / SYNC.COPIES["garak"] / VERSION / "schema.json").unlink()
 
     assert _main("--check", "--garak", str(garak)) == 1
 
     out = capsys.readouterr().out
     assert "garak copy" in out
-    assert f"{V2}/schema.json is missing" in out
+    assert f"{VERSION}/schema.json is missing" in out
 
 
 def test_check_modifies_no_file(tmp_path: Path) -> None:
     consumer = _checkout(tmp_path, "consumer")
-    vector = consumer / SYNC.COPIES["consumer"] / V2 / "vectors/validate.json"
+    vector = consumer / SYNC.COPIES["consumer"] / VERSION / "vectors/validate.json"
     vector.write_bytes(vector.read_bytes() + b"\n")
     before = (_tree_digest(PRODUCER), _tree_digest(consumer))
 
@@ -182,7 +182,7 @@ def test_check_modifies_no_file(tmp_path: Path) -> None:
 def test_write_refreshes_a_drifted_copy(tmp_path: Path) -> None:
     midojo = _checkout(tmp_path, "midojo")
     copy = midojo / SYNC.COPIES["midojo"]
-    (copy / V2 / "vectors/validate.json").write_bytes(b"{}\n")
+    (copy / VERSION / "vectors/validate.json").write_bytes(b"{}\n")
     (copy / "CONTRACT.lock").unlink()
 
     assert _main("--write", "--midojo", str(midojo)) == 0
@@ -211,14 +211,14 @@ def test_producer_drift_fails_the_check(
     root = tmp_path / "tool-call-condition"
     shutil.copytree(PRODUCER, root)
     monkeypatch.setattr(SYNC, "ROOT", root)
-    readme = root / V2 / "README.md"
+    readme = root / VERSION / "README.md"
     readme.write_bytes(readme.read_bytes() + b"\n")
 
     assert _main("--check") == 1
 
     out = capsys.readouterr().out
     assert f"producer {root}" in out
-    assert f"{V2}/README.md differs from CONTRACT.lock" in out
+    assert f"{VERSION}/README.md differs from CONTRACT.lock" in out
 
 
 def test_write_without_checkouts_writes_nothing(
@@ -241,7 +241,7 @@ def test_write_never_edits_the_producer(
     root = tmp_path / "tool-call-condition"
     shutil.copytree(PRODUCER, root)
     monkeypatch.setattr(SYNC, "ROOT", root)
-    readme = root / V2 / "README.md"
+    readme = root / VERSION / "README.md"
     readme.write_bytes(readme.read_bytes() + b"\n")
 
     assert _main("--write") == 1

@@ -27,13 +27,11 @@ from asago_scenario_generator.stpa.scenario_prod.and_or_tree import (
 )
 from asago_scenario_generator.stpa.scenario_prod.handoff import (
     ScenarioHandoffV6,
+    build_scenario_handoff_v6,
     handoff_ownership_violations,
     verify_handoff_digest,
 )
 from asago_scenario_generator.stpa.scenario_prod.handoff_schema import handoff_schema
-from asago_scenario_generator.stpa.scenario_prod.handoff_v5 import (
-    build_scenario_handoff_v6,
-)
 from asago_scenario_generator.stpa.scenario_prod.assembly import assemble_envelope
 from asago_scenario_generator.stpa.scenario_prod.narration import (
     ATLAS_DIRECT_INJECTION,

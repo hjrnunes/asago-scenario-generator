@@ -2899,7 +2899,7 @@
       }
     }
   ],
-  "description": "Scenario-handoff-v6: the same document with one field renamed on the wire.\n\nA v6 document writes ``attack_shape.indirect.party_relation.controlling_party``\nwhere v5 writes ``controller``. The model keeps ``controller`` as its\nattribute, and the serializer renames only the document, so every prompt and\nevery structured-output schema stays byte-identical to v5. v6 documents\ncarry the contract envelope that ``scenario-handoff-v6/spec.json`` requires.",
+  "description": "The versioned scenario handoff.\n\nThe handoff carries the scenario's ``attack_path`` and its ``uca``,\n``actor``, ``causal_factors``, ``preconditions``, ``procedure`` and\n``worst_case_threat``. ``actor`` is an object for ``kind: adversarial`` and\n``null`` for ``kind: functional``; a functional scenario has no\npreconditions and no procedure.\n\nThe document writes ``attack_shape.indirect.party_relation.controlling_party``.\nThe model keeps ``controller`` as its attribute, and the serializer renames\nonly the document, so every prompt and every structured-output schema keeps\nthe attribute name. Documents carry the contract envelope that\n``scenario-handoff-v6/spec.json`` requires.",
   "properties": {
     "schema_version": {
       "const": "scenario-handoff-v6",

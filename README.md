@@ -129,8 +129,8 @@ messages, setup instructions, detector expressions, or harness bindings.
 
 The producer also publishes the `tool-call-condition` contract.
 [`data/contracts/tool-call-condition/`](data/contracts/tool-call-condition/)
-holds version 2's schema, its validate and evaluate vectors, the versioning
-rules and a `CONTRACT.lock` of every digest. Every implementation must agree
+holds `tool-call-condition-v2`'s schema, its validate and evaluate vectors and a
+`CONTRACT.lock` of every digest. Every implementation must agree
 on every vector, and the consumer, MiDojo and the Garak fork each keep a byte
 copy. `scripts/sync_tool_call_condition.py --check` compares a copy with this
 directory, and `--write` refreshes it.
@@ -909,18 +909,14 @@ code-rendered Gherkin when the reply fails, errors, or is refused. The
 `gherkins.json` records each scenario's source, request count, rejections,
 reason, and reply. The handoff signs its digest under the `scenario-handoff-v6`
 domain, and generation fails when a source the six fields need is missing.
-`CONTRACT.lock` pins v6.
+`CONTRACT.lock` pins `scenario-handoff-v6`.
 
-`generate` writes only v6 (`ScenarioHandoffV6` in
-`stpa/scenario_prod/handoff.py`, built by `build_scenario_handoff_v6` in
-`handoff_v5.py`). Each handoff file carries the `contract` envelope its spec
-requires, and the party field of an indirect attack shape is
-`attack_shape.indirect.party_relation.controlling_party` on the wire, though
-the model and every prompt keep the attribute name `controller`. The retired
-`scenario-handoff-v5` stays published only so a reader can still validate a
-saved v5 document, and no `generate` path writes it. You upgrade a saved v5
-handoff with `asago_handoff.HANDOFF_UPGRADE`, which renames the field and
-recomputes `content_digest`. The handoff retains the semantic failure criterion, the
+`generate` writes `ScenarioHandoffV6` (`stpa/scenario_prod/handoff.py`, built by
+`build_scenario_handoff_v6` in the same module). Each handoff file carries the
+`contract` envelope its spec requires, and the party field of an indirect attack
+shape is `attack_shape.indirect.party_relation.controlling_party` on the wire,
+though the model and every prompt keep the attribute name `controller`. The
+handoff retains the semantic failure criterion, the
 safe alternative, lineage, identity, and hypothesis framing, and publishes no
 prepared message, prepared history, delivery route, oracle selection, detector
 expression, judge prompt, or executable setup. The artifact generator reads

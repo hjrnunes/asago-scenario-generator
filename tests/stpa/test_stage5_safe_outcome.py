@@ -17,13 +17,11 @@ from asago_scenario_generator.stpa.scenario_prod.stage5.generate import (
 from asago_scenario_generator.stpa.scenario_prod.assembly import assemble_envelope
 from asago_scenario_generator.stpa.scenario_prod.handoff import (
     OPERATION_AUTHORITY_SAFE_OUTCOME,
+    build_scenario_handoff_v6,
 )
 from asago_scenario_generator.stpa.scenario_prod.and_or_tree import (
     build_sibling_index,
     render_and_or_tree,
-)
-from asago_scenario_generator.stpa.scenario_prod.handoff_v5 import (
-    build_scenario_handoff_v6,
 )
 from asago_scenario_generator.stpa.scenario_prod.presentation import (
     render_scenario_summary,

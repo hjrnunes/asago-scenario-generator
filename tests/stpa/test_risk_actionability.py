@@ -353,16 +353,13 @@ def _entry(**fields: object) -> dict[str, object]:
     return {"risk_id": "r-1", "reason": "Stated reason.", **fields}
 
 
-def _persisted(*entries: dict[str, object], version: str | None = None) -> dict:
-    record: dict[str, object] = {
+def _persisted(*entries: dict[str, object]) -> dict:
+    return {
         "status": "completed",
         "call_count": 1,
         "counts": {},
         "entries": list(entries),
     }
-    if version is not None:
-        record["schema_version"] = version
-    return record
 
 
 @pytest.mark.parametrize(
@@ -418,21 +415,15 @@ def test_a_current_record_accepts_model_and_fallback_entries() -> None:
     assert record.schema_version == "risk-actionability-v2"
 
 
-def test_a_v1_record_without_action_fields_still_loads() -> None:
-    record = RiskActionabilityRecord.model_validate(
-        _persisted(
-            _entry(decision="actionable", source="model"),
-            version="risk-actionability-v1",
-        )
-    )
-
-    assert record.entries[0].system_action is None
+def test_the_recorded_run_fixture_loads_as_a_current_record() -> None:
     fixture = (
         Path(__file__).parents[1]
         / "fixtures/generate_report/miniklarna-1/risk-actionability.yaml"
     )
+
     loaded = RiskActionabilityRecord.model_validate(yaml.safe_load(fixture.read_text()))
-    assert loaded.schema_version == "risk-actionability-v1"
+
+    assert loaded.schema_version == "risk-actionability-v2"
 
 
 def test_no_cards_makes_no_call(tmp_path: Path) -> None:

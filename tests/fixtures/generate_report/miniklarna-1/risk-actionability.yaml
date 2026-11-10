@@ -1,4 +1,4 @@
-schema_version: risk-actionability-v1
+schema_version: risk-actionability-v2
 status: completed
 call_count: 2
 counts:
@@ -17,11 +17,15 @@ entries:
   reason: The AI assistant can be used to facilitate fraudulent activities through
     its conversational interface and tool calls.
   source: model
+  system_action: The assistant replies to the customer or calls a tool for them.
+  affected_stakeholder: The customer.
 - risk_id: atlas-hallucination
   decision: actionable
   reason: The controller (AI assistant) can produce the harm by generating factually
     inaccurate content via its natural language generation.
   source: model
+  system_action: The assistant replies to the customer or calls a tool for them.
+  affected_stakeholder: The customer.
 - risk_id: credo-risk-036
   decision: outside_boundary
   reason: The threat describes employees inputting PII into external systems, which
@@ -37,6 +41,8 @@ entries:
   reason: The AI assistant can produce biased or unethical outputs through its generated
     responses.
   source: model
+  system_action: The assistant replies to the customer or calls a tool for them.
+  affected_stakeholder: The customer.
 - risk_id: ai-risk-taxonomy-unauthorized-disclosure---pii-(personal-identifiable-information)
   decision: outside_boundary
   reason: The threat involves employees inputting PII into external services, which
@@ -57,11 +63,15 @@ entries:
   reason: The AI assistant can produce false or misleading information through its
     control action of generating replies.
   source: model
+  system_action: The assistant replies to the customer or calls a tool for them.
+  affected_stakeholder: The customer.
 - risk_id: credo-risk-016
   decision: actionable
   reason: The AI assistant can cause harm if users inappropriately rely on its outputs
     for critical financial decisions.
   source: model
+  system_action: The assistant replies to the customer or calls a tool for them.
+  affected_stakeholder: The customer.
 - risk_id: atlas-exposing-personal-information
   decision: outside_boundary
   reason: The threat describes employees including PII in queries sent to external
@@ -92,21 +102,29 @@ entries:
   reason: The AI assistant can process or expose PII through its automated handling
     of customer account data and responses.
   source: model
+  system_action: The assistant replies to the customer or calls a tool for them.
+  affected_stakeholder: The customer.
 - risk_id: ai-risk-taxonomy-unauthorized-processing---financial-records
   decision: actionable
   reason: The AI assistant can process sensitive financial records through its direct
     API integrations with backend systems.
   source: model
+  system_action: The assistant replies to the customer or calls a tool for them.
+  affected_stakeholder: The customer.
 - risk_id: ai-risk-taxonomy-unauthorized-distribution---pii-(personal-identifiable-information)
   decision: actionable
   reason: The AI assistant can facilitate the unauthorized distribution of PII through
     its generated responses.
   source: model
+  system_action: The assistant replies to the customer or calls a tool for them.
+  affected_stakeholder: The customer.
 - risk_id: mit-ai-risk-subdomain-5.1
   decision: actionable
   reason: The AI assistant can cause harm if users develop an inappropriate level
     of trust and rely on its outputs for critical tasks.
   source: model
+  system_action: The assistant replies to the customer or calls a tool for them.
+  affected_stakeholder: The customer.
 - risk_id: atlas-personal-information-in-prompt
   decision: outside_boundary
   reason: The threat describes employees including sensitive information in queries
@@ -117,16 +135,22 @@ entries:
   reason: The AI assistant can produce the harm by generating text outputs that are
     substantially similar to copyrighted works.
   source: model
+  system_action: The assistant replies to the customer or calls a tool for them.
+  affected_stakeholder: The customer.
 - risk_id: atlas-revealing-confidential-information
   decision: actionable
   reason: The AI assistant can leak confidential information through its generated
     responses if such information is in its context or training.
   source: model
+  system_action: The assistant replies to the customer or calls a tool for them.
+  affected_stakeholder: The customer.
 - risk_id: credo-risk-024
   decision: actionable
   reason: The AI assistant can cause harm by producing outputs that lead to negligence
     or privacy violation claims.
   source: model
+  system_action: The assistant replies to the customer or calls a tool for them.
+  affected_stakeholder: The customer.
 - risk_id: atlas-ip-information-in-prompt
   decision: outside_boundary
   reason: The threat describes employees including proprietary information in queries
@@ -137,21 +161,29 @@ entries:
   reason: The AI assistant can produce the harm by generating inaccurate or deceptive
     information in its replies.
   source: model
+  system_action: The assistant replies to the customer or calls a tool for them.
+  affected_stakeholder: The customer.
 - risk_id: mit-ai-risk-subdomain-4.3
   decision: actionable
   reason: The AI assistant can be used to facilitate fraudulent or deceptive behavior
     through its conversational capabilities.
   source: model
+  system_action: The assistant replies to the customer or calls a tool for them.
+  affected_stakeholder: The customer.
 - risk_id: credo-risk-023
   decision: actionable
   reason: The AI assistant can cause regulatory non-compliance through its incorrect
     handling of financial queries or policies.
   source: model
+  system_action: The assistant replies to the customer or calls a tool for them.
+  affected_stakeholder: The customer.
 - risk_id: atlas-non-disclosure
   decision: actionable
   reason: The AI assistant can fail to disclose its AI nature in its communicative
     control actions.
   source: model
+  system_action: The assistant replies to the customer or calls a tool for them.
+  affected_stakeholder: The customer.
 - risk_id: mit-ai-risk-subdomain-2.2
   decision: outside_boundary
   reason: The threat describes hackers breaching external generative AI services,
@@ -162,6 +194,8 @@ entries:
   reason: The AI assistant can be used to manipulate financial transactions through
     its execution of backend API calls.
   source: model
+  system_action: The assistant replies to the customer or calls a tool for them.
+  affected_stakeholder: The customer.
 - risk_id: atlas-data-usage
   decision: not_applicable
   reason: The risk concerns the training/fine-tuning of models, which is a process
@@ -182,11 +216,15 @@ entries:
   reason: The AI assistant can produce biased outputs through its natural language
     generation control action.
   source: model
+  system_action: The assistant replies to the customer or calls a tool for them.
+  affected_stakeholder: The customer.
 - risk_id: mit-ai-risk-subdomain-1.1
   decision: actionable
   reason: The AI assistant can produce biased or unethical business decisions through
     its generated responses.
   source: model
+  system_action: The assistant replies to the customer or calls a tool for them.
+  affected_stakeholder: The customer.
 - risk_id: credo-risk-034
   decision: not_applicable
   reason: The risk concerns the difficulty of overseeing the model's development and
@@ -197,6 +235,8 @@ entries:
   reason: The AI assistant can produce the harm by generating incorrect financial
     insights or inaccurate policy answers.
   source: model
+  system_action: The assistant replies to the customer or calls a tool for them.
+  affected_stakeholder: The customer.
 - risk_id: atlas-model-usage-rights
   decision: outside_boundary
   reason: The risk involves violating terms of service or licenses of the model provider,
@@ -240,6 +280,8 @@ entries:
   reason: A controller inside the boundary (the AI assistant) can produce incorrect
     financial or policy information which employees or customers may then rely upon.
   source: model
+  system_action: The assistant replies to the customer or calls a tool for them.
+  affected_stakeholder: The customer.
 - risk_id: credo-risk-017
   decision: outside_boundary
   reason: The threat describes employees using external generative AI services, which
@@ -250,6 +292,8 @@ entries:
   reason: The controller (the assistant) can be used by users to input PII or NPI
     into the prompt, which is then sent to the model provider.
   source: model
+  system_action: The assistant replies to the customer or calls a tool for them.
+  affected_stakeholder: The customer.
 - risk_id: atlas-data-usage-rights
   decision: outside_boundary
   reason: The threat involves employees using outputs for external communications

@@ -9,18 +9,14 @@ carries the whole contract directory as byte-identical package data.
 
 `scenario-handoff-v6` states one failure: the unsafe outcome, the procedure chain that leads
 to it, the taxonomy references, the preconditions, the discriminating condition and the tool
-call the failure needs. It is v5's document with one field renamed on the wire:
-
-| v5 path | v6 path |
-| --- | --- |
-| `attack_shape.indirect.party_relation.controller` | `attack_shape.indirect.party_relation.controlling_party` |
-
-The producer's model keeps `controller` as its attribute, and every prompt and
-structured-output schema it sends the model keeps the old name, so the rename reaches
-documents only. `schema.json` is the runtime schema, `cases/` holds the valid and invalid
-documents with `expected-violations.json`, the conformance manifest and the feature
-companions, and `spec.json` names them. The case files are bare payloads: a v6 document
-requires the envelope, so a test wraps each case with `write_envelope` before it reads it.
+call the failure needs. A document names the party that controls a planted item as
+`attack_shape.indirect.party_relation.controlling_party`. The producer's model keeps
+`controller` as its attribute, and every prompt and structured-output schema it sends the
+model keeps that name, so the wire name reaches documents only. `schema.json` is the runtime
+schema, `cases/` holds the valid and invalid documents with `expected-violations.json`, the
+conformance manifest and the feature companions, and `spec.json` names them. The case files
+are bare payloads: a document requires the envelope, so a test wraps each case with
+`write_envelope` before it reads it.
 
 ## The reader rules
 
@@ -57,15 +53,13 @@ A document written from the self-identifying envelope carries one `contract` blo
 }
 ```
 
-`scenario-handoff-v6` is published with `"envelope": "required"`, so a v6 document names its
-version before a reader validates it. `scenario-handoff-v5` stays published with
-`"envelope": "optional"`, so a reader still validates a v5 document, and the producer's
-`generate` writes v6. A reader selects one of its installed specs by the
+`scenario-handoff-v6` is published with `"envelope": "required"`, so a document names its
+version before a reader validates it. A reader selects one of its installed specs by the
 document's contract id and version, and rejects:
 
-- a v6 document without the envelope, with `MissingEnvelopeError`;
+- a document without the envelope, with `MissingEnvelopeError`;
 - an unsupported version, with the error listing the supported versions;
-- a `requires` entry the selected spec does not support (v6 supports none);
+- a `requires` entry the selected spec does not support (the spec supports none);
 - a top-level field outside the schema and the spec's declared extensions;
 - a `spec_digest` that is not exactly the installed spec's, for a draft as for a published
   version.
@@ -77,6 +71,6 @@ installed spec before the hand-written rules, so the producer's Stage 6 check an
 consumer's input adapter keep their existing error wording.
 
 The orchestrator keeps no copy of this contract and validates no handoff against it. Its
-handoff reader reads only `schema_version`: `HANDOFF_SCHEMA_VERSIONS` pins
-`scenario-handoff-v6`, and a saved generate output whose handoff names any other version is
-refused rather than reused, with a message naming the version authoring reads.
+handoff reader reads only `schema_version`: the orchestrator's `HANDOFF_SCHEMA_VERSIONS`
+pins `scenario-handoff-v6`, and a saved generate output whose handoff names any other
+version is refused rather than reused, with a message naming the version authoring reads.

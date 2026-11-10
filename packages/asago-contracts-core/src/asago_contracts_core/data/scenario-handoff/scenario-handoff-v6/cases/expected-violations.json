@@ -1,4 +1,94 @@
 {
+  "invalid/actor-blank-goal.json": [
+    "schema_violation:actor"
+  ],
+  "invalid/actor-missing.json": [
+    "schema_violation:actor"
+  ],
+  "invalid/actor-null-on-adversarial.json": [
+    "schema_violation:<root>"
+  ],
+  "invalid/actor-on-functional.json": [
+    "schema_violation:<root>"
+  ],
+  "invalid/attack-path-attacker-plan-not-list.json": [
+    "schema_violation:attack_path"
+  ],
+  "invalid/attack-path-category-not-enumerated.json": [
+    "schema_violation:attack_path"
+  ],
+  "invalid/attack-path-condition-source-id-not-list.json": [
+    "schema_violation:attack_path"
+  ],
+  "invalid/attack-path-condition-unknown-field.json": [
+    "schema_violation:attack_path"
+  ],
+  "invalid/attack-path-conditions-not-list.json": [
+    "schema_violation:attack_path"
+  ],
+  "invalid/attack-path-evidence-status-not-enumerated.json": [
+    "schema_violation:attack_path"
+  ],
+  "invalid/attack-path-failure-not-object.json": [
+    "schema_violation:attack_path"
+  ],
+  "invalid/attack-path-format-not-v1.json": [
+    "schema_violation:attack_path"
+  ],
+  "invalid/attack-path-hazard-id-wrong.json": [
+    "schema_violation:attack_path"
+  ],
+  "invalid/attack-path-hazard-loss-missing-label.json": [
+    "schema_violation:attack_path"
+  ],
+  "invalid/attack-path-missing.json": [
+    "schema_violation:attack_path"
+  ],
+  "invalid/attack-path-node-id-not-ap.json": [
+    "schema_violation:attack_path"
+  ],
+  "invalid/attack-path-step-blank-label.json": [
+    "schema_violation:attack_path"
+  ],
+  "invalid/attack-path-step-id-not-step.json": [
+    "schema_violation:attack_path"
+  ],
+  "invalid/attack-path-unknown-key.json": [
+    "schema_violation:attack_path"
+  ],
+  "invalid/attack-path-unsafe-action-id-wrong.json": [
+    "schema_violation:attack_path"
+  ],
+  "invalid/attack-path-unsafe-action-violates-missing.json": [
+    "schema_violation:attack_path"
+  ],
+  "invalid/attack-tree-present.json": [
+    "schema_violation:attack_tree"
+  ],
+  "invalid/causal-factor-belief-missing.json": [
+    "schema_violation:causal_factors"
+  ],
+  "invalid/causal-factor-blank-flaw.json": [
+    "schema_violation:causal_factors"
+  ],
+  "invalid/causal-factor-variable-blank-description.json": [
+    "schema_violation:causal_factors"
+  ],
+  "invalid/causal-factor-variable-id-missing.json": [
+    "schema_violation:causal_factors"
+  ],
+  "invalid/causal-factor-variable-id-not-pm.json": [
+    "schema_violation:causal_factors"
+  ],
+  "invalid/causal-factor-variable-not-object.json": [
+    "schema_violation:causal_factors"
+  ],
+  "invalid/causal-factor-variable-unknown-field.json": [
+    "schema_violation:causal_factors"
+  ],
+  "invalid/causal-factors-empty.json": [
+    "schema_violation:causal_factors"
+  ],
   "invalid/failure-call-blank-operation.json": [
     "schema_violation:semantic_failure_call"
   ],
@@ -40,8 +130,38 @@
   "invalid/ownership-system-prompt-is.json": [
     "prose_hiding:ready_to_send_instruction"
   ],
+  "invalid/preconditions-not-text.json": [
+    "schema_violation:preconditions"
+  ],
+  "invalid/preconditions-on-functional.json": [
+    "schema_violation:<root>"
+  ],
   "invalid/prepared-message-field.json": [
     "prose_hiding:prepared_message_field"
+  ],
+  "invalid/procedure-channel-not-enumerated.json": [
+    "schema_violation:procedure"
+  ],
+  "invalid/procedure-empty-on-adversarial.json": [
+    "schema_violation:<root>"
+  ],
+  "invalid/procedure-leads-to-wrong.json": [
+    "schema_violation:<root>"
+  ],
+  "invalid/procedure-on-functional.json": [
+    "schema_violation:<root>"
+  ],
+  "invalid/procedure-step-id-out-of-order.json": [
+    "schema_violation:<root>"
+  ],
+  "invalid/procedure-step-missing-tactic-key.json": [
+    "schema_violation:procedure"
+  ],
+  "invalid/procedure-technique-id-free-text.json": [
+    "schema_violation:procedure"
+  ],
+  "invalid/procedure-technique-without-tactic.json": [
+    "schema_violation:<root>"
   ],
   "invalid/role-turn-array.json": [
     "prose_hiding:role_serialization"
@@ -335,148 +455,28 @@
   "invalid/taxonomy-unsorted-references.json": [
     "schema_violation:taxonomy"
   ],
-  "invalid/v5-actor-blank-goal.json": [
-    "schema_violation:actor"
-  ],
-  "invalid/v5-actor-missing.json": [
-    "schema_violation:actor"
-  ],
-  "invalid/v5-actor-null-on-adversarial.json": [
-    "schema_violation:<root>"
-  ],
-  "invalid/v5-actor-on-functional.json": [
-    "schema_violation:<root>"
-  ],
-  "invalid/v5-attack-path-attacker-plan-not-list.json": [
-    "schema_violation:attack_path"
-  ],
-  "invalid/v5-attack-path-category-not-enumerated.json": [
-    "schema_violation:attack_path"
-  ],
-  "invalid/v5-attack-path-condition-source-id-not-list.json": [
-    "schema_violation:attack_path"
-  ],
-  "invalid/v5-attack-path-condition-unknown-field.json": [
-    "schema_violation:attack_path"
-  ],
-  "invalid/v5-attack-path-conditions-not-list.json": [
-    "schema_violation:attack_path"
-  ],
-  "invalid/v5-attack-path-evidence-status-not-enumerated.json": [
-    "schema_violation:attack_path"
-  ],
-  "invalid/v5-attack-path-failure-not-object.json": [
-    "schema_violation:attack_path"
-  ],
-  "invalid/v5-attack-path-format-not-v1.json": [
-    "schema_violation:attack_path"
-  ],
-  "invalid/v5-attack-path-hazard-id-wrong.json": [
-    "schema_violation:attack_path"
-  ],
-  "invalid/v5-attack-path-hazard-loss-missing-label.json": [
-    "schema_violation:attack_path"
-  ],
-  "invalid/v5-attack-path-missing.json": [
-    "schema_violation:attack_path"
-  ],
-  "invalid/v5-attack-path-node-id-not-ap.json": [
-    "schema_violation:attack_path"
-  ],
-  "invalid/v5-attack-path-step-blank-label.json": [
-    "schema_violation:attack_path"
-  ],
-  "invalid/v5-attack-path-step-id-not-step.json": [
-    "schema_violation:attack_path"
-  ],
-  "invalid/v5-attack-path-unknown-key.json": [
-    "schema_violation:attack_path"
-  ],
-  "invalid/v5-attack-path-unsafe-action-id-wrong.json": [
-    "schema_violation:attack_path"
-  ],
-  "invalid/v5-attack-path-unsafe-action-violates-missing.json": [
-    "schema_violation:attack_path"
-  ],
-  "invalid/v5-attack-tree-present.json": [
-    "schema_violation:attack_tree"
-  ],
-  "invalid/v5-causal-factor-belief-missing.json": [
-    "schema_violation:causal_factors"
-  ],
-  "invalid/v5-causal-factor-blank-flaw.json": [
-    "schema_violation:causal_factors"
-  ],
-  "invalid/v5-causal-factor-variable-blank-description.json": [
-    "schema_violation:causal_factors"
-  ],
-  "invalid/v5-causal-factor-variable-id-missing.json": [
-    "schema_violation:causal_factors"
-  ],
-  "invalid/v5-causal-factor-variable-id-not-pm.json": [
-    "schema_violation:causal_factors"
-  ],
-  "invalid/v5-causal-factor-variable-not-object.json": [
-    "schema_violation:causal_factors"
-  ],
-  "invalid/v5-causal-factor-variable-unknown-field.json": [
-    "schema_violation:causal_factors"
-  ],
-  "invalid/v5-causal-factors-empty.json": [
-    "schema_violation:causal_factors"
-  ],
-  "invalid/v5-preconditions-not-text.json": [
-    "schema_violation:preconditions"
-  ],
-  "invalid/v5-preconditions-on-functional.json": [
-    "schema_violation:<root>"
-  ],
-  "invalid/v5-procedure-channel-not-enumerated.json": [
-    "schema_violation:procedure"
-  ],
-  "invalid/v5-procedure-empty-on-adversarial.json": [
-    "schema_violation:<root>"
-  ],
-  "invalid/v5-procedure-leads-to-wrong.json": [
-    "schema_violation:<root>"
-  ],
-  "invalid/v5-procedure-on-functional.json": [
-    "schema_violation:<root>"
-  ],
-  "invalid/v5-procedure-step-id-out-of-order.json": [
-    "schema_violation:<root>"
-  ],
-  "invalid/v5-procedure-step-missing-tactic-key.json": [
-    "schema_violation:procedure"
-  ],
-  "invalid/v5-procedure-technique-id-free-text.json": [
-    "schema_violation:procedure"
-  ],
-  "invalid/v5-procedure-technique-without-tactic.json": [
-    "schema_violation:<root>"
-  ],
-  "invalid/v5-uca-blank-statement.json": [
+  "invalid/uca-blank-statement.json": [
     "schema_violation:uca"
   ],
-  "invalid/v5-uca-hazards-empty.json": [
+  "invalid/uca-hazards-empty.json": [
     "schema_violation:uca"
   ],
-  "invalid/v5-uca-missing.json": [
+  "invalid/uca-missing.json": [
     "schema_violation:uca"
   ],
-  "invalid/v5-uca-not-object.json": [
+  "invalid/uca-not-object.json": [
     "schema_violation:uca"
   ],
-  "invalid/v5-uca-type-not-enumerated.json": [
+  "invalid/uca-type-not-enumerated.json": [
     "schema_violation:uca"
   ],
-  "invalid/v5-uca-unknown-field.json": [
+  "invalid/uca-unknown-field.json": [
     "schema_violation:uca"
   ],
-  "invalid/v5-worst-case-threat-blank.json": [
+  "invalid/worst-case-threat-blank.json": [
     "schema_violation:worst_case_threat"
   ],
-  "invalid/v5-worst-case-threat-missing.json": [
+  "invalid/worst-case-threat-missing.json": [
     "schema_violation:worst_case_threat"
   ]
 }

@@ -10,11 +10,8 @@ and consumer canonical-JSON encodings.
 ``load_specs`` reads a contract kit's installed runtime specs, and ``spec_digest``
 pins one: the bytes of ``spec.json`` and its schema, never its cases or docs.
 ``SpecSet.read`` selects the spec a document names and enforces the reader rules;
-``write_envelope`` gives a new-version document its identity. ``parse_version_name``
-reads the semantic version a version directory carries, ``diff_schemas`` refuses a
-breaking schema change without a major bump, and ``support_window`` applies the
-dcpl.2 support rule. ``upgrade(document)`` applies the registered saved-artifact
-migration and writes the target envelope.
+``write_envelope`` gives a document its identity. ``parse_version_name``
+reads the semantic version a version directory carries.
 
 The package needs the standard library and ``jsonschema`` only. It carries the
 scenario-handoff schemas, the ownership rules and the envelope schema as package
@@ -44,7 +41,6 @@ from .condition_eval import (
     INCONCLUSIVE,
     NOT_DETECTED,
     ConditionEvaluation,
-    evaluate_condition,
     evaluate_condition_v2,
     validate_condition,
 )
@@ -58,13 +54,9 @@ from .contract import (
     CASES_NAME,
     CONTRACT,
     CONTRACT_DIR,
-    HANDOFF_SCHEMA_VERSION_V5,
     HANDOFF_SCHEMA_VERSION_V6,
-    KIT_V5,
     KIT_V6,
-    LEGACY_VERSION,
     VERSION,
-    VERSIONS,
     Contract,
     ContractError,
     installed_specs,
@@ -98,12 +90,6 @@ from .envelope import (
     spec_digest,
     write_envelope,
 )
-from .schema_diff import (
-    SchemaChange,
-    SchemaDiffError,
-    check_roots,
-    diff_schemas,
-)
 from .semver import (
     ContractVersionName,
     ContractVersionNameError,
@@ -117,20 +103,6 @@ from .shape import (
     CHANNEL_FORGED,
     CHANNEL_INDIRECT,
     attack_shape_violation,
-)
-from .support import (
-    SUPPORT_POLICY,
-    SUPPORT_STATUSES,
-    VersionSupport,
-    check_support_window,
-    support_window,
-)
-from .upgrade import (
-    Upgrade,
-    UpgradeError,
-    register_upgrade,
-    registered_upgrades,
-    upgrade,
 )
 from .violation import Violation
 from .violations import (
@@ -152,19 +124,14 @@ __all__ = [
     "DETECTED",
     "ENVELOPE_FIELD",
     "ENVELOPE_SCHEMA_ID",
-    "HANDOFF_SCHEMA_VERSION_V5",
     "HANDOFF_SCHEMA_VERSION_V6",
     "INCONCLUSIVE",
-    "KIT_V5",
     "KIT_V6",
-    "LEGACY_VERSION",
     "NFC_ALLOW_NAN_ENCODING",
     "NOT_DETECTED",
     "NO_NAN_ENCODING",
     "OTHER_VERSION_VIOLATIONS",
     "PRODUCER_ENCODING",
-    "SUPPORT_POLICY",
-    "SUPPORT_STATUSES",
     "VALIDATOR",
     "ConditionEvaluation",
     "ConformanceCase",
@@ -183,8 +150,6 @@ __all__ = [
     "InvalidVersionNameError",
     "MissingEnvelopeError",
     "Provenance",
-    "SchemaChange",
-    "SchemaDiffError",
     "SemVer",
     "SpecDigestMismatchError",
     "SpecSet",
@@ -192,21 +157,13 @@ __all__ = [
     "UnknownFieldError",
     "UnknownRequirementError",
     "UnsupportedVersionError",
-    "Upgrade",
-    "UpgradeError",
     "VERSION",
-    "VERSIONS",
-    "VersionSupport",
     "Violation",
     "attack_shape_violation",
     "canonical_json",
     "canonical_json_bytes",
-    "check_roots",
-    "check_support_window",
-    "diff_schemas",
     "digest_record",
     "encoding_for",
-    "evaluate_condition",
     "evaluate_condition_v2",
     "envelope_schema",
     "feature_violations",
@@ -225,15 +182,11 @@ __all__ = [
     "parse_version_name",
     "read_handoff",
     "read_envelope",
-    "register_upgrade",
-    "registered_upgrades",
     "render_feature_text",
     "run_conformance",
     "schema_violations",
     "sha256_hex",
     "spec_digest",
-    "support_window",
-    "upgrade",
     "validate_condition",
     "validate_handoff",
     "write_envelope",

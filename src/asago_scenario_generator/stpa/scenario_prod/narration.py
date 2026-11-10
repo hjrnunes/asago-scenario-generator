@@ -35,6 +35,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from asago_handoff import ownership_violations
+
 from asago_scenario_generator.stpa.infra.llm import DEFAULT_TEMPERATURE, LLMClient
 from asago_scenario_generator.stpa.infra.llm_helpers import (
     CorrectionPolicy,
@@ -57,7 +59,6 @@ from asago_scenario_generator.stpa.models.causal_factor import (
 from asago_scenario_generator.stpa.models.scenario_spec import ScenarioSpec
 
 from ._constants import PROMPTS_DIR
-from .handoff import handoff_ownership_violations
 from .presentation import (
     ADVERSARY_WORDS,
     CONTROLLER_WORDS,
@@ -878,8 +879,8 @@ def text_failures(label: str, text: str, source_text: str) -> list[str]:
             f"{label} quotes a long passage; say in your own words what it "
             "asks for instead of quoting a message"
         )
-    for code in handoff_ownership_violations({"narrative": text}):
-        slug = code.split(":", 1)[-1]
+    for violation in ownership_violations({"narrative": text}):
+        slug = violation.code.split(":", 1)[-1]
         failures.append(
             f"{label} contains {_OWNERSHIP_WORDS.get(slug, slug)}; reword it"
         )
@@ -1193,7 +1194,7 @@ def _fact_clause(
     text, commentary = _split_off(text, lambda clause: bool(_COMMENTARY.search(clause)))
     text, lost = _split_off(
         _as_prose(text),
-        lambda clause: bool(handoff_ownership_violations({"narrative": clause})),
+        lambda clause: bool(ownership_violations({"narrative": clause})),
     )
     return lower_first(text.rstrip(" .;,")), commentary, lost
 

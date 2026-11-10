@@ -66,7 +66,7 @@ from tests.helpers.sp3_run import _make_ets
 from tests.helpers.stpa_builders import make_cs, make_loss_analysis
 from tests.stpa.sp1_helpers import MockLLMClient
 from tests.stpa.test_and_or_tree import nodes, tree_of
-from tests.stpa.test_scenario_handoff_v5 import SCHEMA
+from tests.stpa.test_scenario_handoff_v6 import SCHEMA
 
 BELIEF = "The payment batch was already approved by the account holder."
 CA_BELIEF = "The account holder asked for this exact batch of payments."

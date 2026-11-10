@@ -98,7 +98,7 @@ def test_the_lock_pins_every_file_beside_it() -> None:
         "asago-scenario-generator",
         "scenario-handoff",
     )
-    # The lock names the newest published version; its rows cover every version.
+    # The lock names the published version.
     assert lock["schema_version"] == HANDOFF_SCHEMA_VERSION_V6
     assert lock["files"] == on_disk
 

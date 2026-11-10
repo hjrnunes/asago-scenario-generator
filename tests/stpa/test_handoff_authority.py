@@ -26,13 +26,13 @@ from asago_scenario_generator.stpa.scenario_prod.stage5.generate import (
 from asago_scenario_generator.stpa.scenario_prod.context import (
     build_scenario_generation_context,
 )
-from asago_scenario_generator.stpa.scenario_prod.handoff import ScenarioHandoff
+from asago_scenario_generator.stpa.scenario_prod.handoff import (
+    ScenarioHandoffV6,
+    build_scenario_handoff_v6,
+)
 from asago_scenario_generator.stpa.scenario_prod.and_or_tree import (
     build_sibling_index,
     render_and_or_tree,
-)
-from asago_scenario_generator.stpa.scenario_prod.handoff_v5 import (
-    build_scenario_handoff_v6,
 )
 from asago_scenario_generator.stpa.scenario_prod.presentation import (
     render_scenario_summary,
@@ -65,11 +65,11 @@ def _reviewed(analysis: LossAnalysis) -> LossAnalysis:
     return analysis.model_copy(update={"security_constraints": stamped})
 
 
-def _constraint_fact(handoff: ScenarioHandoff | dict) -> dict:
+def _constraint_fact(handoff: ScenarioHandoffV6 | dict) -> dict:
     """Return the scenario-context constraint fact of one handoff."""
     payload = (
         handoff.model_dump(mode="json")
-        if isinstance(handoff, ScenarioHandoff)
+        if isinstance(handoff, ScenarioHandoffV6)
         else handoff
     )
     facts = [
@@ -108,7 +108,7 @@ def _handoff_for(
     constraint_id: str,
     hazard_id: str,
     tmp_path: Path,
-) -> ScenarioHandoff:
+) -> ScenarioHandoffV6:
     """Build one handoff through the normal authoring path.
 
     The scenario context is built from the supplied loss analysis, so the
@@ -217,7 +217,7 @@ def test_authority_follows_source_record(tmp_path: Path) -> None:
     constraint_id = proposed.security_constraints[0].constraint_id
     hazard_id = proposed.security_constraints[0].related_hazards[0]
 
-    def _build(analysis: LossAnalysis, source: str | None) -> ScenarioHandoff:
+    def _build(analysis: LossAnalysis, source: str | None) -> ScenarioHandoffV6:
         return _handoff_for(
             analysis,
             stage_1a_source=source,

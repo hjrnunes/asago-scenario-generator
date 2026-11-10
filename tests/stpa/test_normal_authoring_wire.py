@@ -37,14 +37,12 @@ from asago_scenario_generator.stpa.scenario_prod.stage5.generate import (
     is_bdi_length_retry_exhausted,
 )
 from asago_scenario_generator.stpa.scenario_prod.handoff import (
+    build_scenario_handoff_v6,
     handoff_ownership_violations,
 )
 from asago_scenario_generator.stpa.scenario_prod.and_or_tree import (
     build_sibling_index,
     render_and_or_tree,
-)
-from asago_scenario_generator.stpa.scenario_prod.handoff_v5 import (
-    build_scenario_handoff_v6,
 )
 from asago_scenario_generator.stpa.observation_contract import (
     default_observation_contract,

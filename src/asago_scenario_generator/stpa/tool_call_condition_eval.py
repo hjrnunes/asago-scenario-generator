@@ -12,7 +12,6 @@ from asago_handoff.condition_eval import (
     INCONCLUSIVE,
     NOT_DETECTED,
     ConditionEvaluation,
-    evaluate_condition,
     evaluate_condition_v2,
     validate_condition,
 )
@@ -22,7 +21,6 @@ __all__ = [
     "INCONCLUSIVE",
     "NOT_DETECTED",
     "ConditionEvaluation",
-    "evaluate_condition",
     "evaluate_condition_v2",
     "validate_condition",
 ]

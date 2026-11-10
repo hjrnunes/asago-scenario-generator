@@ -22,7 +22,7 @@ def test_every_sidecar_loads_into_its_model(tmp_path: Path) -> None:
     assert run.testability is not None and len(run.testability) == len(SCENARIOS)
     assert run.accounting is not None and run.structure is not None
     assert run.policy is not None and run.policy["schema_version"] == (
-        "policy-coverage-v1"
+        "policy-coverage-v2"
     )
 
 

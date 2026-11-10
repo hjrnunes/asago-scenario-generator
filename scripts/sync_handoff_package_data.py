@@ -42,11 +42,7 @@ TREES = (
 
 
 # Paths an earlier layout installed; the whole-contract copy replaces them.
-RETIRED = (
-    DATA / "ownership-rules.json",
-    DATA / "handoff-v5",
-    TEST_DATA / "scenario-handoff" / "handoff-v5",
-)
+RETIRED = (DATA / "ownership-rules.json",)
 
 
 def _files(root: Path) -> set[Path]:

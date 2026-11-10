@@ -22,12 +22,10 @@ from pydantic import ValidationError
 from asago_scenario_generator.stpa.scenario_prod.handoff import (
     HANDOFF_SCHEMA_VERSION_V6,
     ScenarioHandoffV6,
+    build_scenario_handoff_v6,
     handoff_ownership_violations,
     verify_handoff_digest,
     write_scenario_handoff,
-)
-from asago_scenario_generator.stpa.scenario_prod.handoff_v5 import (
-    build_scenario_handoff_v6,
 )
 from asago_scenario_generator.stpa.scenario_prod.run import (
     SP3CandidateStatus,

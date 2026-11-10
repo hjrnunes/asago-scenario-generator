@@ -47,18 +47,10 @@ def test_every_module_re_exports_the_core_objects(facade: object, core: object) 
         assert getattr(facade, name) is getattr(core, name)
 
 
-# The handoff package owns its saved-artifact migration, so it exports one name
-# the core does not define; every other export must be the core's own object.
-HANDOFF_OWNED = frozenset({"HANDOFF_UPGRADE"})
-
-
 def test_the_package_exports_the_same_rules() -> None:
-    assert set(asago_handoff.__all__) - HANDOFF_OWNED <= set(
-        asago_contracts_core.__all__
-    )
+    assert set(asago_handoff.__all__) <= set(asago_contracts_core.__all__)
     assert asago_handoff.validate_handoff is asago_contracts_core.validate_handoff
     assert asago_handoff.ConformanceResult is asago_contracts_core.ConformanceResult
-    assert asago_handoff.HANDOFF_UPGRADE.contract == asago_handoff.CONTRACT
 
 
 def test_the_packaged_contract_is_the_cores_copy() -> None:

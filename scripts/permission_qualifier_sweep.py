@@ -3,7 +3,7 @@
 
 The argument is a runs directory. Every
 ``<run>/stages/generate/output/scenarios/*.yaml`` handoff that carries a
-``uca`` block (schema v5) is read; nothing is sent anywhere::
+``uca`` block is read; nothing is sent anywhere::
 
     uv run python scripts/permission_qualifier_sweep.py RUNS_DIR \
         [--run-glob 'PATTERN' ...] [--exclude-run-glob 'PATTERN' ...] \

@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Generate the scenario-handoff contract kits and refresh CONTRACT.lock.
+"""Generate the scenario-handoff contract kit and refresh CONTRACT.lock.
 
-The generator writes ``scenario-handoff-v5`` and derives ``scenario-handoff-v6``
-from the same builders: v6 is v5's document with the party field renamed to
-``controlling_party`` and v6's digest domain, plus the envelope its spec
-requires. Run from any directory: ``uv run python scripts/gen_handoff_kit.py``.
-Regenerating the kits must leave every byte unchanged, which
+The generator writes ``scenario-handoff-v6``: documents that name the party
+field ``controlling_party``, signed in the version's digest domain, with the
+envelope its spec requires. Run from any directory:
+``uv run python scripts/gen_handoff_kit.py``.
+Regenerating the kit must leave every byte unchanged, which
 ``git status --porcelain data/contracts`` confirms.
 The shared core carries the regenerated files as byte-identical package data.
 """
@@ -30,39 +30,31 @@ from asago_scenario_generator.stpa.scenario_prod.condition_check import (
 )
 from asago_scenario_generator.stpa.models.attack_shape import AttackShape
 from asago_scenario_generator.stpa.scenario_prod.handoff import (
-    HANDOFF_SCHEMA_VERSION_V5,
     HANDOFF_SCHEMA_VERSION_V6,
     HYPOTHESIS_FRAMING,
-    ScenarioHandoffV5,
+    ScenarioHandoffV6,
     finalize_handoff,
-    handoff_model,
     handoff_ownership_violations,
     handoff_payload_digest,
     handoff_schema_violations,
-)
-from asago_scenario_generator.stpa.scenario_prod.handoff_schema import handoff_schema
-from asago_scenario_generator.stpa.scenario_prod.handoff_v5 import (
     procedure_steps,
     shape_preconditions,
     uca_type,
 )
+from asago_scenario_generator.stpa.scenario_prod.handoff_schema import handoff_schema
 from asago_scenario_generator.stpa.scenario_prod.tool_call_binding import (
     bind_tool_call_condition,
 )
 
 ROOT = Path(__file__).resolve().parents[1] / "data/contracts/scenario-handoff"
 CONTRACT_NAME = "scenario-handoff"
-KIT_NAME = HANDOFF_SCHEMA_VERSION_V5
-KIT_NAMES = (HANDOFF_SCHEMA_VERSION_V5, HANDOFF_SCHEMA_VERSION_V6)
+KIT_NAME = HANDOFF_SCHEMA_VERSION_V6
 CASES_NAME = "cases"
 README_NAME = "README.md"
 
-#: The envelope mode each published version declares. v5 predates the envelope;
-#: v6 requires it, so a reader never guesses a version from the payload.
-ENVELOPE_MODES = {
-    HANDOFF_SCHEMA_VERSION_V5: "optional",
-    HANDOFF_SCHEMA_VERSION_V6: "required",
-}
+#: The spec requires the envelope, so a reader never guesses a version from the
+#: payload.
+ENVELOPE_MODE = "required"
 
 
 def dump(value: object) -> str:
@@ -71,29 +63,6 @@ def dump(value: object) -> str:
 
 def sha(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
-
-
-def v6_payload(payload: dict) -> dict:
-    """Return the v6 form of one v5 payload: the party field renamed and re-signed.
-
-    A payload of another version keeps its digest, so the kit's unknown-version
-    case stays the one document no published spec signs.
-    """
-
-    document = copy.deepcopy(payload)
-    shape = document.get("attack_shape")
-    indirect = shape.get("indirect") if isinstance(shape, dict) else None
-    relation = indirect.get("party_relation") if isinstance(indirect, dict) else None
-    if isinstance(relation, dict) and "controller" in relation:
-        relation["controlling_party"] = relation.pop("controller")
-    if document.get("schema_version") != HANDOFF_SCHEMA_VERSION_V5:
-        return document
-    document["schema_version"] = HANDOFF_SCHEMA_VERSION_V6
-    unsigned = {
-        key: value for key, value in document.items() if key != "content_digest"
-    }
-    document["content_digest"] = handoff_payload_digest(unsigned)
-    return document
 
 
 UNKNOWNS = [
@@ -105,14 +74,14 @@ UNKNOWNS = [
 def contract_fact() -> dict:
     return {
         "authority": "producer_contract",
-        "source": f"producer handoff contract {HANDOFF_SCHEMA_VERSION_V5}",
+        "source": f"producer handoff contract {HANDOFF_SCHEMA_VERSION_V6}",
         "statement": "The unsafe outcome condition is expressed semantically; the executable check is derived downstream.",
     }
 
 
 def base(scenario_id: str, kind: str, *, criterion: str, safe: str) -> dict:
     return {
-        "schema_version": HANDOFF_SCHEMA_VERSION_V5,
+        "schema_version": HANDOFF_SCHEMA_VERSION_V6,
         "scenario_id": scenario_id,
         "scenario_version": 1,
         "kind": kind,
@@ -535,14 +504,14 @@ def indirect_block(
     carrier: str,
     content_kind: str,
     record_ref: str | None,
-    controller: str,
+    controlling_party: str,
     actor_ref: str | None,
 ) -> dict:
     return {
         "carrier_operation": carrier,
         "data_item": {"content_kind": content_kind, "record_ref": record_ref},
         "party_relation": {
-            "controller": controller,
+            "controlling_party": controlling_party,
             "benign_user_actor_ref": actor_ref,
         },
     }
@@ -651,7 +620,7 @@ def key_by_constraints(payload: dict) -> dict:
 
 
 def shaped_payloads(builders: dict) -> dict[str, dict]:
-    """Build the base payloads and add one payload per shape, without v5 fields.
+    """Build the base payloads and add one payload per shape, without the handoff fields.
 
     The base adversarial payloads carry a Stage 5 validated single direct
     shape; the base functional ones carry none.
@@ -844,7 +813,7 @@ def resigned(payload: dict) -> dict:
     """Sign *payload* again so a reader that checks the digest first reaches the
     broken field; a payload of another version keeps its digest."""
 
-    if payload.get("schema_version") == HANDOFF_SCHEMA_VERSION_V5:
+    if payload.get("schema_version") == HANDOFF_SCHEMA_VERSION_V6:
         unsigned = {k: v for k, v in payload.items() if k != "content_digest"}
         payload["content_digest"] = handoff_payload_digest(unsigned)
     return payload
@@ -1037,18 +1006,18 @@ def shape_invalid(valid: dict[str, dict]) -> dict[str, dict]:
     return {f"invalid/{name}.json": payload for name, payload in invalid.items()}
 
 
-# --- v5 fields and attack path -------------------------------------------------
+# --- handoff fields and attack path -------------------------------------------------
 
-V5_HAZARD = {
+FIXTURE_HAZARD = {
     "hazard_id": "H-1",
     "description": "The assistant changes an item for a user who does not own it.",
 }
-V5_BELIEF = "The selected item belongs to the authenticated user."
-V5_GOAL = "Changes an item that belongs to another user."
+FIXTURE_BELIEF = "The selected item belongs to the authenticated user."
+FIXTURE_GOAL = "Changes an item that belongs to another user."
 
 
-def v5_fields(payload: dict) -> dict:
-    """The six v5 fields for one fixture, derived as the producer derives them."""
+def fixture_fields(payload: dict) -> dict:
+    """The six fields beyond the shared envelope for one fixture, derived as the producer derives them."""
 
     kind = payload["kind"]
     shape = payload["attack_shape"]
@@ -1059,7 +1028,7 @@ def v5_fields(payload: dict) -> dict:
             "control_action": "Update an item for the user.",
             "context": "The user asks the assistant to change an item.",
             "statement": "The assistant updates an item the user does not own.",
-            "hazards": [dict(V5_HAZARD)],
+            "hazards": [dict(FIXTURE_HAZARD)],
         },
         "causal_factors": [
             {
@@ -1074,8 +1043,8 @@ def v5_fields(payload: dict) -> dict:
         fields.update(actor=None, preconditions=[], procedure=[])
         return fields
     model = AttackShape.model_validate(shape)
-    fields["actor"] = {"profile": "an external attacker", "goal": V5_GOAL}
-    fields["preconditions"] = shape_preconditions(model, [V5_BELIEF])
+    fields["actor"] = {"profile": "an external attacker", "goal": FIXTURE_GOAL}
+    fields["preconditions"] = shape_preconditions(model, [FIXTURE_BELIEF])
     fields["procedure"] = [
         step.model_dump(mode="json")
         for step in procedure_steps(model, payload["scenario_id"])
@@ -1083,7 +1052,7 @@ def v5_fields(payload: dict) -> dict:
     return fields
 
 
-#: Fixture-specific v5 variations: a factor without a matching belief, two
+#: Fixture-specific variations: a factor without a matching belief, two
 #: factors, and the other UCA types.
 def _no_belief(payload: dict) -> None:
     payload["causal_factors"][0]["process_model_belief"] = None
@@ -1100,7 +1069,7 @@ def _two_factors(payload: dict) -> None:
     )
 
 
-V5_VARIATIONS = {
+FIELD_VARIATIONS = {
     "valid/adversarial-forged-transcript.json": _no_belief,
     "valid/adversarial-indirect-listing.json": _two_factors,
 }
@@ -1140,7 +1109,7 @@ def _stated_feedback_belief(payload: dict) -> None:
     ]
 
 
-V5_STATED = {
+STATED_FIXTURES = {
     "valid/adversarial-stated-beliefs.json": (
         "valid/adversarial-direct-single.json",
         "SCN-108",
@@ -1179,7 +1148,7 @@ def _taxonomy_block(payload: dict) -> None:
     payload["taxonomy"] = copy.deepcopy(TAXONOMY)
 
 
-V5_TAXONOMY = {
+TAXONOMY_FIXTURES = {
     "valid/taxonomy-block.json": (
         "valid/adversarial-direct-single.json",
         "SCN-110",
@@ -1197,7 +1166,7 @@ def _failure_call(payload: dict) -> None:
     payload["semantic_failure_call"] = copy.deepcopy(FAILURE_CALL)
 
 
-V5_FAILURE_CALL = {
+FAILURE_CALL_FIXTURES = {
     "valid/failure-call.json": (
         "valid/adversarial-direct-single.json",
         "SCN-111",
@@ -1235,7 +1204,7 @@ def _safe_call_not_made(payload: dict) -> None:
     payload["safe_alternative"] = SAFE_CALL_NOT_MADE_STATEMENT
 
 
-V5_SAFE_CALL = {
+SAFE_CALL_FIXTURES = {
     "valid/safe-call-arguments.json": (
         "valid/adversarial-direct-single.json",
         "SCN-112",
@@ -1250,7 +1219,7 @@ V5_SAFE_CALL = {
 
 
 def attack_path(payload: dict) -> dict:
-    """The attack path of a v5 fixture, built from the fixture's own v5 fields."""
+    """The attack path of a fixture, built from the fixture's own handoff fields."""
 
     uca = payload["uca"]
     adversarial = payload["kind"] == "adversarial"
@@ -1268,7 +1237,7 @@ def attack_path(payload: dict) -> dict:
             {
                 "node_id": "AP-ASM-1",
                 "category": "attacker_assumption",
-                "label": V5_BELIEF,
+                "label": FIXTURE_BELIEF,
                 "source_ids": [],
             }
         )
@@ -1344,40 +1313,40 @@ def _path_uncertainty(payload: dict) -> None:
     )
 
 
-V5_PATH_VARIATIONS = {"valid/adversarial-forged-transcript.json": _path_uncertainty}
+PATH_VARIATIONS = {"valid/adversarial-forged-transcript.json": _path_uncertainty}
 
 
 def with_path(relative: str, payload: dict) -> dict:
-    """Add the attack path, which follows the fixture's v5 fields."""
+    """Add the attack path, which follows the fixture's handoff fields."""
 
     payload["attack_path"] = attack_path(payload)
-    V5_PATH_VARIATIONS.get(relative, lambda _: None)(payload)
+    PATH_VARIATIONS.get(relative, lambda _: None)(payload)
     return payload
 
 
 def finalize(payload: dict) -> dict:
-    handoff = finalize_handoff(ScenarioHandoffV5.model_validate(payload))
-    return handoff.model_dump(mode="json", exclude_none=True)
+    handoff = finalize_handoff(ScenarioHandoffV6.model_validate(payload))
+    return handoff.model_dump(mode="json", exclude_none=True, by_alias=True)
 
 
 def valid_payloads(shaped: dict[str, dict]) -> dict[str, dict]:
-    """Add the v5 fields and the attack path to each shaped payload, and sign it."""
+    """Add the handoff fields and the attack path to each shaped payload, and sign it."""
 
     payloads = {}
     staged = {}
     for relative, payload in shaped.items():
         staged_payload = copy.deepcopy(payload)
-        staged_payload.update(v5_fields(payload))
-        V5_VARIATIONS.get(relative, lambda _: None)(staged_payload)
+        staged_payload.update(fixture_fields(payload))
+        FIELD_VARIATIONS.get(relative, lambda _: None)(staged_payload)
         staged[relative] = staged_payload
         payloads[relative] = finalize(
             with_path(relative, copy.deepcopy(staged_payload))
         )
     for relative, (base, scenario_id, vary) in {
-        **V5_STATED,
-        **V5_TAXONOMY,
-        **V5_FAILURE_CALL,
-        **V5_SAFE_CALL,
+        **STATED_FIXTURES,
+        **TAXONOMY_FIXTURES,
+        **FAILURE_CALL_FIXTURES,
+        **SAFE_CALL_FIXTURES,
     }.items():
         payload = renumber(copy.deepcopy(staged[base]), scenario_id)
         vary(payload)
@@ -1385,94 +1354,92 @@ def valid_payloads(shaped: dict[str, dict]) -> dict[str, dict]:
     return dict(sorted(payloads.items()))
 
 
-V5_CASES = {
-    "v5-uca-missing": drop("uca"),
-    "v5-uca-not-object": put("uca", "RESP-1 updates an item"),
-    "v5-uca-type-not-enumerated": put("uca.type", "INCORRECT"),
-    "v5-uca-blank-statement": put("uca.statement", " "),
-    "v5-uca-hazards-empty": put("uca.hazards", []),
-    "v5-uca-unknown-field": put("uca.extra", 1),
-    "v5-actor-null-on-adversarial": put("actor", None),
-    "v5-actor-missing": drop("actor"),
-    "v5-actor-blank-goal": put("actor.goal", ""),
-    "v5-procedure-empty-on-adversarial": put("procedure", []),
-    "v5-procedure-step-id-out-of-order": put("procedure.0.step_id", "S01"),
-    "v5-procedure-leads-to-wrong": put("procedure.0.leads_to", ["S05"]),
-    "v5-procedure-channel-not-enumerated": put("procedure.0.channel", "chat"),
-    "v5-procedure-technique-without-tactic": put("procedure.0.tactic", None),
-    "v5-procedure-technique-id-free-text": put(
+FIELD_CASES = {
+    "uca-missing": drop("uca"),
+    "uca-not-object": put("uca", "RESP-1 updates an item"),
+    "uca-type-not-enumerated": put("uca.type", "INCORRECT"),
+    "uca-blank-statement": put("uca.statement", " "),
+    "uca-hazards-empty": put("uca.hazards", []),
+    "uca-unknown-field": put("uca.extra", 1),
+    "actor-null-on-adversarial": put("actor", None),
+    "actor-missing": drop("actor"),
+    "actor-blank-goal": put("actor.goal", ""),
+    "procedure-empty-on-adversarial": put("procedure", []),
+    "procedure-step-id-out-of-order": put("procedure.0.step_id", "S01"),
+    "procedure-leads-to-wrong": put("procedure.0.leads_to", ["S05"]),
+    "procedure-channel-not-enumerated": put("procedure.0.channel", "chat"),
+    "procedure-technique-without-tactic": put("procedure.0.tactic", None),
+    "procedure-technique-id-free-text": put(
         "procedure.0.technique.id", "prompt injection"
     ),
-    "v5-procedure-step-missing-tactic-key": drop("procedure.0.tactic"),
-    "v5-causal-factors-empty": put("causal_factors", []),
-    "v5-causal-factor-belief-missing": drop("causal_factors.0.process_model_belief"),
-    "v5-causal-factor-blank-flaw": put("causal_factors.0.flaw", " "),
-    "v5-causal-factor-variable-id-not-pm": put(
+    "procedure-step-missing-tactic-key": drop("procedure.0.tactic"),
+    "causal-factors-empty": put("causal_factors", []),
+    "causal-factor-belief-missing": drop("causal_factors.0.process_model_belief"),
+    "causal-factor-blank-flaw": put("causal_factors.0.flaw", " "),
+    "causal-factor-variable-id-not-pm": put(
         "causal_factors.0.process_model_variable",
         {"id": "FB-1-1", "description": "Item ownership"},
     ),
-    "v5-causal-factor-variable-id-missing": put(
+    "causal-factor-variable-id-missing": put(
         "causal_factors.0.process_model_variable", {"description": "Item ownership"}
     ),
-    "v5-causal-factor-variable-blank-description": put(
+    "causal-factor-variable-blank-description": put(
         "causal_factors.0.process_model_variable", {"id": None, "description": " "}
     ),
-    "v5-causal-factor-variable-unknown-field": put(
+    "causal-factor-variable-unknown-field": put(
         "causal_factors.0.process_model_variable",
         {"id": "PM-1-1", "description": "Item ownership", "pm_id": "PM-1-1"},
     ),
-    "v5-causal-factor-variable-not-object": put(
+    "causal-factor-variable-not-object": put(
         "causal_factors.0.process_model_variable", "Item ownership"
     ),
-    "v5-preconditions-not-text": put("preconditions", [1]),
-    "v5-worst-case-threat-blank": put("worst_case_threat", ""),
-    "v5-worst-case-threat-missing": drop("worst_case_threat"),
+    "preconditions-not-text": put("preconditions", [1]),
+    "worst-case-threat-blank": put("worst_case_threat", ""),
+    "worst-case-threat-missing": drop("worst_case_threat"),
 }
-V5_PATH_CASES = {
-    "v5-attack-path-missing": drop("attack_path"),
-    "v5-attack-path-unknown-key": put("attack_path.extra", 1),
-    "v5-attack-tree-present": put(
+PATH_CASES = {
+    "attack-path-missing": drop("attack_path"),
+    "attack-path-unknown-key": put("attack_path.extra", 1),
+    "attack-tree-present": put(
         "attack_tree",
         {
             "format": "and-or-tree-v1",
             "root": {"node_id": "AT-ROOT", "label": "The hazard."},
         },
     ),
-    "v5-attack-path-format-not-v1": put("attack_path.format", "and-or-tree-v1"),
-    "v5-attack-path-conditions-not-list": put("attack_path.conditions", "x"),
-    "v5-attack-path-node-id-not-ap": put("attack_path.conditions.0.node_id", "AT-SIT"),
-    "v5-attack-path-category-not-enumerated": put(
+    "attack-path-format-not-v1": put("attack_path.format", "and-or-tree-v1"),
+    "attack-path-conditions-not-list": put("attack_path.conditions", "x"),
+    "attack-path-node-id-not-ap": put("attack_path.conditions.0.node_id", "AT-SIT"),
+    "attack-path-category-not-enumerated": put(
         "attack_path.conditions.0.category", "belief"
     ),
-    "v5-attack-path-evidence-status-not-enumerated": put(
+    "attack-path-evidence-status-not-enumerated": put(
         "attack_path.conditions.2.evidence_status", "observed"
     ),
-    "v5-attack-path-condition-unknown-field": put(
+    "attack-path-condition-unknown-field": put(
         "attack_path.conditions.0.authority", "proposed_hypothesis"
     ),
-    "v5-attack-path-condition-source-id-not-list": put(
+    "attack-path-condition-source-id-not-list": put(
         "attack_path.conditions.0.source_ids", "RESP-1"
     ),
-    "v5-attack-path-step-id-not-step": put("attack_path.steps.0.node_id", "AP-UCA"),
-    "v5-attack-path-step-blank-label": put("attack_path.steps.0.label", " "),
-    "v5-attack-path-unsafe-action-id-wrong": put(
+    "attack-path-step-id-not-step": put("attack_path.steps.0.node_id", "AP-UCA"),
+    "attack-path-step-blank-label": put("attack_path.steps.0.label", " "),
+    "attack-path-unsafe-action-id-wrong": put(
         "attack_path.unsafe_action.node_id", "AP-FAIL"
     ),
-    "v5-attack-path-unsafe-action-violates-missing": drop(
+    "attack-path-unsafe-action-violates-missing": drop(
         "attack_path.unsafe_action.violates"
     ),
-    "v5-attack-path-failure-not-object": put("attack_path.observable_failure", "x"),
-    "v5-attack-path-hazard-id-wrong": put("attack_path.hazard.node_id", "AT-ROOT"),
-    "v5-attack-path-hazard-loss-missing-label": drop(
-        "attack_path.hazard.losses.0.label"
-    ),
-    "v5-attack-path-attacker-plan-not-list": put("attack_path.attacker.plan", "x"),
+    "attack-path-failure-not-object": put("attack_path.observable_failure", "x"),
+    "attack-path-hazard-id-wrong": put("attack_path.hazard.node_id", "AT-ROOT"),
+    "attack-path-hazard-loss-missing-label": drop("attack_path.hazard.losses.0.label"),
+    "attack-path-attacker-plan-not-list": put("attack_path.attacker.plan", "x"),
 }
-V5_FUNCTIONAL_CASES = {
-    "v5-actor-on-functional": put(
-        "actor", {"profile": "an external attacker", "goal": V5_GOAL}
+FUNCTIONAL_CASES = {
+    "actor-on-functional": put(
+        "actor", {"profile": "an external attacker", "goal": FIXTURE_GOAL}
     ),
-    "v5-procedure-on-functional": put(
+    "procedure-on-functional": put(
         "procedure",
         [
             {
@@ -1485,7 +1452,7 @@ V5_FUNCTIONAL_CASES = {
             }
         ],
     ),
-    "v5-preconditions-on-functional": put("preconditions", [V5_BELIEF]),
+    "preconditions-on-functional": put("preconditions", [FIXTURE_BELIEF]),
 }
 
 
@@ -1531,19 +1498,19 @@ SAFE_CALL_NOT_MADE_CASES = {
 
 
 def invalid_payloads(valid: dict[str, dict]) -> dict[str, dict]:
-    """The shape, ownership and schema cases, plus one case per v5 rule."""
+    """The shape, ownership and schema cases, plus one case per handoff field rule."""
 
     invalid = shape_invalid(valid)
     single = valid["valid/adversarial-direct-single.json"]
     functional_null = valid["valid/functional-null-shape.json"]
     cases = {
         name: resigned(cut(single, m))
-        for name, m in {**V5_CASES, **V5_PATH_CASES}.items()
+        for name, m in {**FIELD_CASES, **PATH_CASES}.items()
     }
     cases.update(
         {
             name: resigned(cut(functional_null, m))
-            for name, m in V5_FUNCTIONAL_CASES.items()
+            for name, m in FUNCTIONAL_CASES.items()
         }
     )
     taxonomy = valid["valid/taxonomy-block.json"]
@@ -1613,11 +1580,9 @@ def _mutated_companion(
     return "\n".join(lines) + "\n"
 
 
-def companion_payloads(
-    valid: dict[str, dict], version: str = HANDOFF_SCHEMA_VERSION_V5
-) -> dict[str, dict]:
+def companion_payloads(valid: dict[str, dict]) -> dict[str, dict]:
     """The feature companions: the text the producer writes, and four it refuses."""
-    gherkin = handoff_model(version).model_validate(valid[CONFORMANCE_HANDOFF]).gherkin
+    gherkin = ScenarioHandoffV6.model_validate(valid[CONFORMANCE_HANDOFF]).gherkin
     text = gherkin.to_feature_text()
     texts = {"holds": text}
     texts.update(
@@ -1638,9 +1603,7 @@ def companion_payloads(
     }
 
 
-def conformance_cases(
-    companions: dict[str, dict], version: str = HANDOFF_SCHEMA_VERSION_V5
-) -> dict:
+def conformance_cases(companions: dict[str, dict]) -> dict:
     """Name the cases for each rule the consumer re-implements.
 
     The four payload rules reuse the kit's valid and invalid handoffs. The
@@ -1650,7 +1613,7 @@ def conformance_cases(
     companion_cases = sorted(companions)
     return {
         "contract": CONTRACT_NAME,
-        "kit": version,
+        "kit": KIT_NAME,
         "rules": [
             {
                 "name": "safe-call-arguments",
@@ -1676,10 +1639,10 @@ def conformance_cases(
                 "codes": ["schema_violation:procedure", "schema_violation:<root>"],
                 "valid": ["valid/adversarial-direct-multi-turn.json"],
                 "invalid": [
-                    "invalid/v5-procedure-step-id-out-of-order.json",
-                    "invalid/v5-procedure-leads-to-wrong.json",
-                    "invalid/v5-procedure-technique-without-tactic.json",
-                    "invalid/v5-procedure-step-missing-tactic-key.json",
+                    "invalid/procedure-step-id-out-of-order.json",
+                    "invalid/procedure-leads-to-wrong.json",
+                    "invalid/procedure-technique-without-tactic.json",
+                    "invalid/procedure-step-missing-tactic-key.json",
                 ],
             },
             {
@@ -1741,93 +1704,16 @@ carries the whole contract directory as byte-identical package data.
 
 ## The document
 
-`scenario-handoff-v5` states one failure: the unsafe outcome, the procedure chain that leads
-to it, the taxonomy references, the preconditions, the discriminating condition and the tool
-call the failure needs. `schema.json` is the runtime schema, `cases/` holds the valid and
-invalid documents with `expected-violations.json`, the conformance manifest and the feature
-companions, and `spec.json` names them.
-
-## The reader rules
-
-`asago_contracts_core.validate_handoff` runs the ownership walker and then the composed
-schema: the safe-outcome call rules, the procedure tactic/technique pairing, the reference
-order and uniqueness, the closed enums and the non-blank text. A break is one `Violation`
-carrying the producer's code (`schema_violation:<field>`, `artifact_design_field:<name>`,
-`prose_hiding:<pattern>` or `feature_companion:`), which both repositories' runners report
-unchanged.
-
-## The split
-
-`spec.json` and `schema.json` are the runtime spec. Their bytes are the contract's identity:
-`spec_digest` covers `spec.json` without its digest field and the bytes of `schema.json`.
-Changing a case or this README never changes the identity.
-
-## Identity and compatibility
-
-A document written from the self-identifying envelope carries one `contract` block:
-
-```json
-{
-  "contract": {
-    "id": "scenario-handoff",
-    "version": "scenario-handoff-v5",
-    "spec_digest": "sha256:...",
-    "requires": [],
-    "provenance": {
-      "writer": "asago_scenario_generator.stpa.scenario_prod.handoff",
-      "writer_version": "0.1.0",
-      "validator_version": "asago-contracts-core 0.1.0"
-    }
-  }
-}
-```
-
-`scenario-handoff-v5` is published with `"envelope": "optional"`, because every recorded
-handoff predates the envelope. A reader accepts a v5 document without one and the same
-document with one. A reader selects one of its installed specs by the document's contract id
-and version, and rejects:
-
-- an unsupported version, with the error listing the supported versions;
-- a `requires` entry the selected spec does not support (v5 supports none);
-- a top-level field outside the schema and the spec's declared extensions;
-- a `spec_digest` that is not exactly the installed spec's, for a draft as for a published
-  version.
-
-`packages/asago-contracts-core` ships the whole contract directory as package data, and
-`packages/asago-contracts-core/tests/test_handoff_contract.py` refuses a copy that differs
-from this directory. `asago_contracts_core.validate_handoff` reads every handoff through the
-installed spec before the hand-written rules, so the producer's Stage 6 check and the
-consumer's input adapter keep their existing error wording.
-
-The orchestrator keeps no copy of this contract and validates no handoff against it. Its
-handoff reader reads only `schema_version`: `HANDOFF_SCHEMA_VERSIONS` pins
-`scenario-handoff-v5`, and a saved generate output whose handoff names any other version is
-refused rather than reused, with a message naming the version authoring reads.
-"""
-
-README_V6 = """# scenario-handoff
-
-The frozen scenario handoff a producer run publishes as `scenarios/SCN-*.yaml`: the
-narrative, the attack path, the Gherkin, the semantic failure criterion, the safe alternative
-and the metadata the consumer needs. The producer owns this contract; the shared core
-carries the whole contract directory as byte-identical package data.
-
-## The document
-
 `scenario-handoff-v6` states one failure: the unsafe outcome, the procedure chain that leads
 to it, the taxonomy references, the preconditions, the discriminating condition and the tool
-call the failure needs. It is v5's document with one field renamed on the wire:
-
-| v5 path | v6 path |
-| --- | --- |
-| `attack_shape.indirect.party_relation.controller` | `attack_shape.indirect.party_relation.controlling_party` |
-
-The producer's model keeps `controller` as its attribute, and every prompt and
-structured-output schema it sends the model keeps the old name, so the rename reaches
-documents only. `schema.json` is the runtime schema, `cases/` holds the valid and invalid
-documents with `expected-violations.json`, the conformance manifest and the feature
-companions, and `spec.json` names them. The case files are bare payloads: a v6 document
-requires the envelope, so a test wraps each case with `write_envelope` before it reads it.
+call the failure needs. A document names the party that controls a planted item as
+`attack_shape.indirect.party_relation.controlling_party`. The producer's model keeps
+`controller` as its attribute, and every prompt and structured-output schema it sends the
+model keeps that name, so the wire name reaches documents only. `schema.json` is the runtime
+schema, `cases/` holds the valid and invalid documents with `expected-violations.json`, the
+conformance manifest and the feature companions, and `spec.json` names them. The case files
+are bare payloads: a document requires the envelope, so a test wraps each case with
+`write_envelope` before it reads it.
 
 ## The reader rules
 
@@ -1864,15 +1750,13 @@ A document written from the self-identifying envelope carries one `contract` blo
 }
 ```
 
-`scenario-handoff-v6` is published with `"envelope": "required"`, so a v6 document names its
-version before a reader validates it. `scenario-handoff-v5` stays published with
-`"envelope": "optional"`, so a reader still validates a v5 document, and the producer's
-`generate` writes v6. A reader selects one of its installed specs by the
+`scenario-handoff-v6` is published with `"envelope": "required"`, so a document names its
+version before a reader validates it. A reader selects one of its installed specs by the
 document's contract id and version, and rejects:
 
-- a v6 document without the envelope, with `MissingEnvelopeError`;
+- a document without the envelope, with `MissingEnvelopeError`;
 - an unsupported version, with the error listing the supported versions;
-- a `requires` entry the selected spec does not support (v6 supports none);
+- a `requires` entry the selected spec does not support (the spec supports none);
 - a top-level field outside the schema and the spec's declared extensions;
 - a `spec_digest` that is not exactly the installed spec's, for a draft as for a published
   version.
@@ -1884,9 +1768,9 @@ installed spec before the hand-written rules, so the producer's Stage 6 check an
 consumer's input adapter keep their existing error wording.
 
 The orchestrator keeps no copy of this contract and validates no handoff against it. Its
-handoff reader reads only `schema_version`: `HANDOFF_SCHEMA_VERSIONS` pins
-`scenario-handoff-v6`, and a saved generate output whose handoff names any other version is
-refused rather than reused, with a message naming the version authoring reads.
+handoff reader reads only `schema_version`: the orchestrator's `HANDOFF_SCHEMA_VERSIONS`
+pins `scenario-handoff-v6`, and a saved generate output whose handoff names any other
+version is refused rather than reused, with a message naming the version authoring reads.
 """
 
 
@@ -1894,13 +1778,12 @@ def write_kit(
     kit: Path,
     valid: dict[str, dict],
     invalid: dict[str, dict],
-    version: str = HANDOFF_SCHEMA_VERSION_V5,
 ) -> None:
     cases = kit / CASES_NAME
     (cases / "valid").mkdir(parents=True, exist_ok=True)
     (cases / "invalid").mkdir(parents=True, exist_ok=True)
     (kit / "schema.json").write_text(
-        json.dumps(handoff_schema(version), indent=2) + "\n",
+        json.dumps(handoff_schema(), indent=2) + "\n",
         encoding="utf-8",
     )
     for relative, payload in valid.items():
@@ -1923,10 +1806,10 @@ def write_kit(
     (cases / "expected-violations.json").write_text(dump(expected), encoding="utf-8")
 
     (cases / "companions").mkdir(parents=True, exist_ok=True)
-    companions = companion_payloads(valid, version)
+    companions = companion_payloads(valid)
     for relative, payload in companions.items():
         (cases / relative).write_text(dump(payload), encoding="utf-8")
-    manifest = conformance_cases(companions, version)
+    manifest = conformance_cases(companions)
     for rule in manifest["rules"]:
         assert rule["valid"] and rule["invalid"], rule["name"]
         for relative in [*rule["valid"], *rule["invalid"]]:
@@ -1947,14 +1830,14 @@ def write_kit(
     (cases / "canonical-digests.json").write_text(dump(digests), encoding="utf-8")
 
 
-def write_spec(kit: Path, version: str = HANDOFF_SCHEMA_VERSION_V5) -> None:
+def write_spec(kit: Path) -> None:
     """Write the runtime spec; its digest covers the spec body and the schema."""
 
     body = {
         "contract": CONTRACT_NAME,
-        "version": version,
+        "version": KIT_NAME,
         "status": "published",
-        "envelope": ENVELOPE_MODES[version],
+        "envelope": ENVELOPE_MODE,
         "supports": [],
         "extensions": [],
         "schema": "schema.json",
@@ -1965,11 +1848,8 @@ def write_spec(kit: Path, version: str = HANDOFF_SCHEMA_VERSION_V5) -> None:
     (kit / "spec.json").write_text(dump(body), encoding="utf-8")
 
 
-def write_readme(kit: Path, version: str = HANDOFF_SCHEMA_VERSION_V5) -> None:
-    (kit / README_NAME).write_text(
-        README if version == HANDOFF_SCHEMA_VERSION_V5 else README_V6,
-        encoding="utf-8",
-    )
+def write_readme(kit: Path) -> None:
+    (kit / README_NAME).write_text(README, encoding="utf-8")
 
 
 def write_lock() -> None:
@@ -1994,18 +1874,10 @@ def write_lock() -> None:
 def main() -> None:
     valid = valid_payloads(shaped_payloads(BUILDERS))
     invalid = invalid_payloads(valid)
-    for version in KIT_NAMES:
-        kit = ROOT / version
-        if version == HANDOFF_SCHEMA_VERSION_V5:
-            kit_valid, kit_invalid = valid, invalid
-        else:
-            kit_valid = {name: v6_payload(payload) for name, payload in valid.items()}
-            kit_invalid = {
-                name: v6_payload(payload) for name, payload in invalid.items()
-            }
-        write_kit(kit, kit_valid, kit_invalid, version)
-        write_spec(kit, version)
-        write_readme(kit, version)
+    kit = ROOT / KIT_NAME
+    write_kit(kit, valid, invalid)
+    write_spec(kit)
+    write_readme(kit)
     write_lock()
 
 

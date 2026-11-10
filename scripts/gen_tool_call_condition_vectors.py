@@ -12,12 +12,12 @@ from its source tree; the package depends on the standard library and
 Garak interpreter runs ``validate_condition`` and ``evaluate_condition`` on the
 inputs. The checkout must be at ``REVISION``,
 where Garak evaluates ``tool-call-condition-v2``; every expected value in the
-v2 vector files comes from that run, and the files record that revision.
+vector files comes from that run, and the files record that revision.
 
 The script also runs ``evaluate_condition_v2`` on the same inputs and stops
 when it disagrees with Garak on any vector.
 
-Without ``--check`` the script writes the v2 ``vectors/`` and ``CONTRACT.lock``.
+Without ``--check`` the script writes the ``vectors/`` and ``CONTRACT.lock``.
 With ``--check`` it regenerates the same content in memory, writes nothing,
 and exits 1 when a committed file differs. Downstream repositories mirror the
 files byte for byte.
@@ -43,8 +43,7 @@ from asago_handoff.condition_eval import evaluate_condition_v2  # noqa: E402
 
 REVISION = "4f4917d666feea947731ec1588739d8427bc15d9"
 CONTRACT = "tool-call-condition"
-V2 = "tool-call-condition-v2"
-LATEST = V2
+VERSION = "tool-call-condition-v2"
 AUTHORITY = "asago-scenario-generator"
 ROOT = Path(__file__).resolve().parents[1] / "data/contracts" / CONTRACT
 
@@ -60,15 +59,15 @@ def garak_function(function: str, revision: str = REVISION) -> dict[str, str]:
 
 # Each vector file: its version, the key of its vectors in the computed
 # results, and the implementation that computed them. Garak at REVISION
-# computes the v2 files, which the script writes.
+# computes the files, which the script writes.
 VECTOR_FILES = {
-    f"{V2}/vectors/validate.json": (
-        V2,
+    f"{VERSION}/vectors/validate.json": (
+        VERSION,
         "validate",
         garak_function("validate_condition"),
     ),
-    f"{V2}/vectors/evaluate.json": (
-        V2,
+    f"{VERSION}/vectors/evaluate.json": (
+        VERSION,
         "evaluate",
         garak_function("evaluate_condition"),
     ),
@@ -1067,28 +1066,7 @@ def _missing_call_field_inputs(add: Adder) -> None:
     )
 
 
-def evaluate_inputs() -> list[tuple[str, object, list, bool]]:
-    out: list[tuple[str, object, list, bool]] = []
-
-    def add(vector_id, condition, calls, complete=True):
-        out.append((vector_id, condition, calls, complete))
-
-    for section in (
-        _compare_inputs,
-        _unresolved_inputs,
-        _completeness_inputs,
-        _assignment_inputs,
-        _not_called_inputs,
-        _order_inputs,
-        _shared_operation_inputs,
-        _not_called_combinations_inputs,
-        _missing_call_field_inputs,
-    ):
-        section(add)
-    return out
-
-
-# --- evaluate vectors added by v2 -------------------------------------------
+# --- evaluate vectors for blocked calls and strict order ---------------------
 
 
 def blocked_call(name, arguments=None):
@@ -1208,15 +1186,22 @@ def _blocked_inputs(add: Adder) -> None:
     )
 
 
-def evaluate_inputs_v2() -> list[tuple[str, object, list, bool]]:
-    """The v1 evaluate inputs, then the inputs that pin the v2 changes."""
-
-    out = evaluate_inputs()
+def evaluate_inputs() -> list[tuple[str, object, list, bool]]:
+    out: list[tuple[str, object, list, bool]] = []
 
     def add(vector_id, condition, calls, complete=True):
         out.append((vector_id, condition, calls, complete))
 
     for section in (
+        _compare_inputs,
+        _unresolved_inputs,
+        _completeness_inputs,
+        _assignment_inputs,
+        _not_called_inputs,
+        _order_inputs,
+        _shared_operation_inputs,
+        _not_called_combinations_inputs,
+        _missing_call_field_inputs,
         _incomplete_order_inputs,
         _strict_same_argument_inputs,
         _blocked_inputs,
@@ -1298,7 +1283,7 @@ def worker() -> None:
     )
     result = {
         "validate": compute_validate(toolcall, validate_inputs()),
-        "evaluate": compute_evaluate(toolcall, evaluate_inputs_v2()),
+        "evaluate": compute_evaluate(toolcall, evaluate_inputs()),
         "crashes": probe_crashes(toolcall),
     }
     print(json.dumps(result))
@@ -1396,7 +1381,7 @@ def lock_text(root: Path, vector_texts: dict[Path, str]) -> str:
         "authority": AUTHORITY,
         "contract": CONTRACT,
         "files": files,
-        "version": LATEST,
+        "version": VERSION,
     }
     return json.dumps(lock, indent=2) + "\n"
 

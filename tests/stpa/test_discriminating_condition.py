@@ -63,7 +63,7 @@ from asago_scenario_generator.stpa.scenario_prod.and_or_tree import (
     build_sibling_index,
     render_and_or_tree,
 )
-from asago_scenario_generator.stpa.scenario_prod.handoff_v5 import (
+from asago_scenario_generator.stpa.scenario_prod.handoff import (
     build_scenario_handoff_v6,
 )
 from asago_scenario_generator.stpa.scenario_prod.deduplication import (

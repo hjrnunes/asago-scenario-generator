@@ -122,7 +122,7 @@ def test_sweep_reads_only_selected_runs_and_skips_handoffs_without_uca(
         (scenarios / "SCN-001.yaml").write_text(yaml.safe_dump(handoff))
     legacy = tmp_path / "cur-c/stages/generate/output/scenarios"
     legacy.mkdir(parents=True)
-    (legacy / "SCN-001.yaml").write_text("schema_version: scenario-handoff-v2\n")
+    (legacy / "SCN-001.yaml").write_text("scenario_id: SCN-001\n")
     out = tmp_path / "out"
 
     assert (

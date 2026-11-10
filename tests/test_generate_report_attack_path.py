@@ -1,6 +1,6 @@
 """The attack path in the report: its panel, the hazard view, and the Attack Flow files.
 
-``klarna-and-or`` holds seven v5 handoffs that carry attack paths.
+``klarna-and-or`` holds seven handoffs that carry attack paths.
 """
 
 from __future__ import annotations
@@ -45,10 +45,10 @@ def flow(output: Path, hazard_id: str) -> dict[str, Any]:
 # --- the panel ------------------------------------------------------------------
 
 
-def test_a_v5_scenario_has_an_attack_path_panel_in_place_of_the_tree(
+def test_a_scenario_has_an_attack_path_panel_in_place_of_the_tree(
     tmp_path: Path,
 ) -> None:
-    run = load_run(copy(tmp_path, "v5", "klarna-and-or"))
+    run = load_run(copy(tmp_path, "run", "klarna-and-or"))
 
     for scenario in run.scenarios:
         assert [p.key for p in scenario_panels(run, scenario)] == [
@@ -60,7 +60,7 @@ def test_a_v5_scenario_has_an_attack_path_panel_in_place_of_the_tree(
 
 
 def test_the_path_reads_attacker_then_five_numbered_parts(tmp_path: Path) -> None:
-    p = panels(copy(tmp_path, "v5", "klarna-and-or"), "SCN-027")["path"]
+    p = panels(copy(tmp_path, "run", "klarna-and-or"), "SCN-027")["path"]
 
     body = str(p.body)
     labels = re.findall(r"<dt>(.*?)</dt>", body)
@@ -82,7 +82,7 @@ def test_the_path_reads_attacker_then_five_numbered_parts(tmp_path: Path) -> Non
 
 
 def test_the_path_shows_no_node_id_framing_or_format_note(tmp_path: Path) -> None:
-    body = str(panels(copy(tmp_path, "v5", "klarna-and-or"), "SCN-027")["path"].body)
+    body = str(panels(copy(tmp_path, "run", "klarna-and-or"), "SCN-027")["path"].body)
 
     assert not re.search(r"\bA[TP]-[A-Z]", body)
     assert "Proposed causal hypothesis" not in body
@@ -92,7 +92,7 @@ def test_the_path_shows_no_node_id_framing_or_format_note(tmp_path: Path) -> Non
 
 
 def test_a_weak_point_shows_its_belief_and_evidence_status(tmp_path: Path) -> None:
-    output = copy(tmp_path, "v5", "klarna-and-or")
+    output = copy(tmp_path, "run", "klarna-and-or")
 
     def believe(y: dict) -> None:
         weak = [
@@ -111,7 +111,7 @@ def test_a_weak_point_shows_its_belief_and_evidence_status(tmp_path: Path) -> No
 def test_a_functional_path_has_no_attacker_and_shows_none_for_its_steps(
     tmp_path: Path,
 ) -> None:
-    p = panels(copy(tmp_path, "v5", "klarna-and-or"), "SCN-001")["path"]
+    p = panels(copy(tmp_path, "run", "klarna-and-or"), "SCN-001")["path"]
 
     body = str(p.body)
     labels = re.findall(r"<dt>(.*?)</dt>", body)
@@ -127,7 +127,7 @@ def test_a_functional_path_has_no_attacker_and_shows_none_for_its_steps(
 
 
 def test_an_adversarial_path_keeps_its_steps_row_as_a_list(tmp_path: Path) -> None:
-    body = str(panels(copy(tmp_path, "v5", "klarna-and-or"), "SCN-027")["path"].body)
+    body = str(panels(copy(tmp_path, "run", "klarna-and-or"), "SCN-027")["path"].body)
 
     assert "<dt>2 Attack steps</dt><dd><ol><li>A third party plants" in body
     assert "<dd>None</dd>" not in body
@@ -136,10 +136,10 @@ def test_an_adversarial_path_keeps_its_steps_row_as_a_list(tmp_path: Path) -> No
 # --- the narrative panel --------------------------------------------------------
 
 
-def test_a_v5_narrative_renders_as_its_paragraph_with_a_clipped_preview(
+def test_a_narrative_renders_as_its_paragraph_with_a_clipped_preview(
     tmp_path: Path,
 ) -> None:
-    run = load_run(copy(tmp_path, "v5", "klarna-and-or"))
+    run = load_run(copy(tmp_path, "run", "klarna-and-or"))
     narrative = run.scenarios["SCN-027"].narrative
 
     p = panels(copy(tmp_path, "again", "klarna-and-or"), "SCN-027")["narrative"]
@@ -150,8 +150,8 @@ def test_a_v5_narrative_renders_as_its_paragraph_with_a_clipped_preview(
     assert "sourced claim" not in p.preview
 
 
-def test_a_short_v5_narrative_previews_whole(tmp_path: Path) -> None:
-    output = copy(tmp_path, "v5", "klarna-and-or")
+def test_a_short_narrative_previews_whole(tmp_path: Path) -> None:
+    output = copy(tmp_path, "run", "klarna-and-or")
     edit_yaml(
         output / "scenarios" / "SCN-027.yaml",
         lambda y: y.update(narrative="The assistant acts on a planted item."),
@@ -174,8 +174,8 @@ def test_the_structured_narrative_has_no_opening_paragraph(tmp_path: Path) -> No
 # --- the scenario intro ---------------------------------------------------------
 
 
-def test_the_intro_of_a_v5_run_counts_its_attack_paths(tmp_path: Path) -> None:
-    output = copy(tmp_path, "v5", "klarna-and-or")
+def test_the_intro_of_a_run_counts_its_attack_paths(tmp_path: Path) -> None:
+    output = copy(tmp_path, "run", "klarna-and-or")
 
     write_report(output)
 
@@ -192,7 +192,7 @@ def hazard_text(output: Path) -> str:
 
 
 def test_the_hazard_view_names_the_path_node_ids(tmp_path: Path) -> None:
-    output = copy(tmp_path, "v5", "klarna-and-or")
+    output = copy(tmp_path, "run", "klarna-and-or")
 
     write_report(output)
 
@@ -205,7 +205,7 @@ def test_the_hazard_view_names_the_path_node_ids(tmp_path: Path) -> None:
 
 
 def test_each_reached_hazard_has_an_attack_flow(tmp_path: Path) -> None:
-    output = copy(tmp_path, "v5", "klarna-and-or")
+    output = copy(tmp_path, "run", "klarna-and-or")
 
     write_report(output)
 

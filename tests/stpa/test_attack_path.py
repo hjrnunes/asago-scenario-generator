@@ -1,4 +1,4 @@
-"""The ``attack-path-v1`` path a v5 handoff carries in place of the attack tree.
+"""The ``attack-path-v1`` path a handoff carries in place of the attack tree.
 
 Code reduces the scenario's and-or tree to the path; no request depends on it.
 Every test is offline.
@@ -26,14 +26,12 @@ from asago_scenario_generator.stpa.scenario_prod.attack_path import (
 from asago_scenario_generator.stpa.scenario_prod.handoff import (
     AttackPath,
     ScenarioHandoffV6,
+    build_scenario_handoff_v6,
     handoff_ownership_violations,
     handoff_schema_violations,
 )
-from asago_scenario_generator.stpa.scenario_prod.handoff_v5 import (
-    build_scenario_handoff_v6,
-)
 from tests.stpa.test_narration import adversarial, everyday
-from tests.stpa.test_scenario_handoff_v5 import (
+from tests.stpa.test_scenario_handoff_v6 import (
     SCHEMA,
     _envelope,
     _kit,
@@ -268,9 +266,9 @@ def test_the_kit_holds_the_path_cases() -> None:
     assert expected["invalid/schema-attack-path-not-object.json"] == [
         "schema_violation:attack_path"
     ]
-    assert expected["invalid/v5-attack-tree-present.json"] == [
+    assert expected["invalid/attack-tree-present.json"] == [
         "schema_violation:attack_tree"
     ]
-    assert expected["invalid/v5-attack-path-unknown-key.json"] == [
+    assert expected["invalid/attack-path-unknown-key.json"] == [
         "schema_violation:attack_path"
     ]

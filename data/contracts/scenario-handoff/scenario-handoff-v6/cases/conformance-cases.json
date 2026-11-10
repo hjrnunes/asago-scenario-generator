@@ -27,10 +27,10 @@
         "schema_violation:<root>"
       ],
       "invalid": [
-        "invalid/v5-procedure-step-id-out-of-order.json",
-        "invalid/v5-procedure-leads-to-wrong.json",
-        "invalid/v5-procedure-technique-without-tactic.json",
-        "invalid/v5-procedure-step-missing-tactic-key.json"
+        "invalid/procedure-step-id-out-of-order.json",
+        "invalid/procedure-leads-to-wrong.json",
+        "invalid/procedure-technique-without-tactic.json",
+        "invalid/procedure-step-missing-tactic-key.json"
       ],
       "kind": "handoff",
       "name": "procedure-chain",

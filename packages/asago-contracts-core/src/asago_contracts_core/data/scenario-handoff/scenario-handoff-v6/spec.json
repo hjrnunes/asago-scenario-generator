@@ -5,7 +5,7 @@
   "envelope": "required",
   "extensions": [],
   "schema": "schema.json",
-  "spec_digest": "sha256:a2f3bfe6fa4e3ee926bada66bc420d55a2ea9989a2dd62981acb705426c2f79a",
+  "spec_digest": "sha256:576beaeacf8325f5d28b62c9f769a7dfd81b6d587b524d312cffc78a4a9a4c61",
   "status": "published",
   "supports": [],
   "version": "scenario-handoff-v6"

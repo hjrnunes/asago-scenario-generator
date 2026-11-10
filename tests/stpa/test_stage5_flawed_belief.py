@@ -5,7 +5,7 @@ takes to be true and the process-model variable that holds it (or a gap). Code
 fills the variable of process-model factors and of feedback factors whose
 updated variable is on the path; the model chooses the rest. The Stage 5
 request and its factors carry no belief. Downstream, the agent-belief fact, the
-and-or weak point and the v5 causal factor carry the stated belief. Every test
+and-or weak point and the handoff's causal factor carry the stated belief. Every test
 is offline and uses synthetic replies.
 """
 
@@ -58,7 +58,7 @@ from tests.helpers.normal_authoring_wire import (
 from tests.stpa.sp1_helpers import MockLLMClient
 from tests.stpa.test_and_or_tree import nodes, tree_of
 from tests.stpa.test_narration import adversarial
-from tests.stpa.test_scenario_handoff_v5 import fields_of
+from tests.stpa.test_scenario_handoff_v6 import fields_of
 
 BELIEF = "The payment batch was already approved by the account holder."
 CA_BELIEF = "The account holder asked for this exact batch of payments."
@@ -434,7 +434,7 @@ def test_the_weak_point_carries_the_belief_and_its_variable_or_gap() -> None:
     assert list(found) == list(nodes(tree_of(adversarial())))
 
 
-def test_the_v5_factor_publishes_the_belief_and_the_variable() -> None:
+def test_the_causal_factor_publishes_the_belief_and_the_variable() -> None:
     fields = fields_of(_stated_spec())
     gap = fields_of(_stated_spec(ProcessModelVariable(pm_id=None, description="Who")))
 

@@ -67,11 +67,11 @@ def test_both_encodings_agree_when_text_is_already_nfc_and_finite() -> None:
 def test_the_frame_is_utf8_domain_nul_and_canonical_json() -> None:
     value = {"a": 1}
     payload = (
-        f"scenario-handoff-v5\0{canonical_json(value, encoding=PRODUCER_ENCODING)}"
+        f"scenario-handoff-v6\0{canonical_json(value, encoding=PRODUCER_ENCODING)}"
     )
 
     assert (
-        framed_digest("scenario-handoff-v5", value)
+        framed_digest("scenario-handoff-v6", value)
         == hashlib.sha256(payload.encode("utf-8")).hexdigest()
     )
 

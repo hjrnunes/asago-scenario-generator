@@ -1,6 +1,9 @@
 {
   "harms": [
     {
+      "hazard_ids": [
+        "H-5"
+      ],
       "loss_id": "L-1",
       "provenance": "risk_card",
       "risk_ids": [
@@ -17,6 +20,11 @@
       "title": "Unauthorized exposure or distribution of customer Personally Identifiable Information (PII)"
     },
     {
+      "hazard_ids": [
+        "H-3",
+        "H-4",
+        "H-7"
+      ],
       "loss_id": "L-2",
       "provenance": "risk_card",
       "risk_ids": [
@@ -34,6 +42,10 @@
       "title": "Incorrect financial transactions or unauthorized handling of sensitive financial records, leading to monetary loss or regulatory non-compliance"
     },
     {
+      "hazard_ids": [
+        "H-2",
+        "H-3"
+      ],
       "loss_id": "L-3",
       "provenance": "risk_card",
       "risk_ids": [
@@ -51,6 +63,10 @@
       "title": "Erosion of customer trust and poor decision-making"
     },
     {
+      "hazard_ids": [
+        "H-2",
+        "H-8"
+      ],
       "loss_id": "L-4",
       "provenance": "risk_card",
       "risk_ids": [
@@ -68,6 +84,9 @@
       "title": "Legal penalties, fines, or operational restrictions resulting from inaccurate policy advice or failure to adhere to financial regulations"
     },
     {
+      "hazard_ids": [
+        "H-1"
+      ],
       "loss_id": "L-5",
       "provenance": "risk_card",
       "risk_ids": [
@@ -80,6 +99,10 @@
       "title": "Unfair or discriminatory treatment of customers based on biased or stereotypical AI outputs"
     },
     {
+      "hazard_ids": [
+        "H-7",
+        "H-8"
+      ],
       "loss_id": "L-6",
       "provenance": "use_case",
       "risk_ids": [],
@@ -90,6 +113,9 @@
       "title": "Financial or reputational damage to merchants"
     },
     {
+      "hazard_ids": [
+        "H-6"
+      ],
       "loss_id": "L-7",
       "provenance": "use_case",
       "risk_ids": [],
@@ -98,6 +124,92 @@
       ],
       "text": "Loss of operational value or customer service utility due to the system's inability to handle complex or nuanced inquiries, necessitating human re-intervention.",
       "title": "Loss of operational value or customer service utility"
+    }
+  ],
+  "hazards": [
+    {
+      "description": "The foundation model generates responses that reflect harmful stereotypes or demonstrate disparate accuracy across demographic groups.",
+      "hazard_id": "H-1",
+      "loss_ids": [
+        "L-5"
+      ],
+      "scenario_ids": []
+    },
+    {
+      "description": "The RAG-style knowledge-grounding system provides inaccurate policy information or improvises on regulated topics like fees or payment terms.",
+      "hazard_id": "H-2",
+      "loss_ids": [
+        "L-3",
+        "L-4"
+      ],
+      "scenario_ids": [
+        "SCN-011",
+        "SCN-012"
+      ]
+    },
+    {
+      "description": "The assistant generates deceptive content or facilitates social engineering through confident-but-wrong responses.",
+      "hazard_id": "H-3",
+      "loss_ids": [
+        "L-2",
+        "L-3"
+      ],
+      "scenario_ids": [
+        "SCN-011",
+        "SCN-012"
+      ]
+    },
+    {
+      "description": "The assistant executes `process_refund` or `schedule_payment` operations using incorrect amounts, order IDs, or unauthorized plan IDs.",
+      "hazard_id": "H-4",
+      "loss_ids": [
+        "L-2"
+      ],
+      "scenario_ids": [
+        "SCN-003",
+        "SCN-004"
+      ]
+    },
+    {
+      "description": "The conversational interface or prompt integration reveals PII from the authenticated session or backend data to an unauthorized recipient.",
+      "hazard_id": "H-5",
+      "loss_ids": [
+        "L-1"
+      ],
+      "scenario_ids": [
+        "SCN-001",
+        "SCN-002"
+      ]
+    },
+    {
+      "description": "The assistant attempts to resolve nuanced or complex customer inquiries that fall outside the scope of the programmed intents or the RAG-grounded policy snippets.",
+      "hazard_id": "H-6",
+      "loss_ids": [
+        "L-7"
+      ],
+      "scenario_ids": [
+        "SCN-006"
+      ]
+    },
+    {
+      "description": "The assistant executes `process_refund` with an `amount` that exceeds the `state:orders.remaining_to_pay` for the specified `order_id`.",
+      "hazard_id": "H-7",
+      "loss_ids": [
+        "L-2",
+        "L-6"
+      ],
+      "scenario_ids": []
+    },
+    {
+      "description": "The assistant provides inaccurate or unauthorized information regarding a merchant's specific policies or item details retrieved from the order context.",
+      "hazard_id": "H-8",
+      "loss_ids": [
+        "L-4",
+        "L-6"
+      ],
+      "scenario_ids": [
+        "SCN-023"
+      ]
     }
   ],
   "policy": {
@@ -3434,5 +3546,5 @@
     }
   ],
   "rule": "loss-source-risk-cards",
-  "schema_version": "policy-coverage-v1"
+  "schema_version": "policy-coverage-v2"
 }

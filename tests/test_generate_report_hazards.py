@@ -47,7 +47,7 @@ REACHED = {
 
 
 def copy_and_or(tmp_path: Path, name: str = "output") -> Path:
-    """Copy the v5 run, whose scenarios carry attack paths."""
+    """Copy the run whose scenarios carry attack paths."""
     target = tmp_path / name
     shutil.copytree(AND_OR, target)
     return target
@@ -140,7 +140,7 @@ def test_one_broken_path_costs_only_its_hazards(
     assert written == ["H-10.json", "H-2.json", "H-5.json"]
 
 
-def test_the_scenario_intro_counts_attack_paths_in_a_v5_run(tmp_path: Path) -> None:
+def test_the_scenario_intro_counts_attack_paths_in_a_run(tmp_path: Path) -> None:
     output = copy_and_or(tmp_path)
 
     write_report(output)

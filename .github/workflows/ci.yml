@@ -23,10 +23,6 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
       - run: uv sync --locked
-      # A breaking schema change between installed contract versions needs a new
-      # major version. The check runs on the producer's own contract root.
-      - name: Schema-diff check
-        run: uv run python -m asago_contracts_core.schema_diff_cli data/contracts
       - run: ./scripts/quality.sh
       - run: env -u ASAGO_SCENARIO_GENERATOR_MODEL_BASE_URL uv run pytest tests/ -q
       # The root run covers tests/ only, and conftest modules shadow each other

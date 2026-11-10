@@ -62,7 +62,7 @@ def test_a_semver_renders_and_compares_against_another_semver():
     ("name", "contract", "expected"),
     [
         ("execution-receipt-v2", "execution-receipt", (2, 0, 0)),
-        ("scenario-handoff-v5", "scenario-handoff", (5, 0, 0)),
+        ("demo-v5", "demo", (5, 0, 0)),
         ("example-v1.1.0", "example", (1, 1, 0)),
         ("attack-flow-2.0.0", "attack-flow", (2, 0, 0)),
     ],

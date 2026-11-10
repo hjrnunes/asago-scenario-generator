@@ -122,7 +122,7 @@
     ],
     "status": "satisfied"
   },
-  "content_digest": "d4743f50d76d4dc86bcc79dfa08f38517df4ece52e7e6f0ac4f6ec0696fed39d",
+  "content_digest": "f071f68af62996df3fcb32190b2732d3e6c73602ef9ac360236cfb7bdbcf3c42",
   "deduplication": {
     "key": {
       "condition": "[{\"kind\":\"value\",\"left\":{\"path\":\"TARGET-STATE.items.ITEM-1.owner_id\",\"source\":\"fact\"},\"op\":\"ne\",\"right\":{\"path\":\"TARGET-STATE.authenticated_user_id\",\"source\":\"fact\"}}]",
@@ -283,7 +283,7 @@
     },
     {
       "authority": "producer_contract",
-      "source": "producer handoff contract scenario-handoff-v5",
+      "source": "producer handoff contract scenario-handoff-v6",
       "statement": "The unsafe outcome condition is expressed semantically; the executable check is derived downstream."
     }
   ],

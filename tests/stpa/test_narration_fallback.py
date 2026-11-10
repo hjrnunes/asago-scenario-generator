@@ -34,12 +34,10 @@ from asago_scenario_generator.stpa.models.scenario_context import (
 from asago_scenario_generator.stpa.models.scenario_spec import ScenarioSpec
 from asago_scenario_generator.stpa.scenario_prod.handoff import (
     NARRATIVE_FALLBACK_FACT,
+    build_scenario_handoff_v6,
     handoff_ownership_violations,
     handoff_schema_violations,
     narrative_fallback_fact,
-)
-from asago_scenario_generator.stpa.scenario_prod.handoff_v5 import (
-    build_scenario_handoff_v6,
 )
 from asago_scenario_generator.stpa.scenario_prod.narration import (
     FALLBACK_LAST_RESORT,

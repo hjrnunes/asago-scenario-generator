@@ -6,10 +6,9 @@ checkout. ``scripts/sync_handoff_package_data.py`` copies them and a producer
 test fails when the copies differ.
 
 ``installed_specs`` reads the specs the package installs and ``read_handoff``
-reads one handoff through them; ``load_contract`` pairs each published version's
-schema with the ownership rules. Two versions are published: ``VERSION`` (the
-newest, which requires the envelope) and ``LEGACY_VERSION`` (the retired version,
-which a reader still validates).
+reads one handoff through them; ``load_contract`` pairs the published version's
+schema with the ownership rules. One version is published: ``VERSION``, which
+requires the envelope.
 """
 
 from __future__ import annotations
@@ -17,27 +16,21 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from functools import cache
 from pathlib import Path
 from typing import Any
 
 from .envelope import ContractSpec, SpecSet, UnsupportedVersionError, load_specs
 
-HANDOFF_SCHEMA_VERSION_V5 = "scenario-handoff-v5"
 HANDOFF_SCHEMA_VERSION_V6 = "scenario-handoff-v6"
-#: A version's directory, as the contract layout names it.
-KIT_V5 = HANDOFF_SCHEMA_VERSION_V5
+#: The version's directory, as the contract layout names it.
 KIT_V6 = HANDOFF_SCHEMA_VERSION_V6
 CASES_NAME = "cases"
 OWNERSHIP_RULES_NAME = "ownership-rules.json"
 CONTRACT = "scenario-handoff"
-#: The older published version, retired: no writer publishes it.
-LEGACY_VERSION = HANDOFF_SCHEMA_VERSION_V5
-#: The newest published version, the one a new writer publishes.
+#: The published version, the one a writer publishes.
 VERSION = HANDOFF_SCHEMA_VERSION_V6
-#: Every published version, oldest first.
-VERSIONS = (LEGACY_VERSION, VERSION)
 #: The installed spec root: ``<data>/<contract>/<version>/spec.json``.
 DATA_DIR = Path(__file__).resolve().parent / "data"
 CONTRACT_DIR = DATA_DIR / CONTRACT
@@ -50,25 +43,12 @@ class ContractError(ValueError):
 
 @dataclass(frozen=True)
 class Contract:
-    """The documents one handoff kit states its rules in.
-
-    ``schema`` is the newest installed version's, which is what a reader that
-    knows no version uses; ``schemas`` holds each installed version's, so one
-    contract serves a v5 document and a v6 document alike.
-    """
+    """The documents one handoff kit states its rules in."""
 
     schema: Mapping[str, Any]
     forbidden_keys: frozenset[str]
     forbidden_patterns: tuple[tuple[str, re.Pattern[str]], ...]
     specs: SpecSet | None = None
-    schemas: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
-
-    def schema_for(self, version: Any) -> Mapping[str, Any]:
-        """Return one published version's schema, or the newest when it is unknown."""
-
-        if isinstance(version, str) and version in self.schemas:
-            return self.schemas[version]
-        return self.schema
 
 
 @cache
@@ -82,7 +62,7 @@ def read_handoff(document: Any) -> ContractSpec:
     """Read one handoff through the installed scenario-handoff specs.
 
     A document that carries the envelope is selected by its contract id and
-    version; a legacy document without one is selected by ``schema_version``.
+    version; a document without one is selected by ``schema_version``.
     """
 
     return installed_specs().read(document)
@@ -91,10 +71,9 @@ def read_handoff(document: Any) -> ContractSpec:
 def load_contract(contract_dir: Path | None = None) -> Contract:
     """Read the schemas and the ownership rules of *contract_dir*.
 
-    *contract_dir* is a directory holding ``ownership-rules.json`` and one
-    directory per published version, as the producer's contract tree does.
-    Without it, the package's own copies are read. A directory that holds only
-    the older version states the older schema alone.
+    *contract_dir* is a directory holding ``ownership-rules.json`` and the
+    published version's directory, as the producer's contract tree does.
+    Without it, the package's own copies are read.
     """
 
     root = Path(contract_dir) if contract_dir is not None else CONTRACT_DIR
@@ -103,24 +82,17 @@ def load_contract(contract_dir: Path | None = None) -> Contract:
     installed = {
         spec.version: spec for spec in specs.specs if spec.contract == CONTRACT
     }
-    newest = next(
-        (version for version in reversed(VERSIONS) if version in installed), None
-    )
-    if newest is None:
+    published = installed.get(VERSION)
+    if published is None:
         supported = ", ".join(sorted(installed)) or "none"
         raise UnsupportedVersionError(
             f"no installed {CONTRACT} spec; installed versions: {supported}"
         )
     return Contract(
-        schema=installed[newest].schema,
+        schema=published.schema,
         forbidden_keys=rules[0],
         forbidden_patterns=rules[1],
         specs=specs,
-        schemas={
-            version: installed[version].schema
-            for version in VERSIONS
-            if version in installed
-        },
     )
 
 
@@ -170,14 +142,10 @@ __all__ = [
     "DATA_DIR",
     "Contract",
     "ContractError",
-    "HANDOFF_SCHEMA_VERSION_V5",
     "HANDOFF_SCHEMA_VERSION_V6",
-    "KIT_V5",
     "KIT_V6",
-    "LEGACY_VERSION",
     "OWNERSHIP_RULES_NAME",
     "VERSION",
-    "VERSIONS",
     "installed_specs",
     "load_contract",
     "load_ownership_rules",

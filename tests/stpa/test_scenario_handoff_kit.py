@@ -176,12 +176,23 @@ def _validator() -> Draft202012Validator:
 
 def test_the_kit_holds_exactly_the_listed_fixtures() -> None:
     assert {path.name for path in (KIT / "valid").glob("*.json")} == VALID
-    # The schema-* cases are listed in test_scenario_handoff_contract_kit.py
-    # and the v5-* cases in test_scenario_handoff_v5.py.
+    # The schema-* cases are listed in test_scenario_handoff_contract_kit.py.
+    # The generator names the handoff field and attack path cases, and
+    # test_scenario_handoff_v6.py checks every invalid fixture's codes.
+    generator = _load_generator()
+    field_cases = {
+        f"{name}.json"
+        for cases in (
+            generator.FIELD_CASES,
+            generator.PATH_CASES,
+            generator.FUNCTIONAL_CASES,
+        )
+        for name in cases
+    }
     listed = {
         path.name
         for path in (KIT / "invalid").glob("*.json")
-        if not path.name.startswith(("schema-", "v5-"))
+        if not path.name.startswith("schema-") and path.name not in field_cases
     }
     assert listed == set(INVALID)
     assert len(INVALID) == 52
@@ -305,13 +316,18 @@ def test_the_ownership_scan_still_catches_prose_in_a_payload() -> None:
     assert "role: user" in leaf
 
 
-def _generator(tmp: Path) -> ModuleType:
+def _load_generator() -> ModuleType:
     spec = importlib.util.spec_from_file_location(
         "gen_handoff_kit_under_test", ROOT / "scripts/gen_handoff_kit.py"
     )
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    return module
+
+
+def _generator(tmp: Path) -> ModuleType:
+    module = _load_generator()
     root = tmp / "scenario-handoff"
     shutil.copytree(CONTRACT_ROOT, root)
     module.ROOT = root
@@ -322,8 +338,7 @@ def test_the_generator_reproduces_every_committed_kit_byte_for_byte(
     tmp_path: Path,
 ) -> None:
     module = _generator(tmp_path)
-    for kit in module.KIT_NAMES:
-        shutil.rmtree(module.ROOT / kit)
+    shutil.rmtree(module.ROOT / module.KIT_NAME)
 
     module.main()
 

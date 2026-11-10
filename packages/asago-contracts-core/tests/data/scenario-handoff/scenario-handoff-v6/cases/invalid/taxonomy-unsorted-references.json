@@ -122,7 +122,7 @@
     ],
     "status": "satisfied"
   },
-  "content_digest": "7b36ca67356eac76d39a9a691078ba6b923ee08306900bc9b56539c4d6e8d5c5",
+  "content_digest": "a59086165952d8703447f7a1873f83c83a2ff1ad910c2126d35a90142ea75c6a",
   "deduplication": {
     "key": {
       "claim_level": "command_attempt",
@@ -284,7 +284,7 @@
     },
     {
       "authority": "producer_contract",
-      "source": "producer handoff contract scenario-handoff-v5",
+      "source": "producer handoff contract scenario-handoff-v6",
       "statement": "The unsafe outcome condition is expressed semantically; the executable check is derived downstream."
     }
   ],

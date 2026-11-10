@@ -41,7 +41,7 @@ The normal producer `generate` publishes one semantics-only `scenario-handoff-v6
 through its handoff model, `ScenarioHandoffV6`, which carries the scenario's
 `attack_path` (`attack_path.py` reduces the and-or tree to it) and adds the
 UCA, actor, causal factors, preconditions, ATLAS procedure, and worst case threat
-that `handoff_v5.py` derives from the scenario spec. `model_gherkin.py` asks
+that `build_scenario_handoff_v6` in `handoff.py` derives from the scenario spec. `model_gherkin.py` asks
 the model for a declarative Gherkin per published scenario, and code falls back
 to the rendered Gherkin when the reply fails its checks. The envelope carries
 the Stage 5 `discriminating_condition`, its code-owned `condition_check`, and an
@@ -80,38 +80,31 @@ delivery configuration, or executable artifact compilation.
 The producer also owns what a bound `tool_call_condition` means. The
 `tool-call-condition` contract in `data/contracts/tool-call-condition/` states
 the condition's structure, how comparisons combine, how calls are assigned to
-operations, and the three outcomes with their reasons. The vectors of each
-version hold the results of Garak's `validate_condition` and
-`evaluate_condition` at the revision the vector files name; the one reference
-evaluator, `evaluate_condition_v2` in `packages/asago-handoff`
-(`asago_handoff.condition_eval`, which
+operations, and the three outcomes with their reasons. The vectors hold the
+results of Garak's `validate_condition` and `evaluate_condition` at the revision
+the vector files name; the one reference evaluator, `evaluate_condition_v2` in
+`packages/asago-handoff` (`asago_handoff.condition_eval`, which
 `scripts/gen_tool_call_condition_vectors.py` imports and
-`stpa.tool_call_condition_eval` re-exports), must agree with every
-v2 evaluate vector, and the consumer and the orchestrator read it from there. An
+`stpa.tool_call_condition_eval` re-exports), must agree with every evaluate
+vector, and the consumer and the orchestrator read it from there. An
 evaluator, such as the Garak `toolcall` detector, executes the condition and
-must reproduce every vector of the version it implements; the consumer carries the condition unchanged in `tool_call_condition.json`;
+must reproduce every vector; the consumer carries the condition unchanged in `tool_call_condition.json`;
 the consumer and the fork readers carry the contract byte for byte. A change to condition semantics is a new contract
 version with new vectors, made here first; no repository redefines the
 semantics in its own prose or tests.
 
-The contract directory holds two versions side by side, pinned by one lock.
-`VERSIONING.md` states what each version means, how a consumer cites one, and
-how to vendor a copy; `scripts/sync_tool_call_condition.py --check` verifies
-the consumer's, MiDojo's and Garak's byte copies against the lock, and
-`--write` refreshes one. Each copy carries the lock, which names the version
-and every digest, so it references the contract without another producer file.
-`tool-call-condition-v1` is what Garak's detector implemented at the revision
-its vector files name, and its files never change; Garak's detector now
-implements `tool-call-condition-v2`. `tool-call-condition-v2` changes three evaluation rules: an
-`order` that finds no prior call is inconclusive on an incomplete capture,
-`same_argument` uses the strict equality of value comparisons, and a captured
-call marked `blocked` never satisfies `requires_prior`. Both versions share one
-condition schema, so every condition the producer binds is valid under both.
-A `scenario-handoff-v6` handoff therefore carries no condition-version field:
-the evaluator states the version it implements by the kit it mirrors and the
-vectors it reproduces. The producer never emits `blocked`; the capture sets it.
-The Stage 5 condition checks are the same under both versions, because they do
-not reason about completeness, `same_argument` equality, or `blocked`.
+The contract directory holds one version, pinned by one lock. The version's
+`README.md` states how a consumer cites it and how to vendor a copy;
+`scripts/sync_tool_call_condition.py --check` verifies the consumer's, MiDojo's
+and Garak's byte copies against the lock, and `--write` refreshes one. Each copy
+carries the lock, which names the version and every digest, so it references
+the contract without another producer file. Garak's detector implements
+`tool-call-condition-v2`. A `scenario-handoff-v6` handoff carries no
+condition-version field: the evaluator states the version it implements by the
+kit it mirrors and the vectors it reproduces. The producer never emits
+`blocked`; the capture sets it. The Stage 5 condition checks do not reason about
+completeness, `same_argument` equality, or `blocked`, so they do not depend on
+those rules.
 
 The consumer `generate` command owns concrete user text or user-only history,
 target-context binding, required-argument delivery, setup, detector and

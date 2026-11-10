@@ -21,9 +21,8 @@ from asago_contracts_core import (
 )
 
 CONTRACT_DIR = Path(__file__).resolve().parent / "data" / "scenario-handoff"
-V5 = "scenario-handoff-v5"
-V6 = "scenario-handoff-v6"
-VERSION_DIR = CONTRACT_DIR / V6
+VERSION = "scenario-handoff-v6"
+VERSION_DIR = CONTRACT_DIR / VERSION
 KIT_DIR = VERSION_DIR / "cases"
 
 
@@ -37,25 +36,21 @@ def _copy_kit(tmp_path: Path) -> Path:
     return kit
 
 
-@pytest.mark.parametrize("version", [V5, V6])
-def test_every_conformance_case_passes(version: str) -> None:
-    results = run_conformance(CONTRACT_DIR, version)
+def test_every_conformance_case_passes() -> None:
+    results = run_conformance(CONTRACT_DIR, VERSION)
     assert [result.case.path for result in results if not result.passed] == []
     assert len(results) == 35
 
 
-@pytest.mark.parametrize("version", [V5, V6])
-def test_the_manifest_rule_without_codes_is_refused(
-    version: str, tmp_path: Path
-) -> None:
+def test_the_manifest_rule_without_codes_is_refused(tmp_path: Path) -> None:
     kit = _copy_kit(tmp_path)
-    manifest_path = kit / version / "cases" / "conformance-cases.json"
+    manifest_path = kit / VERSION / "cases" / "conformance-cases.json"
     manifest = _load(manifest_path)
     del manifest["rules"][0]["codes"]
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
 
     with pytest.raises(ContractError, match="must name a non-empty codes list"):
-        load_conformance_cases(kit, version)
+        load_conformance_cases(kit, VERSION)
 
 
 def test_every_invalid_case_reports_a_code_its_rule_names() -> None:
@@ -73,7 +68,7 @@ def test_every_invalid_case_reports_a_code_its_rule_names() -> None:
 
 def test_an_invalid_case_with_an_unrelated_violation_fails(tmp_path: Path) -> None:
     kit = _copy_kit(tmp_path)
-    kit_dir = kit / V6 / "cases"
+    kit_dir = kit / VERSION / "cases"
     (kit_dir / "invalid" / "taxonomy-unsorted-references.json").write_bytes(
         (kit_dir / "invalid" / "safe-call-argument-blank-name.json").read_bytes()
     )
@@ -191,7 +186,7 @@ def test_a_companion_rule_names_the_first_break() -> None:
 
 def test_a_broken_companion_fails_only_its_own_case(tmp_path: Path) -> None:
     kit = _copy_kit(tmp_path)
-    path = kit / V6 / "cases" / "companions" / "feature-companion-holds.json"
+    path = kit / VERSION / "cases" / "companions" / "feature-companion-holds.json"
     entry = _load(path)
     entry["text"] = "Feature: something else\n"
     path.write_text(json.dumps(entry), encoding="utf-8")

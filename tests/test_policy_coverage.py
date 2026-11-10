@@ -515,8 +515,8 @@ CONTRACTS = Path(__file__).resolve().parents[1] / "data/contracts/policy-coverag
 CONTRACT = CONTRACTS / "policy-coverage-v2"
 
 
-def validator(contract: Path = CONTRACT) -> Draft202012Validator:
-    return Draft202012Validator(json.loads((contract / "schema.json").read_text()))
+def validator() -> Draft202012Validator:
+    return Draft202012Validator(json.loads((CONTRACT / "schema.json").read_text()))
 
 
 def test_a_built_document_validates_against_the_contract_schema() -> None:
@@ -547,14 +547,6 @@ def test_the_v2_schema_requires_hazards_and_each_harms_hazard_ids() -> None:
 
     assert "'hazards' is a required property" in messages
     assert "'hazard_ids' is a required property" in messages
-
-
-def test_the_v1_schema_still_validates_its_minimal_example() -> None:
-    v1 = CONTRACTS / "policy-coverage-v1"
-    example = json.loads((v1 / "valid/minimal.json").read_text())
-
-    assert example["schema_version"] == "policy-coverage-v1"
-    assert list(validator(v1).iter_errors(example)) == []
 
 
 def test_a_document_without_a_source_validates_with_null_provenance() -> None:

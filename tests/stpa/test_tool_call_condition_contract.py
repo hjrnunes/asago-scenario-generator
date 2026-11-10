@@ -54,20 +54,7 @@ SCHEMA = _load(KIT / "schema.json")
 VALIDATOR = Draft202012Validator(SCHEMA)
 VALIDATE = _load(KIT / "vectors/validate.json")["vectors"]
 EVALUATE = _load(KIT / "vectors/evaluate.json")["vectors"]
-# The current kit is the only kit; the aliases keep the v2-flavoured names
-# used by the vectors and the generator tests.
-SCHEMA_V2 = SCHEMA
-VALIDATOR_V2 = VALIDATOR
 CALL_VALIDATOR_V2 = Draft202012Validator(SCHEMA["$defs"]["call"])
-VALIDATE_V2 = VALIDATE
-EVALUATE_V2 = EVALUATE
-
-# The v2 vectors whose result differs from v1, each by one of the three changes.
-CHANGED_IN_V2 = {
-    "completeness.order-clean.complete-false",
-    "order.same-argument-bool-int",
-    "order.same-argument-null-both-missing-on-prior",
-}
 
 
 def _schema_errors(condition: Any, validator: Any = VALIDATOR) -> list[str]:
@@ -137,16 +124,11 @@ def test_evaluate_vectors_cover_every_outcome_with_and_without_completeness() ->
     assert ops == set(VALUE_OPS)
 
 
-def test_the_contract_publishes_only_the_current_version() -> None:
+def test_the_lock_names_the_version_and_pins_only_its_kit() -> None:
     lock = _load(CONTRACT_ROOT / "CONTRACT.lock")
 
     assert lock["version"] == "tool-call-condition-v2"
-    assert not any("-v1/" in path for path in lock["files"])
-    assert not (CONTRACT_ROOT / "tool-call-condition-v1").exists()
-
-
-def test_v2_schema_is_a_valid_draft_2020_12_schema() -> None:
-    Draft202012Validator.check_schema(SCHEMA_V2)
+    assert {path.split("/")[0] for path in lock["files"]} == {"tool-call-condition-v2"}
 
 
 def test_each_vector_file_names_the_garak_revision_that_computed_it() -> None:
@@ -159,16 +141,6 @@ def test_each_vector_file_names_the_garak_revision_that_computed_it() -> None:
             "module": "garak/detectors/toolcall.py",
             "function": f"{name}_condition",
         }
-
-
-def test_versioning_states_the_current_version_and_the_v1_retirement() -> None:
-    text = (CONTRACT_ROOT / "VERSIONING.md").read_text(encoding="utf-8")
-
-    assert "tool-call-condition-v2" in text
-    assert "tool-call-condition-v1" in text
-    assert "retired" in text
-    assert "CONTRACT.lock" in text
-    assert GENERATOR.REVISION in text
 
 
 def test_v2_readme_states_how_to_vendor_and_verify_a_copy() -> None:
@@ -230,13 +202,13 @@ def test_v2_call_schema_rejects_a_malformed_call(call: dict[str, Any]) -> None:
 
 def test_v2_evaluate_vectors_are_well_formed() -> None:
     malformed = []
-    for vector in EVALUATE_V2:
+    for vector in EVALUATE:
         calls = vector["calls"]
         matched = vector["matched_calls"]
         good = (
             OUTCOME_REASONS.get(vector["outcome"]) == vector["reason"]
             and isinstance(vector["complete"], bool)
-            and not _schema_errors(vector["condition"], VALIDATOR_V2)
+            and not _schema_errors(vector["condition"], VALIDATOR)
             and all(not _schema_errors(call, CALL_VALIDATOR_V2) for call in calls)
             and all(set(call) <= {"name", "arguments", "blocked"} for call in calls)
             and all(
@@ -247,11 +219,11 @@ def test_v2_evaluate_vectors_are_well_formed() -> None:
         if not good:
             malformed.append(vector["id"])
     assert malformed == []
-    ids = [vector["id"] for vector in EVALUATE_V2]
+    ids = [vector["id"] for vector in EVALUATE]
     assert len(ids) == len(set(ids))
     blocked = {
         vector["id"]
-        for vector in EVALUATE_V2
+        for vector in EVALUATE
         if any("blocked" in call for call in vector["calls"])
     }
     assert blocked == {id_ for id_ in ids if id_.startswith("blocked.")}
@@ -385,7 +357,7 @@ def test_bound_condition_satisfies_the_schema(case: str) -> None:
     assert bound.condition is not None
     condition = bound.condition.model_dump(mode="json", exclude_none=True)
     assert _schema_errors(condition) == []
-    assert _schema_errors(condition, VALIDATOR_V2) == []
+    assert _schema_errors(condition, VALIDATOR) == []
 
 
 @pytest.mark.parametrize(
@@ -397,7 +369,7 @@ def test_handoff_fixture_condition_satisfies_the_schema(fixture: Path) -> None:
         assert "tool_call_condition" not in payload
         return
     assert _schema_errors(payload["tool_call_condition"]) == []
-    assert _schema_errors(payload["tool_call_condition"], VALIDATOR_V2) == []
+    assert _schema_errors(payload["tool_call_condition"], VALIDATOR) == []
 
 
 # The vector generator needs Garak to compute results. These tests cover what
@@ -423,7 +395,7 @@ GENERATOR = _load_generator()
 
 
 def _computed_from_committed() -> dict[str, Any]:
-    return {"validate": VALIDATE_V2, "evaluate": EVALUATE_V2, "crashes": []}
+    return {"validate": VALIDATE, "evaluate": EVALUATE, "crashes": []}
 
 
 @pytest.fixture
@@ -447,7 +419,7 @@ def test_generator_inputs_are_the_committed_vector_inputs() -> None:
     ]
     evaluate = [
         {"id": vector_id, "condition": condition, "calls": calls, "complete": complete}
-        for vector_id, condition, calls, complete in GENERATOR.evaluate_inputs_v2()
+        for vector_id, condition, calls, complete in GENERATOR.evaluate_inputs()
     ]
     assert evaluate == [
         {key: vector[key] for key in ("id", "condition", "calls", "complete")}
@@ -464,7 +436,7 @@ def test_generator_formats_the_committed_vector_bytes(path: str) -> None:
     assert GENERATOR.dump(version, implementation, vectors) == text
 
 
-@pytest.mark.parametrize("vector", EVALUATE_V2, ids=lambda vector: vector["id"])
+@pytest.mark.parametrize("vector", EVALUATE, ids=lambda vector: vector["id"])
 def test_reference_evaluator_reproduces_every_v2_vector(vector: dict) -> None:
     result = GENERATOR.evaluate_condition_v2(
         vector["condition"], vector["calls"], vector["complete"]
@@ -472,17 +444,24 @@ def test_reference_evaluator_reproduces_every_v2_vector(vector: dict) -> None:
     assert result == (vector["outcome"], vector["reason"], vector["matched_calls"])
 
 
-def test_v2_changes_reach_the_stated_outcomes() -> None:
-    v2 = {vector["id"]: vector["outcome"] for vector in EVALUATE_V2}
-    assert {id_: v2[id_] for id_ in CHANGED_IN_V2} == {
+def test_the_order_and_blocked_vectors_reach_the_stated_outcomes() -> None:
+    outcomes = {vector["id"]: vector["outcome"] for vector in EVALUATE}
+    assert {
+        id_: outcomes[id_]
+        for id_ in (
+            "completeness.order-clean.complete-false",
+            "order.same-argument-bool-int",
+            "order.same-argument-null-both-missing-on-prior",
+        )
+    } == {
         "completeness.order-clean.complete-false": "inconclusive",
         "order.same-argument-bool-int": "detected",
         "order.same-argument-null-both-missing-on-prior": "detected",
     }
-    assert v2["completeness.order-violated.complete-false"] == "inconclusive"
-    assert v2["order.same-argument-prior-int-main-bool"] == "detected"
-    assert v2["order.same-argument-null-both"] == "not_detected"
-    assert {id_: v2[id_] for id_ in v2 if id_.startswith("blocked.")} == {
+    assert outcomes["completeness.order-violated.complete-false"] == "inconclusive"
+    assert outcomes["order.same-argument-prior-int-main-bool"] == "detected"
+    assert outcomes["order.same-argument-null-both"] == "not_detected"
+    assert {id_: outcomes[id_] for id_ in outcomes if id_.startswith("blocked.")} == {
         "blocked.prior": "detected",
         "blocked.prior-incomplete": "inconclusive",
         "blocked.prior-explicit-false": "not_detected",
@@ -530,7 +509,7 @@ def _garak_results(**changes: tuple[str, str, list[int]]) -> dict[str, Any]:
     """The committed v2 results, with the named vectors given other results."""
 
     evaluate = []
-    for vector in EVALUATE_V2:
+    for vector in EVALUATE:
         result = changes.get(vector["id"])
         if result is not None:
             outcome, reason, matched = result
@@ -694,9 +673,9 @@ def test_generator_worker_prints_one_json_line(
     GENERATOR.main(["--worker"])
     result = json.loads(capsys.readouterr().out)
     assert set(result) == {"validate", "evaluate", "crashes"}
-    assert len(result["validate"]) == len(VALIDATE_V2)
+    assert len(result["validate"]) == len(VALIDATE)
     assert [vector["id"] for vector in result["evaluate"]] == [
-        vector["id"] for vector in EVALUATE_V2
+        vector["id"] for vector in EVALUATE
     ]
     assert {vector["outcome"] for vector in result["evaluate"]} == {"detected"}
     assert result["crashes"] == []

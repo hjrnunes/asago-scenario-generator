@@ -3,7 +3,7 @@
 ``contracts/tool-call-condition/tool-call-condition-v2/README.md`` is the shared
 semantics; the producer owns it. This module is the one evaluator the producer,
 the consumer and the orchestrator use, and it follows the producer's
-implementation, which the v2 vectors pin. A reader that only checks a condition
+implementation, which the vectors pin. A reader that only checks a condition
 calls :func:`validate_condition` first; a reader that evaluates one calls
 :func:`evaluate_condition_v2` and gets a :class:`ConditionEvaluation`.
 
@@ -17,11 +17,10 @@ difference is a named case in ``tests/test_condition_eval.py``:
 - A call that lacks ``name`` or ``arguments`` raises ``KeyError``; it does not
   read as an unknown call.
 
-Validation is v1's, which Garak executes, and the vectors pin Garak's behavior
-where it is surprising. Evaluation differs from v1 in ``order``: a missing prior
-call is true only on a complete capture, ``same_argument`` uses contract equality
-and a prior call that lacks the argument never matches, and a ``blocked`` call
-never satisfies ``requires_prior``.
+Garak executes the validation, and the vectors pin Garak's behavior where it is
+surprising. In ``order``, a missing prior call is true only on a complete capture,
+``same_argument`` uses contract equality and a prior call that lacks the argument
+never matches, and a ``blocked`` call never satisfies ``requires_prior``.
 """
 
 from __future__ import annotations
@@ -251,18 +250,18 @@ def _order(comparison, index, calls, complete) -> bool | None:
         if wanted is _NO_VALUE:
             return None
     for earlier in calls[:index]:
-        # v2: a blocked call never satisfies requires_prior
+        # a blocked call never satisfies requires_prior
         if earlier["name"] != comparison["requires_prior"] or earlier.get("blocked"):
             continue
         if not same:
             return False
         if not isinstance(earlier["arguments"], dict):
             return None
-        # v2: strict equality, and a prior that lacks the argument never matches
+        # strict equality, and a prior that lacks the argument never matches
         prior = _argument_value(earlier, same)
         if prior is not _NO_VALUE and _equal(prior, wanted):
             return False
-    # v2: a missing prior call is detected only on a complete capture
+    # a missing prior call is detected only on a complete capture
     return True if complete else None
 
 
@@ -346,16 +345,11 @@ def evaluate_condition_v2(condition, calls, complete) -> ConditionEvaluation:
     return ConditionEvaluation(outcome, _REASONS[outcome], matched)
 
 
-#: The consumer's name for the one evaluator. It is the same function object.
-evaluate_condition = evaluate_condition_v2
-
-
 __all__ = [
     "DETECTED",
     "INCONCLUSIVE",
     "NOT_DETECTED",
     "ConditionEvaluation",
-    "evaluate_condition",
     "evaluate_condition_v2",
     "validate_condition",
 ]

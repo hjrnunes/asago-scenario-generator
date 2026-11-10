@@ -625,8 +625,8 @@ SCENARIO_PROD_LAYERS: dict[str, int] = {
     "presentation": 1,
     # Tree-source collectors shared by presentation and validators.
     "tree_sources": 0,
-    # The v5 attack path reduces an and-or tree; the v5 handoff and the
-    # report read it.
+    # The attack path reduces an and-or tree; the handoff and the report
+    # read it.
     "attack_path": 1,
     "_constants": 0,
     "context": 0,
@@ -635,25 +635,23 @@ SCENARIO_PROD_LAYERS: dict[str, int] = {
     "assembly": 1,
     "stage5": 1,
     "validators": 1,
-    # The versioned scenario handoff is the normal publication seam: a pure
-    # projection over the scenario envelope and its models.
-    "handoff": 1,
-    # The published handoff schema restates the handoff envelope's expressible
-    # rules for readers that do not run Pydantic.
-    "handoff_schema": 1,
     # Deterministic scenario identity is a pure projection over ScenarioSpec.
     "deduplication": 1,
     # The narrate step's model request and write-up reuse presentation's
-    # wording and the handoff's ownership check.
+    # wording and the shared ownership check.
     "narration": 2,
     # The AND/OR attack tree reuses the narrate step's plain wording and
     # attack steps.
     "and_or_tree": 2,
-    # The v5 handoff fields reuse the narrate step's plain wording and
-    # attack steps on top of the shared handoff envelope.
-    "handoff_v5": 2,
     # The model Gherkin request reuses the narrate step's facts and checks.
     "model_gherkin": 2,
+    # The versioned scenario handoff is the normal publication seam: a pure
+    # projection over the scenario envelope and its models. It reuses the
+    # narrate step's plain wording and attack steps for the fields it derives.
+    "handoff": 3,
+    # The published handoff schema restates the handoff envelope's expressible
+    # rules for readers that do not run Pydantic.
+    "handoff_schema": 3,
     "run": 3,
 }
 

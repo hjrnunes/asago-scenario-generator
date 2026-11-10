@@ -46,7 +46,7 @@ from tests.helpers.scenario_handoff_publication import (
 from tests.helpers.shape_step_call import DIRECT_REPLY
 from tests.helpers.sp3_run import _make_ets, stage5_and_shape_calls
 
-SCHEMA = handoff_schema(HANDOFF_SCHEMA_VERSION_V6)
+SCHEMA = handoff_schema()
 
 #: The shape reply for a third party that reaches the agent through content.
 INDIRECT_REPLY = {

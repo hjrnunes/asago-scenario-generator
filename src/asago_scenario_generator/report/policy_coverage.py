@@ -6,7 +6,7 @@ consumer's, and the orchestrator's) do not each re-derive it. A loss
 lists the risks it came from (``source_risk_cards``) and a scenario
 cites losses, so a risk reaches scenarios only through its harms.
 
-Version 2 adds the hazards. A hazard leads to the losses loss analysis
+The document also lists the hazards. A hazard leads to the losses loss analysis
 relates it to (``Hazard.related_losses``) and is reached by the scenarios
 whose lineage names it. The losses never come from scenario lineage: a
 scenario can cite every loss of the run at once.
@@ -56,7 +56,7 @@ _LOSS_NUMBER = re.compile(r"(\d+)$")
 
 
 def harm_title(description: str) -> str:
-    """Return the description's first clause, the version 1 stand-in for a title."""
+    """Return the description's first clause, which stands in for a title."""
     return _CLAUSE_BREAK.split(description, maxsplit=1)[0].strip().rstrip(".")
 
 

@@ -8,11 +8,11 @@ exactly. An invalid case passes only when one of its violations carries one of
 those codes, so a violation from another rule, or a code that merely starts with
 an exact code's text, cannot hide a case that no longer exercises the rule it
 names. The runner reads the kit directory it is given, so it runs the producer's
-contract tree and a consumer's mirror alike, for any published version.
+contract tree and a consumer's mirror alike.
 
-A kit's case files are bare payloads, including for a version whose spec requires
-the envelope, so the runner reads the payload rules alone; the envelope is
-exercised by the tests that read a document through the spec.
+A kit's case files are bare payloads, although the spec requires the envelope, so
+the runner reads the payload rules alone; the envelope is exercised by the tests
+that read a document through the spec.
 """
 
 from __future__ import annotations

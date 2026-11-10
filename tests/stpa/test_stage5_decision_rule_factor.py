@@ -33,13 +33,9 @@ from asago_scenario_generator.stpa.models.causal_factor import (
 from asago_scenario_generator.stpa.scenario_prod._constants import PROMPTS_DIR
 from asago_scenario_generator.stpa.scenario_prod.handoff import (
     ScenarioHandoffV6,
-    verify_handoff_digest,
-)
-from asago_scenario_generator.stpa.scenario_prod.handoff_v5 import (
     _causal_factors as handoff_causal_factors,
-)
-from asago_scenario_generator.stpa.scenario_prod.handoff_v5 import (
     build_scenario_handoff_v6,
+    verify_handoff_digest,
 )
 from asago_scenario_generator.stpa.scenario_prod.narration import (
     AGENT_BELIEF,
@@ -99,7 +95,7 @@ from tests.stpa.test_sp3_scenario_continuity import (
     _coordination_control_structure,
     _coordination_threat,
 )
-from tests.stpa.test_scenario_handoff_v5 import SCHEMA, _envelope
+from tests.stpa.test_scenario_handoff_v6 import SCHEMA, _envelope
 from tests.stpa.test_stage5_belief_step import BELIEF as STEP_BELIEF
 from tests.stpa.test_stage5_belief_step import BeliefClient
 

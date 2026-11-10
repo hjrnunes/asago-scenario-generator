@@ -6,9 +6,6 @@ state. Each break is a :class:`Violation` carrying the producer's code, the
 dotted path of the break, and a reason. Ownership codes come first, in
 first-seen order; a payload the schema rejects reports one code per field it
 rejects, and a schema-valid payload reports the first rule it breaks.
-
-The schema is the document's own version's, so one contract validates a v5
-document and a v6 document alike.
 """
 
 from __future__ import annotations
@@ -22,7 +19,7 @@ from jsonschema.exceptions import best_match
 
 from .boundary import ownership_violations
 from .contract import (
-    VERSIONS,
+    VERSION,
     Contract,
     installed_specs,
     packaged_contract,
@@ -98,9 +95,10 @@ def _read_through_installed_spec(document: Any, contract: Contract) -> None:
     """Select the installed spec for *document* before its rules run.
 
     An enveloped document is answered by the reader alone: a version, a
-    requirement or a digest it refuses has no producer code. A legacy document
-    that names another version, an unknown field or another break keeps the
-    code the kit records for it, so the walk below words it exactly as before.
+    requirement or a digest it refuses has no producer code. A document without
+    the envelope that names another version, an unknown field or another break
+    keeps the code the kit records for it, so the walk below words it exactly as
+    before.
     """
 
     if not isinstance(document, Mapping):
@@ -131,15 +129,14 @@ def schema_violations(
         return [_ROOT_REFUSAL]
     contract = contract or packaged_contract()
     payload = _without_envelope(payload)
-    version = payload.get("schema_version")
-    if version not in VERSIONS:
+    if payload.get("schema_version") != VERSION:
         return list(OTHER_VERSION_VIOLATIONS)
     found: dict[str, Violation] = {}
     rooted: Violation | None = None
     # The producer lists a missing required field before the fields it rejects as
     # extra, whatever order the schema's keywords come in.
     errors = sorted(
-        Draft202012Validator(contract.schema_for(version)).iter_errors(payload),
+        Draft202012Validator(contract.schema).iter_errors(payload),
         key=lambda error: not (error.validator == "required" and not error.path),
     )
     for error in errors:
@@ -184,7 +181,7 @@ def hand_rule_violations(
 
     The rules are blank text, the observation-contract format, presence where
     the schema has a default, and cross-field pairings. The reported code names
-    the top-level field the rule reads; the v5 procedure chain, a rule across
+    the top-level field the rule reads; the procedure chain, a rule across
     the steps that the producer checks on the whole handoff, reports ``<root>``.
     A root that is not a JSON object gets the same code as the schema's.
     """
@@ -200,9 +197,7 @@ def hand_rule_violations(
             if found is not None:
                 return [Violation(f"schema_violation:{key}", *found)]
     if payload.get("attack_shape") is not None:
-        found = attack_shape_violation(
-            payload["attack_shape"], contract.schema_for(payload.get("schema_version"))
-        )
+        found = attack_shape_violation(payload["attack_shape"], contract.schema)
         if found is not None:
             return [Violation("schema_violation:attack_shape", *found)]
     if "procedure" in payload:
@@ -322,7 +317,7 @@ def _procedure_chain(steps: list[dict[str, Any]], path: str) -> _Break:
     """Number the steps S00, S01, ... in order and link each to the next.
 
     A step names a tactic exactly when it names a technique. The rules are the
-    producer's ``ScenarioHandoffV5.validate_procedure_chain``.
+    producer's ``ScenarioHandoffV6.validate_procedure_chain``.
     """
 
     ids = [f"S{index:02d}" for index in range(len(steps))]

@@ -96,9 +96,7 @@ def test_constants_name_v6() -> None:
     assert HANDOFF_DIGEST_DOMAIN_V6 == "scenario-handoff-v6"
 
 
-@pytest.mark.parametrize(
-    "version", ["scenario-handoff-v4", "scenario-handoff-v9", None], ids=str
-)
+@pytest.mark.parametrize("version", ["scenario-handoff-v9", None], ids=str)
 def test_any_other_version_gets_the_kits_unknown_version_codes(
     version: str | None,
 ) -> None:

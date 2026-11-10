@@ -16,7 +16,6 @@ from asago_contracts_core import (
     DETECTED,
     NOT_DETECTED,
     ConditionEvaluation,
-    evaluate_condition,
     evaluate_condition_v2,
     validate_condition,
 )
@@ -165,10 +164,6 @@ def test_a_plain_condition_still_reads_as_before() -> None:
         "the captured calls do not satisfy the condition",
         [],
     )
-
-
-def test_the_consumer_name_is_the_same_function() -> None:
-    assert evaluate_condition is evaluate_condition_v2
 
 
 def test_a_condition_without_an_argument_operand_is_refused() -> None:

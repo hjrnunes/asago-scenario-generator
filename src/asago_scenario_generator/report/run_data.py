@@ -36,7 +36,7 @@ from asago_scenario_generator.stpa.infra.provider_record import RECORD_FILENAME
 from asago_scenario_generator.stpa.models.control_structure import ControlStructure
 from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
 from asago_scenario_generator.stpa.scenario_prod.handoff import (
-    ScenarioHandoff,
+    ScenarioHandoffV6,
     read_handoff_document,
 )
 from asago_scenario_generator.stpa.system_model.risk_actionability import (
@@ -244,7 +244,7 @@ class RunData:
     realization: TargetRealizationResult | None
     testability: dict[str, TestabilityRow] | None
     coverage_review: CoverageReview | None
-    scenarios: dict[str, ScenarioHandoff]
+    scenarios: dict[str, ScenarioHandoffV6]
     features: dict[str, str]
     policy: dict[str, Any] | None
     unreadable: dict[str, str] = field(default_factory=dict)
@@ -358,7 +358,7 @@ def _message_content(record: dict[str, Any]) -> str | None:
     return content if isinstance(content, str) else None
 
 
-def _read_scenarios(output: Path) -> dict[str, ScenarioHandoff]:
+def _read_scenarios(output: Path) -> dict[str, ScenarioHandoffV6]:
     folder = output / "scenarios"
     paths = sorted(folder.glob("SCN-*.yaml")) if folder.is_dir() else []
     documents = {

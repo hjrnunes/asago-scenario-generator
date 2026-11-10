@@ -121,12 +121,12 @@ from .narration import (
 )
 from .handoff import (
     HandoffTaxonomyInputs,
-    ScenarioHandoff,
+    ScenarioHandoffV6,
     Stage1aSource,
+    build_scenario_handoff_v6,
     handoff_document,
     write_scenario_handoff,
 )
-from .handoff_v5 import build_scenario_handoff_v6
 from .stage5.belief_step import apply_belief_step
 from .model_gherkin import (
     gherkins_payload,
@@ -1110,7 +1110,7 @@ def _write_scenario_handoff_artifacts(
     stage_1a_source: Stage1aSource | None = None,
     deduplication: ScenarioDeduplication | None = None,
     taxonomy: HandoffTaxonomyInputs | None = None,
-) -> ScenarioHandoff:
+) -> ScenarioHandoffV6:
     """Write the versioned scenario handoff for one published scenario.
 
     The normal product run publishes scenario meaning only: narrative, attack
@@ -1143,7 +1143,7 @@ def _checked_scenario_handoff(
     stage_1a_source: Stage1aSource | None = None,
     deduplication: ScenarioDeduplication | None = None,
     taxonomy: HandoffTaxonomyInputs | None = None,
-) -> ScenarioHandoff:
+) -> ScenarioHandoffV6:
     """Build one scenario's handoff and check the published contract."""
     handoff = build_scenario_handoff_v6(
         envelope,

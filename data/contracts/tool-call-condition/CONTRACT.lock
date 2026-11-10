@@ -2,8 +2,7 @@
   "authority": "asago-scenario-generator",
   "contract": "tool-call-condition",
   "files": {
-    "VERSIONING.md": "91e4f8c8b6f79ba1b6234d8fd1c5f044c5fc70797fb36a91907770f74ec26e36",
-    "tool-call-condition-v2/README.md": "e25db1dd2329e6284391677f938204b284369b089bb5f0c15042d58406f81f11",
+    "tool-call-condition-v2/README.md": "2c73e4dcabb1b3965a8dd499554e1d52c96fa855f4589dd477734096d4630afc",
     "tool-call-condition-v2/schema.json": "cfcb96094bd688e71751d9c67c92c0a7d37b8038cf5a50de052eb5b15ea362bd",
     "tool-call-condition-v2/vectors/evaluate.json": "42c1216c2b6f2d972d7ae2715eeb12ee52a5c05334945e3ac559ecc559d86c52",
     "tool-call-condition-v2/vectors/validate.json": "5899cc2f9cb3cf3912efa0383b229d8534314a848e51d9632fac4ad0ff7bd364"
