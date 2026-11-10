@@ -943,19 +943,6 @@ The unit suite is deterministic and does not require an LLM endpoint. Unit
 tests pin behavior, and the phrase tables in `tests/phrases/*.yaml` pin prompt
 text. Pipeline output and harness state are ignored.
 
-Tests marked `replay_corpus` read the replay corpus, a folder outside every
-repository that is never committed. Set `ASAGO_REPLAY_CORPUS` to its path.
-When the variable is unset, the marked tests in the `asago-contracts-core` and
-`asago-target-discovery` members default to the `replay-corpus` folder beside
-this repository (`../replay-corpus`). When the corpus directory does not
-exist, the marked tests fail and name the missing path. CI runs each workspace
-member with `-m 'not replay_corpus'` because it has no corpus. To run a member's
-tests without a corpus, deselect the marker:
-
-```bash
-uv run pytest packages/asago-contracts-core/tests -q -m 'not replay_corpus'
-```
-
 See the [architecture overview](docs/architecture/overview.md).
 
 ## License
