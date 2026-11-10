@@ -1,9 +1,7 @@
 """Independent MCP target-discovery primitive and persistence helpers.
 
 Every name loads on first use (PEP 562), so importing one module of this
-package does not load the others. The runtime-contract builder depends on that:
-orch runs it in the producer's interpreter, and a target's declaration needs
-neither STPA, the LLM interpreter, the MCP transport nor the prompt templates.
+package does not load the others.
 """
 
 from __future__ import annotations
@@ -34,9 +32,6 @@ _EXPORTS: dict[str, str] = {
     "PROFILE_FILENAME": "asago_target_discovery.persistence",
     "TARGET_DISCOVERY_MANIFEST_SCHEMA_VERSION": ("asago_target_discovery.persistence"),
     "write_target_discovery": "asago_target_discovery.persistence",
-    "PLANTED_ITEM": "asago_target_discovery.runtime_contract",
-    "RuntimeContractViolation": ("asago_target_discovery.runtime_contract"),
-    "declared_runtime_contract": "asago_target_discovery.runtime_contract",
     "FileMcpInventoryAdapter": "asago_target_discovery.transport",
     "HttpMcpInventoryAdapter": "asago_target_discovery.transport",
     "McpToolsListFileError": "asago_target_discovery.transport",
@@ -54,7 +49,6 @@ _SUBMODULES = frozenset(
         "persistence",
         "prompts",
         "redaction",
-        "runtime_contract",
         "transport",
     }
 )

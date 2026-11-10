@@ -9,10 +9,6 @@ description = "The MCP target-discovery scanner: inventory a target's tools and 
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    # The runtime-contract builder reads every contract through the installed spec set
-    # ``asago_package`` carries and names the refusals it raises.
-    "asago-contracts-core>=0.1,<0.2",
-    "asago-package>=0.1,<0.2",
     "asago-scenario-generator>=0.1,<0.2",
     "pydantic>=2.0",
     "pyyaml>=6.0",
@@ -29,9 +25,6 @@ dev = ["pytest"]
 # The scanner reads the producer's STPA models and calls the app's provider
 # client, so this member depends on the workspace root that depends on it.
 asago-scenario-generator = { workspace = true }
-# The runtime-contract builder validates against the schema the consumer owns,
-# so the app and this member read it from the consumer's package member.
-asago-package = { path = "../../../asago-artifact-generator/packages/asago-package", editable = true }
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/asago_target_discovery"]

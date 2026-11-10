@@ -158,11 +158,8 @@ with exact survivor evidence. Each terminal run writes
 Asago Scenario Generator requires Python 3.12 or newer. The lock file is the
 authoritative development environment.
 
-The lock resolves `asago-package` from
-`../asago-artifact-generator/packages/asago-package`
-(`pyproject.toml`, `[tool.uv.sources]`). Check out the artifact generator
-(the consumer) beside this repository before you sync; the sync fails
-without it.
+The repository resolves nothing from the artifact generator (the consumer), so
+you sync it without a consumer checkout.
 
 ```bash
 uv sync --locked --all-extras

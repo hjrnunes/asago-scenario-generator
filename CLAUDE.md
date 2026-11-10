@@ -51,12 +51,11 @@ own documents.
 ## Commands
 
 Run from the intended checkout. Check CLI `--help` for current flags.
-The runtime-contract builder imports `asago_package`, which the lock resolves
-from `../asago-artifact-generator/packages/asago-package`, so sync with the
-consumer checkout beside this one. The consumer resolves this checkout the same
-way. Target-discovery work and `asago-orch doctor` need the MCP SDK from the
-`target-discovery` extra, and only `--all-extras` installs it; a plain
-`uv sync --locked` prunes the extra.
+This repository resolves nothing from the consumer, so sync it without a
+consumer checkout beside it. The dependency runs one way only: the consumer
+resolves this checkout by path. Target-discovery work and `asago-orch doctor`
+need the MCP SDK from the `target-discovery` extra, and only `--all-extras`
+installs it; a plain `uv sync --locked` prunes the extra.
 
 ```bash
 uv sync --locked --all-extras

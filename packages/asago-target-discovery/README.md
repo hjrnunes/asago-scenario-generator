@@ -26,10 +26,8 @@ offline. See the repository README for the full commands and flags.
 
 ## Layout
 
-- `src/asago_target_discovery/` holds the scanner modules. `runtime_contract.py`
-  is pure: it imports only the standard library and `asago_package`, because
-  the orchestrator runs it in the producer's interpreter for a target's
-  declaration. The package root loads each name on first use (PEP 562).
+- `src/asago_target_discovery/` holds the scanner modules. The package root
+  loads each name on first use (PEP 562).
 - `src/asago_target_discovery/model_adapter.py` is the one seam the scanner uses
   to reach the provider client and the MCP transport;
   `llm_interpreter.py` renders its own prompt templates and belongs to that
