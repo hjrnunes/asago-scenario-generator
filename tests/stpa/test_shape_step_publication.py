@@ -1,4 +1,4 @@
-"""A run publishes scenario-handoff-v5 with the shape the shape step produced.
+"""A run publishes scenario-handoff-v6 with the shape the shape step produced.
 
 The offline end-to-end tests drive ``run_sp3`` with a fake client: Stage 5
 replies first, then one shape reply per adversarial scenario. The counts
@@ -19,8 +19,8 @@ from asago_scenario_generator.stpa.models.attack_shape import (
     ShapeSource,
 )
 from asago_scenario_generator.stpa.scenario_prod.handoff import (
-    HANDOFF_SCHEMA_VERSION_V5,
-    ScenarioHandoffV5,
+    HANDOFF_SCHEMA_VERSION_V6,
+    ScenarioHandoffV6,
     handoff_ownership_violations,
     verify_handoff_digest,
 )
@@ -46,7 +46,7 @@ from tests.helpers.scenario_handoff_publication import (
 from tests.helpers.shape_step_call import DIRECT_REPLY
 from tests.helpers.sp3_run import _make_ets, stage5_and_shape_calls
 
-SCHEMA = handoff_schema(HANDOFF_SCHEMA_VERSION_V5)
+SCHEMA = handoff_schema(HANDOFF_SCHEMA_VERSION_V6)
 
 #: The shape reply for a third party that reaches the agent through content.
 INDIRECT_REPLY = {
@@ -98,11 +98,11 @@ def publish(
     return result, client
 
 
-def assert_valid(document: dict) -> ScenarioHandoffV5:
+def assert_valid(document: dict) -> ScenarioHandoffV6:
     errors = list(Draft202012Validator(SCHEMA).iter_errors(document))
     assert errors == []
     assert handoff_ownership_violations(document) == []
-    handoff = ScenarioHandoffV5.model_validate(document)
+    handoff = ScenarioHandoffV6.model_validate(document)
     verify_handoff_digest(handoff)
     return handoff
 
@@ -113,7 +113,7 @@ def test_an_adversarial_run_publishes_the_validated_shape(
     result, client = publish([_normal_semantics_payload()], tmp_path)
 
     document = _published_handoff(tmp_path)
-    assert document["schema_version"] == HANDOFF_SCHEMA_VERSION_V5
+    assert document["schema_version"] == HANDOFF_SCHEMA_VERSION_V6
     handoff = assert_valid(document)
     assert handoff.attack_shape is not None
     assert handoff.attack_shape.source is ShapeSource.STAGE5_VALIDATED
@@ -125,10 +125,10 @@ def test_an_adversarial_run_publishes_the_validated_shape(
     assert result.scenario_specs[0].attack_shape == handoff.attack_shape
 
 
-def test_an_indirect_run_publishes_the_controller_under_its_v5_name(
+def test_an_indirect_run_publishes_the_controlling_party_under_its_wire_name(
     tmp_path: Path,
 ) -> None:
-    """A v5 reader sees ``party_relation.controller``; the schema must accept it."""
+    """A reader sees ``party_relation.controlling_party``; the schema accepts it."""
 
     publish(
         [_indirect_payload()],
@@ -140,7 +140,8 @@ def test_an_indirect_run_publishes_the_controller_under_its_v5_name(
 
     document = _published_handoff(tmp_path)
     indirect = document["attack_shape"]["indirect"]
-    assert indirect["party_relation"]["controller"] == "counterparty"
+    assert indirect["party_relation"]["controlling_party"] == "counterparty"
+    assert "controller" not in indirect["party_relation"]
     handoff = assert_valid(document)
     assert handoff.attack_shape is not None
     assert handoff.attack_shape.source is ShapeSource.STAGE5_VALIDATED
@@ -172,7 +173,7 @@ def test_a_functional_scenario_publishes_a_null_shape_and_costs_no_request(
     result, client = publish([_functional_payload()], tmp_path)
 
     document = _published_handoff(tmp_path)
-    assert document["schema_version"] == HANDOFF_SCHEMA_VERSION_V5
+    assert document["schema_version"] == HANDOFF_SCHEMA_VERSION_V6
     assert document["kind"] == "functional"
     assert "attack_shape" in document and document["attack_shape"] is None
     assert_valid(document)

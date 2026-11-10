@@ -32,14 +32,14 @@ from asago_scenario_generator.stpa.models.causal_factor import (
 )
 from asago_scenario_generator.stpa.scenario_prod._constants import PROMPTS_DIR
 from asago_scenario_generator.stpa.scenario_prod.handoff import (
-    ScenarioHandoffV5,
+    ScenarioHandoffV6,
     verify_handoff_digest,
 )
 from asago_scenario_generator.stpa.scenario_prod.handoff_v5 import (
     _causal_factors as handoff_causal_factors,
 )
 from asago_scenario_generator.stpa.scenario_prod.handoff_v5 import (
-    build_scenario_handoff_v5,
+    build_scenario_handoff_v6,
 )
 from asago_scenario_generator.stpa.scenario_prod.narration import (
     AGENT_BELIEF,
@@ -569,8 +569,8 @@ def _mixed_spec():
 
 def test_the_handoff_publishes_a_null_belief_for_a_decision_rule() -> None:
     for spec, index in ((_rule_spec(), 0), (_mixed_spec(), 1)):
-        handoff = build_scenario_handoff_v5(_envelope(spec))
-        document = handoff.model_dump(mode="json")
+        handoff = build_scenario_handoff_v6(_envelope(spec))
+        document = handoff.model_dump(mode="json", by_alias=True)
         factor = document["causal_factors"][index]
 
         assert factor["source_id"] == "RESP-1"
@@ -579,7 +579,7 @@ def test_the_handoff_publishes_a_null_belief_for_a_decision_rule() -> None:
         assert factor.get("process_model_variable") is None
         assert factor["flaw"] == RULE_EVIDENCE
         assert list(Draft202012Validator(SCHEMA).iter_errors(document)) == []
-    mixed = build_scenario_handoff_v5(_envelope(_mixed_spec()))
+    mixed = build_scenario_handoff_v6(_envelope(_mixed_spec()))
     assert mixed.causal_factors[0].process_model_belief == (
         "The order on screen belongs to the caller."
     )
@@ -593,7 +593,7 @@ def test_the_attack_tree_prints_no_belief_for_a_decision_rule() -> None:
     assert found["AT-WP-1"]["label"] == RULE_EVIDENCE
     assert "belief" not in mixed["AT-WP-2"]
     assert mixed["AT-WP-1"]["belief"].startswith("The agent wrongly believes that ")
-    path = build_scenario_handoff_v5(_envelope(_rule_spec())).model_dump(mode="json")[
+    path = build_scenario_handoff_v6(_envelope(_rule_spec())).model_dump(mode="json")[
         "attack_path"
     ]
     (weak,) = [item for item in path["conditions"] if item["category"] == "weak_point"]
@@ -868,7 +868,7 @@ def test_a_run_publishes_a_decision_rule_with_a_null_belief(tmp_path: Path) -> N
     }
     for document in published.values():
         assert list(Draft202012Validator(SCHEMA).iter_errors(document)) == []
-        verify_handoff_digest(ScenarioHandoffV5.model_validate(document))
+        verify_handoff_digest(ScenarioHandoffV6.model_validate(document))
         rule_factor = document["causal_factors"][-1]
         assert rule_factor["flaw"] == RULE_EVIDENCE
         assert rule_factor["process_model_belief"] is None

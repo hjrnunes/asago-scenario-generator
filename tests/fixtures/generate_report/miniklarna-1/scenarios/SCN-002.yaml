@@ -1,4 +1,4 @@
-schema_version: scenario-handoff-v5
+schema_version: scenario-handoff-v6
 scenario_id: SCN-002
 scenario_version: 1
 kind: functional
@@ -172,7 +172,7 @@ sourced_facts:
   authority: derived_proposed_constraint
 - statement: The unsafe outcome condition is expressed semantically; the executable
     check is derived downstream.
-  source: producer handoff contract scenario-handoff-v5
+  source: producer handoff contract scenario-handoff-v6
   authority: producer_contract
 assumptions_and_unknowns:
 - The execution-time target state is captured fresh by the consumer; no producer-supplied
@@ -201,7 +201,7 @@ observation:
     supported_criteria: []
     unsupported_criteria:
     - PII_DISCLOSURE_BEFORE_AUTH
-content_digest: 97af5948d48ea4e9df6f5615b72cd135951756efc3719b8fb0da89a6548ef536
+content_digest: cb667e7d5b71d1fc6ee76cb150ed977e2e5a741c87fcd519ccc584fc0d4c2cce
 condition_omitted_reason: The scenario is analytical-only, so the returned discriminating
   condition was discarded.
 tool_call_condition_status:
@@ -235,3 +235,12 @@ preconditions: []
 procedure: []
 worst_case_threat: Unauthorized exposure or distribution of customer Personally Identifiable
   Information (PII) through the conversational interface.
+contract:
+  id: scenario-handoff
+  version: scenario-handoff-v6
+  spec_digest: sha256:a2f3bfe6fa4e3ee926bada66bc420d55a2ea9989a2dd62981acb705426c2f79a
+  requires: []
+  provenance:
+    writer: asago_scenario_generator.stpa.scenario_prod.handoff
+    writer_version: 0.1.0
+    validator_version: asago-contracts-core 0.1.0

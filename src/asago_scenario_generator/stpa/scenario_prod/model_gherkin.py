@@ -1,4 +1,4 @@
-"""Model-written declarative Gherkin for a scenario-handoff-v5.
+"""Model-written declarative Gherkin for a scenario handoff.
 
 After the narrate step, one request per published scenario asks the model
 for the scenario's Gherkin: a feature and scenario name, the context

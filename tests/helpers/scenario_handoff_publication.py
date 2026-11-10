@@ -6,6 +6,7 @@ import yaml
 
 
 from pathlib import Path
+from asago_contracts_core.envelope import ENVELOPE_FIELD
 from asago_scenario_generator.stpa.scenario_prod.run import run_sp3
 from tests.helpers.stpa_builders import make_cs, make_loss_analysis
 from tests.stpa.sp1_helpers import MockLLMClient
@@ -131,7 +132,14 @@ def _functional_payload() -> dict:
     return payload
 
 
-def _published_handoff(run_dir: Path, scenario_id: str = "SCN-001") -> dict:
+def _published_document(run_dir: Path, scenario_id: str = "SCN-001") -> dict:
+    """The written document: the handoff and the contract envelope around it."""
     path = run_dir / "scenarios" / f"{scenario_id}.yaml"
     assert path.is_file(), f"missing handoff {path}"
     return yaml.safe_load(path.read_text(encoding="utf-8"))
+
+
+def _published_handoff(run_dir: Path, scenario_id: str = "SCN-001") -> dict:
+    """The published handoff: the written document without its envelope."""
+    document = _published_document(run_dir, scenario_id)
+    return {name: value for name, value in document.items() if name != ENVELOPE_FIELD}

@@ -59,8 +59,8 @@ A document written from the self-identifying envelope carries one `contract` blo
 
 `scenario-handoff-v6` is published with `"envelope": "required"`, so a v6 document names its
 version before a reader validates it. `scenario-handoff-v5` stays published with
-`"envelope": "optional"`, because every recorded handoff predates the envelope, and the
-producer's `generate` still writes v5. A reader selects one of its installed specs by the
+`"envelope": "optional"`, so a reader still validates a v5 document, and the producer's
+`generate` writes v6. A reader selects one of its installed specs by the
 document's contract id and version, and rejects:
 
 - a v6 document without the envelope, with `MissingEnvelopeError`;
@@ -78,5 +78,5 @@ consumer's input adapter keep their existing error wording.
 
 The orchestrator keeps no copy of this contract and validates no handoff against it. Its
 handoff reader reads only `schema_version`: `HANDOFF_SCHEMA_VERSIONS` pins
-`scenario-handoff-v5`, and a saved generate output whose handoff names any other version is
+`scenario-handoff-v6`, and a saved generate output whose handoff names any other version is
 refused rather than reused, with a message naming the version authoring reads.

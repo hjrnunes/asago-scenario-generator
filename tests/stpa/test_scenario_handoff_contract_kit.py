@@ -23,10 +23,9 @@ from asago_contracts_core import spec_digest
 from asago_scenario_generator.models.canonical import canonical_json_bytes
 from asago_scenario_generator.stpa.observation_contract import SafeObservableOutcome
 from asago_scenario_generator.stpa.scenario_prod.handoff import (
-    HANDOFF_SCHEMA_VERSION_V5,
     HANDOFF_SCHEMA_VERSION_V6,
     HandoffGherkin,
-    ScenarioHandoffV5,
+    ScenarioHandoffV6,
     _FORBIDDEN_KEYS,
     _FORBIDDEN_VALUE_PATTERNS,
     handoff_ownership_violations,
@@ -37,7 +36,7 @@ from asago_scenario_generator.stpa.scenario_prod.handoff import (
 from asago_scenario_generator.stpa.scenario_prod.handoff_schema import handoff_schema
 
 CONTRACT_ROOT = Path(__file__).resolve().parents[2] / "data/contracts/scenario-handoff"
-VERSION_DIR = CONTRACT_ROOT / "scenario-handoff-v5"
+VERSION_DIR = CONTRACT_ROOT / HANDOFF_SCHEMA_VERSION_V6
 # The cases live under the version directory; these tests read them by their
 # paths relative to it.
 KIT = VERSION_DIR / "cases"
@@ -73,9 +72,9 @@ def test_the_spec_identifies_the_published_version() -> None:
 
     assert (spec["contract"], spec["version"]) == (
         "scenario-handoff",
-        HANDOFF_SCHEMA_VERSION_V5,
+        HANDOFF_SCHEMA_VERSION_V6,
     )
-    assert (spec["status"], spec["envelope"]) == ("published", "optional")
+    assert (spec["status"], spec["envelope"]) == ("published", "required")
     assert spec["supports"] == []
     assert spec["extensions"] == []
     assert spec["schema"] == "schema.json"
@@ -114,12 +113,11 @@ def test_schema_file_is_the_published_schema_byte_for_byte() -> None:
     rendered = json.dumps(handoff_schema(), indent=2) + "\n"
 
     assert rendered == committed
-    assert list(ScenarioHandoffV5.model_fields) == list(_schema()["properties"])
+    assert list(ScenarioHandoffV6.model_fields) == list(_schema()["properties"])
 
 
 def test_the_published_schema_adds_only_its_rule_assertions() -> None:
-    # v5 publishes the model's field names, so its schema dumps without aliases.
-    model = ScenarioHandoffV5.model_json_schema(by_alias=False)
+    model = ScenarioHandoffV6.model_json_schema()
     published = _schema()
 
     assert published["properties"] == model["properties"]
@@ -133,7 +131,7 @@ def test_kit_introduces_no_fourth_scenario_representation() -> None:
     # named metadata field; the spec adds nothing else.
     schema = _schema()
     assert representations <= set(schema["properties"])
-    assert set(schema["properties"]) == set(ScenarioHandoffV5.model_fields)
+    assert set(schema["properties"]) == set(ScenarioHandoffV6.model_fields)
     assert schema["additionalProperties"] is False
 
 
@@ -144,7 +142,7 @@ def test_valid_handoff_fixtures_round_trip_with_digests(fixture: Path) -> None:
 
     assert not list(Draft202012Validator(_schema()).iter_errors(payload))
     assert handoff_schema_violations(payload) == []
-    verify_handoff_digest(ScenarioHandoffV5.model_validate(payload))
+    verify_handoff_digest(ScenarioHandoffV6.model_validate(payload))
     assert handoff_ownership_violations(payload) == []
     # The semantic failure criterion and the safe alternative are retained.
     assert payload["semantic_failure_criterion"].strip()
@@ -184,7 +182,7 @@ def test_valid_fixtures_cover_every_condition_shape() -> None:
     shapes = set()
     for fixture in _valid_fixtures():
         payload = json.loads(fixture.read_text(encoding="utf-8"))
-        assert payload["schema_version"] == HANDOFF_SCHEMA_VERSION_V5
+        assert payload["schema_version"] == HANDOFF_SCHEMA_VERSION_V6
         condition = payload.get("discriminating_condition")
         if condition is None:
             assert "condition_check" not in payload

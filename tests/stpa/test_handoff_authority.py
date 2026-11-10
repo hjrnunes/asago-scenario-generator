@@ -32,7 +32,7 @@ from asago_scenario_generator.stpa.scenario_prod.and_or_tree import (
     render_and_or_tree,
 )
 from asago_scenario_generator.stpa.scenario_prod.handoff_v5 import (
-    build_scenario_handoff_v5,
+    build_scenario_handoff_v6,
 )
 from asago_scenario_generator.stpa.scenario_prod.presentation import (
     render_scenario_summary,
@@ -153,7 +153,7 @@ def _handoff_for(
         gherkin_spec=gherkin,
         gherkin_raw=gherkin.to_feature_text(),
     )
-    return build_scenario_handoff_v5(
+    return build_scenario_handoff_v6(
         envelope,
         loss_analysis=loss_analysis,
         stage_1a_source=stage_1a_source,

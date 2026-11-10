@@ -26,12 +26,13 @@ from asago_scenario_generator.stpa.scenario_prod.and_or_tree import (
     render_and_or_tree,
 )
 from asago_scenario_generator.stpa.scenario_prod.handoff import (
-    ScenarioHandoffV5,
+    ScenarioHandoffV6,
     handoff_ownership_violations,
     verify_handoff_digest,
 )
+from asago_scenario_generator.stpa.scenario_prod.handoff_schema import handoff_schema
 from asago_scenario_generator.stpa.scenario_prod.handoff_v5 import (
-    build_scenario_handoff_v5,
+    build_scenario_handoff_v6,
 )
 from asago_scenario_generator.stpa.scenario_prod.assembly import assemble_envelope
 from asago_scenario_generator.stpa.scenario_prod.narration import (
@@ -65,9 +66,7 @@ from tests.stpa.sp1_helpers import MockLLMClient
 from tests.cli_helpers import PlainCliRunner
 from tests.stpa.test_narration import adversarial, everyday
 
-# The v5 document names the party ``controller``; the model's ``by_alias`` schema
-# names the serialization alias scenario-handoff-v6 writes.
-SCHEMA = ScenarioHandoffV5.model_json_schema(by_alias=False)
+SCHEMA = handoff_schema()
 DIRECT = AttackShape.model_validate(
     {
         **DIRECT_REPLY,
@@ -415,7 +414,7 @@ def _handoff(spec: ScenarioSpec, tree: dict[str, Any]) -> dict[str, Any]:
         gherkin_spec=gherkin,
         gherkin_raw=gherkin.to_feature_text(),
     )
-    return build_scenario_handoff_v5(envelope).model_dump(mode="json")
+    return build_scenario_handoff_v6(envelope).model_dump(mode="json", by_alias=True)
 
 
 @pytest.mark.parametrize(
@@ -427,7 +426,7 @@ def test_an_and_or_handoff_passes_ownership_model_and_schema(make) -> None:
 
     assert handoff_ownership_violations(document) == []
     assert list(Draft202012Validator(SCHEMA).iter_errors(document)) == []
-    verify_handoff_digest(ScenarioHandoffV5.model_validate(document))
+    verify_handoff_digest(ScenarioHandoffV6.model_validate(document))
 
 
 def test_the_other_scenarios_in_the_tree_leave_the_handoff_unchanged() -> None:
@@ -478,7 +477,7 @@ def test_a_run_renders_trees_that_name_each_other_and_publishes_paths(
         document = _published_handoff(tmp_path, scenario_id)
         assert list(Draft202012Validator(SCHEMA).iter_errors(document)) == []
         assert handoff_ownership_violations(document) == []
-        verify_handoff_digest(ScenarioHandoffV5.model_validate(document))
+        verify_handoff_digest(ScenarioHandoffV6.model_validate(document))
         assert "attack_tree" not in document
         assert document["attack_path"]["format"] == "attack-path-v1"
 

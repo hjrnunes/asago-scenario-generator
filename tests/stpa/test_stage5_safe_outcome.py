@@ -23,7 +23,7 @@ from asago_scenario_generator.stpa.scenario_prod.and_or_tree import (
     render_and_or_tree,
 )
 from asago_scenario_generator.stpa.scenario_prod.handoff_v5 import (
-    build_scenario_handoff_v5,
+    build_scenario_handoff_v6,
 )
 from asago_scenario_generator.stpa.scenario_prod.presentation import (
     render_scenario_summary,
@@ -227,7 +227,7 @@ def test_handoff_and_gherkin_use_the_safe_outcome_statement(tmp_path) -> None:
         gherkin_spec=gherkin,
         gherkin_raw=gherkin.to_feature_text(),
     )
-    handoff = build_scenario_handoff_v5(
+    handoff = build_scenario_handoff_v6(
         envelope,
         loss_analysis=_loss_analysis(),
         observed_operations=("refund_payment",),
@@ -1028,7 +1028,7 @@ def test_handoff_names_an_operation_once_when_two_authorities_agree(tmp_path) ->
         gherkin_raw=gherkin.to_feature_text(),
     )
 
-    handoff = build_scenario_handoff_v5(
+    handoff = build_scenario_handoff_v6(
         envelope,
         loss_analysis=_loss_analysis(),
         enriched_operations={spec.target_control_action: " refund_payment "},

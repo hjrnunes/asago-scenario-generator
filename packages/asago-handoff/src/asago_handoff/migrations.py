@@ -2,9 +2,10 @@
 
 Version 6 renamed ``attack_shape.indirect.party_relation.controller`` to
 ``controlling_party``. The migration renames the field, advances the document to
-the v6 schema version, and recomputes ``content_digest`` under the v6 domain, so
-an upgraded v5 handoff equals the v6 handoff the producer writes. A handoff
-without the digest gains one, as the producer's writer always adds it.
+the v6 schema version, and recomputes ``content_digest`` under the v6 domain. It
+leaves every other value as the v5 document states it, including the source text
+of the ``producer handoff contract`` fact, which a v6 writer states as v6. A
+handoff without the digest gains one, as the producer's writer always adds it.
 
 The producer imports ``asago_handoff``, so importing this module registers the
 hop with the shared core. Only the handoff owner defines the migration; the core

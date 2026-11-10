@@ -8,8 +8,8 @@ test fails when the copies differ.
 ``installed_specs`` reads the specs the package installs and ``read_handoff``
 reads one handoff through them; ``load_contract`` pairs each published version's
 schema with the ownership rules. Two versions are published: ``VERSION`` (the
-newest, which requires the envelope) and ``LEGACY_VERSION`` (which every recorded
-handoff names).
+newest, which requires the envelope) and ``LEGACY_VERSION`` (the retired version,
+which a reader still validates).
 """
 
 from __future__ import annotations
@@ -32,7 +32,7 @@ KIT_V6 = HANDOFF_SCHEMA_VERSION_V6
 CASES_NAME = "cases"
 OWNERSHIP_RULES_NAME = "ownership-rules.json"
 CONTRACT = "scenario-handoff"
-#: The older published version, and the one every recorded handoff names.
+#: The older published version, retired: no writer publishes it.
 LEGACY_VERSION = HANDOFF_SCHEMA_VERSION_V5
 #: The newest published version, the one a new writer publishes.
 VERSION = HANDOFF_SCHEMA_VERSION_V6

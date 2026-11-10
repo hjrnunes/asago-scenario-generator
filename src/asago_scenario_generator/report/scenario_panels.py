@@ -179,7 +179,7 @@ def narrative_panel(text: str) -> Panel:
     """Build the narrative panel from the producer's narrative text.
 
     The structured write-up opens with its ``Test hypothesis`` line, which the
-    panel leaves out; any other narrative, such as a v5 handoff's paragraph,
+    panel leaves out; any other narrative, such as a handoff's paragraph,
     renders as that text with a clipped preview.
     """
     if not text.lstrip().startswith("Test hypothesis"):

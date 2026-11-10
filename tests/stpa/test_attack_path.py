@@ -25,12 +25,12 @@ from asago_scenario_generator.stpa.scenario_prod.attack_path import (
 )
 from asago_scenario_generator.stpa.scenario_prod.handoff import (
     AttackPath,
-    ScenarioHandoffV5,
+    ScenarioHandoffV6,
     handoff_ownership_violations,
     handoff_schema_violations,
 )
 from asago_scenario_generator.stpa.scenario_prod.handoff_v5 import (
-    build_scenario_handoff_v5,
+    build_scenario_handoff_v6,
 )
 from tests.stpa.test_narration import adversarial, everyday
 from tests.stpa.test_scenario_handoff_v5 import (
@@ -169,12 +169,12 @@ def test_a_tree_that_is_not_an_and_or_tree_does_not_reduce(damage: Any) -> None:
 # --- Stage-7 check ------------------------------------------------------------
 
 
-def _factor_ids(handoff: ScenarioHandoffV5) -> list[str]:
+def _factor_ids(handoff: ScenarioHandoffV6) -> list[str]:
     return [factor.source_id for factor in handoff.causal_factors]
 
 
 def test_a_reduced_path_passes_the_stage_7_check() -> None:
-    handoff = build_scenario_handoff_v5(_envelope(adversarial()))
+    handoff = build_scenario_handoff_v6(_envelope(adversarial()))
     path = handoff.attack_path.model_dump(mode="json", exclude_none=True)
 
     assert attack_path_errors(path, _factor_ids(handoff)) == []
@@ -182,7 +182,7 @@ def test_a_reduced_path_passes_the_stage_7_check() -> None:
 
 
 def test_the_check_names_a_duplicate_or_a_foreign_id() -> None:
-    handoff = build_scenario_handoff_v5(_envelope(adversarial()))
+    handoff = build_scenario_handoff_v6(_envelope(adversarial()))
     path = handoff.attack_path.model_dump(mode="json", exclude_none=True)
     path["conditions"][0]["node_id"] = "AT-SIT"
     path["steps"].append(dict(path["steps"][0]))
@@ -194,7 +194,7 @@ def test_the_check_names_a_duplicate_or_a_foreign_id() -> None:
 
 
 def test_the_check_wants_one_weak_point_per_causal_factor() -> None:
-    handoff = build_scenario_handoff_v5(_envelope(adversarial()))
+    handoff = build_scenario_handoff_v6(_envelope(adversarial()))
     path = handoff.attack_path.model_dump(mode="json", exclude_none=True)
 
     errors = attack_path_errors(path, [*_factor_ids(handoff), "CA-9-9"])
@@ -203,12 +203,12 @@ def test_the_check_wants_one_weak_point_per_causal_factor() -> None:
     assert "one weak point per causal factor" in errors[0]
 
 
-# --- the v5 model and its schema ----------------------------------------------
+# --- the handoff model and its schema -----------------------------------------
 
 
 def _document() -> dict[str, Any]:
-    return build_scenario_handoff_v5(_envelope(adversarial())).model_dump(
-        mode="json", exclude_none=True
+    return build_scenario_handoff_v6(_envelope(adversarial())).model_dump(
+        mode="json", exclude_none=True, by_alias=True
     )
 
 
@@ -242,7 +242,7 @@ def test_the_path_model_is_closed_and_typed() -> None:
             AttackPath.model_validate(broken)
 
 
-def test_a_v5_document_with_a_tree_or_without_a_path_is_rejected() -> None:
+def test_a_document_with_a_tree_or_without_a_path_is_rejected() -> None:
     document = _document()
     with_tree = {**document, "attack_tree": {"format": "and-or-tree-v1"}}
     without_path = {k: v for k, v in document.items() if k != "attack_path"}
@@ -251,7 +251,7 @@ def test_a_v5_document_with_a_tree_or_without_a_path_is_rejected() -> None:
         assert list(Draft202012Validator(SCHEMA).iter_errors(broken))
         assert handoff_schema_violations(broken)
         with pytest.raises(ValidationError):
-            ScenarioHandoffV5.model_validate(broken)
+            ScenarioHandoffV6.model_validate(broken)
 
 
 def test_the_published_document_passes_the_schema_and_ownership_scan() -> None:

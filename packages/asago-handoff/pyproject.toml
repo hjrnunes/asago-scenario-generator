@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "asago-handoff"
 version = "0.1.0"
-description = "The scenario-handoff-v5 rules the producer, the consumer and the orchestrator share."
+description = "The scenario-handoff rules the producer, the consumer and the orchestrator share."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = ["asago-contracts-core>=0.1,<0.2", "jsonschema>=4.0"]

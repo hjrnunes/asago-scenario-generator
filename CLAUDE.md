@@ -20,7 +20,7 @@ own documents.
   controlled process. Unqualified "controller" belongs to STPA material only.
 - **Control action** — an action a controller issues; the scenario names the
   unsafe one and the context that makes it unsafe.
-- **Scenario** (`scenario-handoff-v5`) — the frozen handoff: narrative, attack
+- **Scenario** (`scenario-handoff-v6`) — the frozen handoff: narrative, attack
   tree, Gherkin, failure criterion, safe alternative and metadata.
 - **Party** — one of `third_party`, `counterparty`, `operator_insider` or
   `unknown`, from `ItemController`.

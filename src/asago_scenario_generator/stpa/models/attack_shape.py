@@ -1,6 +1,6 @@
 """Attack shape: how an adversarial scenario reaches the agent, as structure.
 
-The shape is part of scenario-handoff-v5. It holds closed enums, bounded
+The shape is part of the scenario handoff. It holds closed enums, bounded
 integers and identifiers only, so attack text cannot fit in it: the artifact
 generator writes every turn and every planted item. An identifier admits no
 whitespace, which keeps a sentence out of the identifier fields.
@@ -157,11 +157,11 @@ class PlantedItem(_ShapeModel):
 class PartyRelation(_ShapeModel):
     """Who controls the planted item and which actor the benign turns speak as."""
 
-    # The party field keeps its model-facing name in Python and in the published
-    # v5 schema. Scenario-handoff-v6 writes it as ``controlling_party``, so the
-    # serialization alias renames the document and never the prompts or the
-    # structured-output schema the model answers against. The class docstring
-    # stays v5's, because it is part of the frozen v5 schema.
+    # The party field keeps its model-facing name in Python and in the
+    # structured-output schema the model answers against. The handoff document
+    # writes it as ``controlling_party``, so the serialization alias renames the
+    # document and never the prompts. The class docstring stays as it is,
+    # because the published schemas carry it.
     controller: ItemController = Field(
         validation_alias=AliasChoices("controlling_party", "controller"),
         serialization_alias="controlling_party",

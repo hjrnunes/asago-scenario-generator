@@ -1,8 +1,9 @@
-"""scenario-handoff-v5, the producer's only published handoff.
+"""scenario-handoff-v6, the handoff the producer publishes.
 
-v5 carries the scenario's attack path and adds the UCA, actor, causal
+The handoff carries the scenario's attack path, the UCA, actor, causal
 factors, preconditions, procedure and worst case threat, each derived by code
-from the scenario spec. Every test is offline.
+from the scenario spec. The module also holds the builders the other handoff
+tests share. Every test is offline.
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ from pydantic import ValidationError
 from asago_scenario_generator.models.canonical import compute_framed_digest
 from asago_scenario_generator.cli import app
 from asago_scenario_generator.pipeline import synthesis
+from asago_contracts_core import validate_handoff
 from asago_scenario_generator.report.run_data import _read_scenarios
 from asago_scenario_generator.stpa.models.attack_shape import AttackShape, TurnPurpose
 from asago_scenario_generator.stpa.models.scenario_spec import ScenarioSpec
@@ -27,13 +29,12 @@ from asago_scenario_generator.stpa.scenario_prod.and_or_tree import (
 )
 from asago_scenario_generator.stpa.scenario_prod.assembly import assemble_envelope
 from asago_scenario_generator.stpa.scenario_prod.handoff import (
-    HANDOFF_DIGEST_DOMAIN_V5,
-    HANDOFF_SCHEMA_VERSION_V5,
+    HANDOFF_DIGEST_DOMAIN_V6,
     HANDOFF_SCHEMA_VERSION_V6,
     HandoffTaxonomy,
     HandoffTaxonomyInputs,
     HandoffTaxonomyRef,
-    ScenarioHandoffV5,
+    ScenarioHandoffV6,
     handoff_ownership_violations,
     handoff_payload_digest,
     handoff_schema_violations,
@@ -41,7 +42,7 @@ from asago_scenario_generator.stpa.scenario_prod.handoff import (
 )
 from asago_scenario_generator.stpa.scenario_prod.handoff_schema import handoff_schema
 from asago_scenario_generator.stpa.scenario_prod.handoff_v5 import (
-    build_scenario_handoff_v5,
+    build_scenario_handoff_v6,
     uca_type,
     v5_fields,
 )
@@ -59,6 +60,7 @@ from asago_scenario_generator.stpa.scenario_prod.stage5.shape_step import (
 from tests.helpers.scenario_handoff_publication import (
     _functional_payload,
     _normal_semantics_payload,
+    _published_document,
     _published_handoff,
 )
 from tests.helpers.shape_step_call import DIRECT_REPLY
@@ -77,7 +79,7 @@ from tests.stpa.test_narration import (
 
 ROOT = Path(__file__).resolve().parents[2]
 CONTRACT_ROOT = ROOT / "data/contracts/scenario-handoff"
-KIT = CONTRACT_ROOT / "scenario-handoff-v5"
+KIT = CONTRACT_ROOT / "scenario-handoff-v6"
 CASES = KIT / "cases"
 SCHEMA = json.loads((KIT / "schema.json").read_text(encoding="utf-8"))
 
@@ -121,9 +123,14 @@ def shaped(shape: AttackShape) -> ScenarioSpec:
     return adversarial().model_copy(update={"attack_shape": shape})
 
 
+def _wire(handoff: ScenarioHandoffV6) -> dict[str, Any]:
+    """The handoff as its document writes it, without the envelope."""
+    return handoff.model_dump(mode="json", exclude_none=True, by_alias=True)
+
+
 def fields_of(spec: ScenarioSpec) -> dict[str, Any]:
     """The v5 fields as the handoff publishes them."""
-    handoff = build_scenario_handoff_v5(_envelope(spec))
+    handoff = build_scenario_handoff_v6(_envelope(spec))
     return {
         key: value
         for key, value in handoff.model_dump(mode="json", exclude_none=True).items()
@@ -359,53 +366,45 @@ def test_a_missing_source_fails_instead_of_publishing_blank_text() -> None:
     [adversarial, everyday, lambda: shaped(DIRECT), lambda: shaped(FORGED)],
     ids=["indirect", "functional", "direct", "forged"],
 )
-def test_a_v5_handoff_passes_the_kit_schema_ownership_and_digest(make) -> None:
-    document = build_scenario_handoff_v5(_envelope(make())).model_dump(
-        mode="json", exclude_none=True
-    )
+def test_a_handoff_passes_the_kit_schema_ownership_and_digest(make) -> None:
+    document = _wire(build_scenario_handoff_v6(_envelope(make())))
 
-    assert document["schema_version"] == HANDOFF_SCHEMA_VERSION_V5
+    assert document["schema_version"] == HANDOFF_SCHEMA_VERSION_V6
     assert list(Draft202012Validator(SCHEMA).iter_errors(document)) == []
     assert handoff_schema_violations(document) == []
     assert handoff_ownership_violations(document) == []
-    verify_handoff_digest(ScenarioHandoffV5.model_validate(document))
+    verify_handoff_digest(ScenarioHandoffV6.model_validate(document))
 
 
-def test_the_v5_digest_uses_its_own_domain() -> None:
-    document = build_scenario_handoff_v5(_envelope(adversarial())).model_dump(
-        mode="json", exclude_none=True
-    )
+def test_the_digest_uses_its_own_domain() -> None:
+    document = _wire(build_scenario_handoff_v6(_envelope(adversarial())))
     unsigned = {k: v for k, v in document.items() if k != "content_digest"}
 
-    assert HANDOFF_DIGEST_DOMAIN_V5 == "scenario-handoff-v5"
+    assert HANDOFF_DIGEST_DOMAIN_V6 == "scenario-handoff-v6"
     assert document["content_digest"] == compute_framed_digest(
-        HANDOFF_DIGEST_DOMAIN_V5, unsigned
+        HANDOFF_DIGEST_DOMAIN_V6, unsigned
     )
     assert handoff_payload_digest(unsigned) == document["content_digest"]
 
 
 def test_the_added_fields_follow_the_shared_envelope() -> None:
-    document = build_scenario_handoff_v5(_envelope(adversarial())).model_dump(
-        mode="json", exclude_none=True
-    )
+    document = _wire(build_scenario_handoff_v6(_envelope(adversarial())))
 
     assert list(document)[-len(V5_KEYS) :] == list(V5_KEYS)
     assert "attack_tree" not in document
     assert document["sourced_facts"][-1]["source"] == (
-        f"producer handoff contract {HANDOFF_SCHEMA_VERSION_V5}"
+        f"producer handoff contract {HANDOFF_SCHEMA_VERSION_V6}"
     )
 
 
 @pytest.mark.parametrize("version", ["scenario-handoff-v4", "scenario-handoff-v9"])
 def test_a_document_of_another_version_is_rejected(version: str) -> None:
-    document = build_scenario_handoff_v5(_envelope(adversarial())).model_dump(
-        mode="json", exclude_none=True
-    )
+    document = _wire(build_scenario_handoff_v6(_envelope(adversarial())))
     document["schema_version"] = version
     unsigned = {k: v for k, v in document.items() if k != "content_digest"}
 
     with pytest.raises(ValidationError):
-        ScenarioHandoffV5.model_validate(document)
+        ScenarioHandoffV6.model_validate(document)
     assert handoff_schema_violations(document) == [
         "schema_violation:schema_version",
         "schema_violation:attack_shape",
@@ -425,9 +424,9 @@ ASI02 = HandoffTaxonomyRef(
 LLM01 = HandoffTaxonomyRef(
     scheme="owasp-llm", edition="2026", id="LLM01", name="Prompt Injection"
 )
-#: The content digest of ``build_scenario_handoff_v5(_envelope(adversarial()))``
-#: before the taxonomy block existed.
-BLOCKLESS_DIGEST = "1fc8be80a7dd7b387e4b27298c46bbdd11ab52799d3f103c8f33dd10f3bc5cb6"
+#: The content digest of ``build_scenario_handoff_v6(_envelope(adversarial()))``
+#: with no taxonomy block, as the writer signs it in the v6 digest domain.
+BLOCKLESS_DIGEST = "785fb1f3f227dc68b0bb7a59adc829f3d5b29fd2d492823375852ff60fdffe7c"
 
 
 def _two_losses(spec: ScenarioSpec) -> ScenarioSpec:
@@ -449,10 +448,10 @@ def test_taxonomy_block_unions_the_lineage_losses_references() -> None:
         references_by_loss={"L-1": (LLM03,), "L-2": (ASI02, LLM03), "L-9": (LLM01,)},
     )
 
-    handoff = build_scenario_handoff_v5(
+    handoff = build_scenario_handoff_v6(
         _envelope(_two_losses(adversarial())), taxonomy=taxonomy
     )
-    document = handoff.model_dump(mode="json", exclude_none=True)
+    document = _wire(handoff)
 
     assert handoff.lineage.loss_ids == ["L-1", "L-2"]
     assert document["taxonomy"] == {
@@ -475,7 +474,7 @@ def test_taxonomy_block_unions_the_lineage_losses_references() -> None:
     assert list(Draft202012Validator(SCHEMA).iter_errors(document)) == []
     assert handoff_schema_violations(document) == []
     assert handoff_ownership_violations(document) == []
-    verify_handoff_digest(ScenarioHandoffV5.model_validate(document))
+    verify_handoff_digest(ScenarioHandoffV6.model_validate(document))
 
 
 def test_a_scenario_with_no_mapped_risk_gets_an_empty_reference_list() -> None:
@@ -483,15 +482,15 @@ def test_a_scenario_with_no_mapped_risk_gets_an_empty_reference_list() -> None:
         atlas_release="2026.05", references_by_loss={"L-9": (LLM01,)}
     )
 
-    handoff = build_scenario_handoff_v5(_envelope(everyday()), taxonomy=taxonomy)
-    document = handoff.model_dump(mode="json", exclude_none=True)
+    handoff = build_scenario_handoff_v6(_envelope(everyday()), taxonomy=taxonomy)
+    document = _wire(handoff)
 
     assert document["taxonomy"] == {"atlas_release": "2026.05", "references": []}
     assert list(Draft202012Validator(SCHEMA).iter_errors(document)) == []
 
 
 def test_a_handoff_without_taxonomy_omits_the_key_and_keeps_its_digest() -> None:
-    handoff = build_scenario_handoff_v5(_envelope(adversarial()))
+    handoff = build_scenario_handoff_v6(_envelope(adversarial()))
 
     assert handoff.taxonomy is None
     assert "taxonomy" not in handoff.model_dump(mode="json")
@@ -537,7 +536,7 @@ def test_a_run_publishes_the_taxonomy_block_it_is_given(tmp_path: Path) -> None:
         document = _published_handoff(tmp_path, scenario_id)
         assert document["lineage"]["loss_ids"] == ["L-1"]
         blocks[document["kind"]] = document["taxonomy"]
-        verify_handoff_digest(ScenarioHandoffV5.model_validate(document))
+        verify_handoff_digest(ScenarioHandoffV6.model_validate(document))
     block = {"atlas_release": "2026.05", "references": [LLM03.model_dump()]}
     assert blocks == {"adversarial": block, "functional": block}
 
@@ -549,7 +548,7 @@ def _kit(relative: str) -> dict:
     return json.loads((CASES / relative).read_text(encoding="utf-8"))
 
 
-def test_the_v5_schema_file_is_the_published_schema_byte_for_byte() -> None:
+def test_the_schema_file_is_the_published_schema_byte_for_byte() -> None:
     rendered = json.dumps(handoff_schema(), indent=2) + "\n"
 
     assert (KIT / "schema.json").read_text(encoding="utf-8") == rendered
@@ -566,14 +565,14 @@ def test_the_kit_holds_the_attack_path_case_and_names_every_invalid_case() -> No
 @pytest.mark.parametrize(
     "path", sorted((CASES / "valid").glob("*.json")), ids=lambda path: path.name
 )
-def test_each_valid_v5_fixture_passes_every_check(path: Path) -> None:
+def test_each_valid_fixture_passes_every_check(path: Path) -> None:
     payload = json.loads(path.read_text(encoding="utf-8"))
 
-    assert payload["schema_version"] == HANDOFF_SCHEMA_VERSION_V5
+    assert payload["schema_version"] == HANDOFF_SCHEMA_VERSION_V6
     assert list(Draft202012Validator(SCHEMA).iter_errors(payload)) == []
     assert handoff_schema_violations(payload) == []
     assert handoff_ownership_violations(payload) == []
-    verify_handoff_digest(ScenarioHandoffV5.model_validate(payload))
+    verify_handoff_digest(ScenarioHandoffV6.model_validate(payload))
     digests = _kit("canonical-digests.json")
     assert digests["handoff_digests"][f"valid/{path.name}"] == payload["content_digest"]
 
@@ -581,7 +580,7 @@ def test_each_valid_v5_fixture_passes_every_check(path: Path) -> None:
 @pytest.mark.parametrize(
     "path", sorted((CASES / "invalid").glob("*.json")), ids=lambda path: path.name
 )
-def test_each_invalid_v5_fixture_is_rejected_with_its_recorded_codes(
+def test_each_invalid_fixture_is_rejected_with_its_recorded_codes(
     path: Path,
 ) -> None:
     payload = json.loads(path.read_text(encoding="utf-8"))
@@ -603,7 +602,7 @@ def test_each_invalid_v5_fixture_is_rejected_with_its_recorded_codes(
         ("v5-worst-case-threat-blank", ["schema_violation:worst_case_threat"]),
     ],
 )
-def test_the_v5_rules_reject_their_cases(name: str, codes: list[str]) -> None:
+def test_the_rules_reject_their_cases(name: str, codes: list[str]) -> None:
     payload = _kit(f"invalid/{name}.json")
 
     assert handoff_schema_violations(payload) == codes
@@ -647,7 +646,7 @@ def _publish(run_dir: Path, **kwargs: Any) -> Any:
     return result, client
 
 
-def test_a_run_publishes_valid_v5_handoffs(tmp_path: Path) -> None:
+def test_a_run_publishes_valid_handoffs(tmp_path: Path) -> None:
     result, _ = _publish(tmp_path)
 
     assert result.stage_errors == []
@@ -655,15 +654,16 @@ def test_a_run_publishes_valid_v5_handoffs(tmp_path: Path) -> None:
     for scenario_id in ("SCN-001", "SCN-002"):
         document = _published_handoff(tmp_path, scenario_id)
         kinds.add(document["kind"])
-        assert document["schema_version"] == HANDOFF_SCHEMA_VERSION_V5
+        assert document["schema_version"] == HANDOFF_SCHEMA_VERSION_V6
         assert list(Draft202012Validator(SCHEMA).iter_errors(document)) == []
         assert handoff_ownership_violations(document) == []
-        verify_handoff_digest(ScenarioHandoffV5.model_validate(document))
+        verify_handoff_digest(ScenarioHandoffV6.model_validate(document))
         assert "attack_tree" not in document
         assert document["attack_path"]["format"] == "attack-path-v1"
+        assert validate_handoff(_published_document(tmp_path, scenario_id)) == []
     assert kinds == {"adversarial", "functional"}
     scenarios = _read_scenarios(tmp_path)
-    assert all(isinstance(item, ScenarioHandoffV5) for item in scenarios.values())
+    assert all(isinstance(item, ScenarioHandoffV6) for item in scenarios.values())
 
 
 def test_the_handoff_narrative_is_the_accepted_paragraph_alone(

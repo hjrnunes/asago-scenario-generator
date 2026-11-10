@@ -20,14 +20,14 @@ import yaml
 from pydantic import ValidationError
 
 from asago_scenario_generator.stpa.scenario_prod.handoff import (
-    HANDOFF_SCHEMA_VERSION_V5,
-    ScenarioHandoffV5,
+    HANDOFF_SCHEMA_VERSION_V6,
+    ScenarioHandoffV6,
     handoff_ownership_violations,
     verify_handoff_digest,
     write_scenario_handoff,
 )
 from asago_scenario_generator.stpa.scenario_prod.handoff_v5 import (
-    build_scenario_handoff_v5,
+    build_scenario_handoff_v6,
 )
 from asago_scenario_generator.stpa.scenario_prod.run import (
     SP3CandidateStatus,
@@ -44,6 +44,7 @@ from tests.helpers.scenario_handoff_publication import (
 )
 from tests.helpers.scenario_handoff_publication import (
     _functional_payload,
+    _published_document,
     _published_handoff,
 )
 
@@ -139,8 +140,10 @@ def test_run_publishes_the_versioned_scenario_handoff(tmp_path: Path) -> None:
         SP3CandidateStatus.published
     ]
     assert result.stage_errors == []
-    document = _published_handoff(tmp_path)
-    assert document["schema_version"] == HANDOFF_SCHEMA_VERSION_V5
+    document = _published_document(tmp_path)
+    assert document["schema_version"] == HANDOFF_SCHEMA_VERSION_V6
+    assert document["contract"]["id"] == "scenario-handoff"
+    assert document["contract"]["version"] == HANDOFF_SCHEMA_VERSION_V6
     assert document["scenario_id"] == "SCN-001"
     assert document["scenario_version"] >= 1
     assert document["kind"] == "adversarial"
@@ -172,8 +175,9 @@ def test_handoff_is_the_envelope_over_three_representations_only(
 ) -> None:
     """No fourth representation is introduced under new field names."""
     _publish([_normal_semantics_payload()], tmp_path)
-    document = _published_handoff(tmp_path)
+    document = _published_document(tmp_path)
     assert set(document) == {
+        "contract",
         "schema_version",
         "scenario_id",
         "scenario_version",
@@ -313,27 +317,27 @@ def test_handoff_without_failure_criterion_or_safe_alternative_is_rejected() -> 
     alternative fails validation — the ownership boundary requires both."""
     fixture_path = (
         Path(__file__).resolve().parents[2]
-        / "data/contracts/scenario-handoff/scenario-handoff-v5/cases/valid/"
+        / "data/contracts/scenario-handoff/scenario-handoff-v6/cases/valid/"
         "adversarial-observed-record.json"
     )
     document = json.loads(fixture_path.read_text(encoding="utf-8"))
-    ScenarioHandoffV5.model_validate(document)
+    ScenarioHandoffV6.model_validate(document)
 
     for missing_field in ("semantic_failure_criterion", "safe_alternative"):
         incomplete = {
             key: value for key, value in document.items() if key != missing_field
         }
         with pytest.raises(ValidationError):
-            ScenarioHandoffV5.model_validate(incomplete)
+            ScenarioHandoffV6.model_validate(incomplete)
 
 
 def test_handoff_digest_detects_tampering(tmp_path: Path) -> None:
     _publish([_normal_semantics_payload()], tmp_path)
     document = _published_handoff(tmp_path)
-    handoff = ScenarioHandoffV5.model_validate(document)
+    handoff = ScenarioHandoffV6.model_validate(document)
     verify_handoff_digest(handoff)
 
-    tampered = ScenarioHandoffV5.model_validate(
+    tampered = ScenarioHandoffV6.model_validate(
         {**document, "narrative": document["narrative"] + " tampered"}
     )
     with pytest.raises(ValueError):
@@ -432,7 +436,7 @@ def test_a_failed_feature_write_leaves_no_handoff_yaml(
 ) -> None:
     """A companion write that fails leaves no YAML that downstream reads."""
     result = _publish([_normal_semantics_payload()], tmp_path / "run")
-    handoff = build_scenario_handoff_v5(result.scenario_envelopes[0])
+    handoff = build_scenario_handoff_v6(result.scenario_envelopes[0])
     original_write_text = Path.write_text
 
     def fail_feature_write(self, data, *args, **kwargs):
@@ -492,7 +496,7 @@ def test_criterion_operation_requires_an_exact_observed_inventory_match(
     result = _publish([payload], tmp_path)
     envelope = result.scenario_envelopes[0]
 
-    handoff = build_scenario_handoff_v5(
+    handoff = build_scenario_handoff_v6(
         envelope,
         observed_operations=("process_refund", "lookup_order"),
         environment_bound=True,
@@ -539,7 +543,7 @@ def test_generic_capability_labels_never_substitute_for_observed_operations(
     result = _publish([payload], tmp_path)
     envelope = result.scenario_envelopes[0]
 
-    handoff = build_scenario_handoff_v5(
+    handoff = build_scenario_handoff_v6(
         envelope,
         observed_operations=("process_refund", "lookup_order"),
         environment_bound=True,
@@ -559,12 +563,12 @@ def test_ambiguous_or_unobserved_criterion_tokens_contribute_no_authority(
     result = _publish([payload], tmp_path)
     envelope = result.scenario_envelopes[0]
 
-    ambiguous = build_scenario_handoff_v5(
+    ambiguous = build_scenario_handoff_v6(
         envelope,
         observed_operations=("process_refund", "schedule_payment"),
         environment_bound=True,
     )
-    absent = build_scenario_handoff_v5(
+    absent = build_scenario_handoff_v6(
         envelope,
         observed_operations=("lookup_order",),
         environment_bound=True,
@@ -586,8 +590,8 @@ def test_unbound_handoff_records_the_operation_inventory_as_unknown(
         "observed operations."
     )
 
-    unbound = build_scenario_handoff_v5(envelope, environment_bound=False)
-    bound = build_scenario_handoff_v5(envelope, environment_bound=True)
+    unbound = build_scenario_handoff_v6(envelope, environment_bound=False)
+    bound = build_scenario_handoff_v6(envelope, environment_bound=True)
 
     assert unbound.assumptions_and_unknowns[-1] == unbound_unknown
     assert unbound.assumptions_and_unknowns[:-1] == bound.assumptions_and_unknowns

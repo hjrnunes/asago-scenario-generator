@@ -37,8 +37,8 @@ commands.
 
 ## Current ownership and historical seams
 
-The normal producer `generate` publishes one semantics-only `scenario-handoff-v5`
-through its handoff model, `ScenarioHandoffV5`, which carries the scenario's
+The normal producer `generate` publishes one semantics-only `scenario-handoff-v6`
+through its handoff model, `ScenarioHandoffV6`, which carries the scenario's
 `attack_path` (`attack_path.py` reduces the and-or tree to it) and adds the
 UCA, actor, causal factors, preconditions, ATLAS procedure, and worst case threat
 that `handoff_v5.py` derives from the scenario spec. `model_gherkin.py` asks
@@ -63,7 +63,7 @@ reaches no prompt, and a run without SSSOM rows or risk cards omits it. The owne
 scan reads its forbidden keys and prose patterns from `ownership-rules.json`
 beside the kit; the lock pins that file, and the shared core ships it to the
 consumer, so both sides enforce one list. `scripts/gen_handoff_kit.py` regenerates the kit and
-the lock; every kit file must come out byte-identical. `scenario-handoff-v5/schema.json`
+the lock; every kit file must come out byte-identical. `scenario-handoff-v6/schema.json`
 states the rules JSON Schema can express, composed from the model's own schema,
 so a reader that holds only the schema reaches the verdicts the Pydantic model
 enforces; the rules it cannot state stay model-only. The kit carries the
@@ -107,7 +107,7 @@ implements `tool-call-condition-v2`. `tool-call-condition-v2` changes three eval
 `same_argument` uses the strict equality of value comparisons, and a captured
 call marked `blocked` never satisfies `requires_prior`. Both versions share one
 condition schema, so every condition the producer binds is valid under both.
-A `scenario-handoff-v5` handoff therefore carries no condition-version field:
+A `scenario-handoff-v6` handoff therefore carries no condition-version field:
 the evaluator states the version it implements by the kit it mirrors and the
 vectors it reproduces. The producer never emits `blocked`; the capture sets it.
 The Stage 5 condition checks are the same under both versions, because they do
@@ -120,7 +120,7 @@ the frozen content, immediate pre-dispatch dependency checks, command/reply
 receipts, and separate backend/state observations. A command-level detector
 does not establish a completed backend effect.
 
-The current workflow is producer `generate` → `scenario-handoff-v5` →
+The current workflow is producer `generate` → `scenario-handoff-v6` →
 consumer `generate` → consumer `check`.
 
 ## Taxonomy obligation planning (observational Phase 1)

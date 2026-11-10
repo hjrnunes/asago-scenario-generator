@@ -124,7 +124,7 @@ qualification. Do not restore the retired command as a second semantic engine.
 
 The producer owns semantic scenario authority: STPA lineage, the selected
 failure criterion, safe alternatives, supported causal hypotheses, and the
-semantics-only `scenario-handoff-v5`. The producer does not publish concrete
+semantics-only `scenario-handoff-v6`. The producer does not publish concrete
 messages, setup instructions, detector expressions, or harness bindings.
 
 The producer also publishes the `tool-call-condition` contract.
@@ -289,7 +289,7 @@ Each generated scenario is published as a versioned **scenario handoff**
 under `scenarios/` (`SCN-*.yaml` plus a matching `.feature` companion): the
 envelope over narrative, attack path, Gherkin and necessary metadata defined
 by [`data/contracts/scenario-handoff/`](data/contracts/scenario-handoff/)
-(schema `scenario-handoff-v5`, described below). `tool_call_condition_status` says whether
+(schema `scenario-handoff-v6`, described below). `tool_call_condition_status` says whether
 Stage 5 bound the discriminating condition to target facts, and, when it did,
 `tool_call_condition` carries the ready-to-evaluate condition. The required
 `attack_shape` key (closed enums, turn count 1-4 and identifiers, never attack
@@ -849,8 +849,8 @@ test design, as the handoff flow below describes.
 The normal product `generate` publishes the versioned **scenario handoff**: the envelope over narrative, attack path, Gherkin and
 necessary metadata defined by
 [`data/contracts/scenario-handoff/`](data/contracts/scenario-handoff/)
-(schema `scenario-handoff-v5`, kit in
-`data/contracts/scenario-handoff/scenario-handoff-v5/`), written under `scenarios/`
+(schema `scenario-handoff-v6`, kit in
+`data/contracts/scenario-handoff/scenario-handoff-v6/`), written under `scenarios/`
 with its matching `.feature` companion. Each run builds an AND/OR attack tree
 per scenario and publishes the scenario's `attack_path` (format
 `attack-path-v1`) reduced from it, beside the shared envelope fields and six
@@ -907,16 +907,18 @@ allows one correction, maps the steps to Gherkin keywords, and falls back to the
 code-rendered Gherkin when the reply fails, errors, or is refused. The
 `.feature` file and the handoff YAML come from the same Gherkin, and
 `gherkins.json` records each scenario's source, request count, rejections,
-reason, and reply. The handoff signs its digest under the `scenario-handoff-v5`
+reason, and reply. The handoff signs its digest under the `scenario-handoff-v6`
 domain, and generation fails when a source the six fields need is missing.
-`CONTRACT.lock` pins v5.
+`CONTRACT.lock` pins v6.
 
-`generate` writes only v5. The producer also defines `scenario-handoff-v6`
-(`ScenarioHandoffV6` in `stpa/scenario_prod/handoff.py`), the same document
-with `attack_shape.indirect.party_relation.controller` renamed to
-`controlling_party` on the wire and a digest signed under the v6 domain. No
-`generate` path writes it. A v6 document appears in two cases: you call
-`build_scenario_handoff_v6` (`handoff_v5.py`), or you upgrade a saved v5
+`generate` writes only v6 (`ScenarioHandoffV6` in
+`stpa/scenario_prod/handoff.py`, built by `build_scenario_handoff_v6` in
+`handoff_v5.py`). Each handoff file carries the `contract` envelope its spec
+requires, and the party field of an indirect attack shape is
+`attack_shape.indirect.party_relation.controlling_party` on the wire, though
+the model and every prompt keep the attribute name `controller`. The retired
+`scenario-handoff-v5` stays published only so a reader can still validate a
+saved v5 document, and no `generate` path writes it. You upgrade a saved v5
 handoff with `asago_handoff.HANDOFF_UPGRADE`, which renames the field and
 recomputes `content_digest`. The handoff retains the semantic failure criterion, the
 safe alternative, lineage, identity, and hypothesis framing, and publishes no

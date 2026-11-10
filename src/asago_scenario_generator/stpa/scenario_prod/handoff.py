@@ -15,14 +15,14 @@ judge prompts and executable setup — structurally and in prose. Every
 exclusion is verified by :func:`handoff_ownership_violations`, which is the
 ownership boundary enforced by the negative tests.
 
-Schema version: the producer publishes :class:`ScenarioHandoffV5`
-(:data:`HANDOFF_SCHEMA_VERSION_V5`), whose fields beyond the shared envelope
-``handoff_v5`` derives, and :class:`ScenarioHandoffV6`
-(:data:`HANDOFF_SCHEMA_VERSION_V6`), the same document with the party field
-renamed to ``controlling_party`` on the wire and the contract envelope required.
-``generate`` writes v5, so every recorded handoff and prompt stays byte-identical.
-The kits live in ``data/contracts/scenario-handoff/``; the consumer vendors them
-byte-for-byte, the same discipline as ``data/contracts/target-profile/``.
+Schema version: the producer publishes :class:`ScenarioHandoffV6`
+(:data:`HANDOFF_SCHEMA_VERSION_V6`), whose fields beyond the shared envelope
+``handoff_v5`` derives. The document names the party field
+``controlling_party`` on the wire and carries the contract envelope its spec
+requires. :class:`ScenarioHandoffV5` remains only to read and validate the
+retired v5 kit. The kits live in ``data/contracts/scenario-handoff/``; the
+consumer vendors them byte-for-byte, the same discipline as
+``data/contracts/target-profile/``.
 """
 
 from __future__ import annotations
@@ -48,7 +48,7 @@ from pydantic import (
 
 from asago_contracts_core.contract import CONTRACT as HANDOFF_CONTRACT
 from asago_contracts_core.contract import installed_specs
-from asago_contracts_core.envelope import write_envelope
+from asago_contracts_core.envelope import ENVELOPE_FIELD, write_envelope
 from asago_handoff import load_ownership_rules as _shared_load_ownership_rules
 from asago_handoff import ownership_violations as _shared_ownership_violations
 
@@ -651,15 +651,16 @@ class _HandoffPath(HandoffModel):
     attack_path: AttackPath
 
 
-class ScenarioHandoffV5(_HandoffTail, _HandoffPath, _HandoffHead):
-    """The versioned scenario handoff envelope (v5).
+#: A class docstring is the description its published ``schema.json`` carries, and
+#: ``spec_digest`` covers that file, so editing one republishes the version.
+class ScenarioHandoffV6(_HandoffTail, _HandoffPath, _HandoffHead):
+    """Scenario-handoff-v6: the same document with one field renamed on the wire.
 
-    v5 carries the scenario's ``attack_path`` where v4 carries its
-    ``attack_tree``, keeps every other v4 field, and adds ``uca``, ``actor``,
-    ``causal_factors``, ``preconditions``, ``procedure`` and
-    ``worst_case_threat``. ``actor`` is an object for ``kind: adversarial`` and
-    ``null`` for ``kind: functional``; a functional scenario has no
-    preconditions and no procedure.
+    A v6 document writes ``attack_shape.indirect.party_relation.controlling_party``
+    where v5 writes ``controller``. The model keeps ``controller`` as its
+    attribute, and the serializer renames only the document, so every prompt and
+    every structured-output schema stays byte-identical to v5. v6 documents
+    carry the contract envelope that ``scenario-handoff-v6/spec.json`` requires.
     """
 
     model_config = ConfigDict(
@@ -693,7 +694,7 @@ class ScenarioHandoffV5(_HandoffTail, _HandoffPath, _HandoffHead):
         },
     )
 
-    schema_version: Literal["scenario-handoff-v5"] = HANDOFF_SCHEMA_VERSION_V5  # type: ignore[assignment]
+    schema_version: Literal["scenario-handoff-v6"] = HANDOFF_SCHEMA_VERSION_V6  # type: ignore[assignment]
     uca: HandoffUca
     actor: HandoffActor | None
     causal_factors: list[HandoffCausalFactor] = Field(min_length=1)
@@ -702,23 +703,21 @@ class ScenarioHandoffV5(_HandoffTail, _HandoffPath, _HandoffHead):
     worst_case_threat: HandoffText
 
     @model_validator(mode="after")
-    def validate_v5_kind(self) -> "ScenarioHandoffV5":
+    def validate_kind(self) -> "ScenarioHandoffV6":
         """An adversarial scenario has an actor and a procedure; a functional one neither."""
 
         if self.kind == "adversarial":
             if self.actor is None or not self.procedure:
-                raise ValueError(
-                    "an adversarial v5 handoff has an actor and a procedure"
-                )
+                raise ValueError("an adversarial handoff has an actor and a procedure")
         elif self.actor is not None or self.procedure or self.preconditions:
             raise ValueError(
-                "a functional v5 handoff has a null actor, no preconditions "
+                "a functional handoff has a null actor, no preconditions "
                 "and no procedure"
             )
         return self
 
     @model_validator(mode="after")
-    def validate_procedure_chain(self) -> "ScenarioHandoffV5":
+    def validate_procedure_chain(self) -> "ScenarioHandoffV6":
         """Number the steps S00, S01, ... and link each to the next."""
 
         ids = [f"S{index:02d}" for index in range(len(self.procedure))]
@@ -765,21 +764,24 @@ class ScenarioHandoffV5(_HandoffTail, _HandoffPath, _HandoffHead):
         return {name: data[name] for name in type(self).model_fields if name in data}
 
 
-class ScenarioHandoffV6(ScenarioHandoffV5):
-    """Scenario-handoff-v6: the same document with one field renamed on the wire.
+#: Kept to validate the retired v5 kit: a v5 document names the party field
+#: ``controller``, so dump it with ``by_alias=False``. No writer builds it.
+class ScenarioHandoffV5(ScenarioHandoffV6):
+    """The versioned scenario handoff envelope (v5).
 
-    A v6 document writes ``attack_shape.indirect.party_relation.controlling_party``
-    where v5 writes ``controller``. The model keeps ``controller`` as its
-    attribute, and the serializer renames only the document, so every prompt and
-    every structured-output schema stays byte-identical to v5. v6 documents
-    carry the contract envelope that ``scenario-handoff-v6/spec.json`` requires.
+    v5 carries the scenario's ``attack_path`` where v4 carries its
+    ``attack_tree``, keeps every other v4 field, and adds ``uca``, ``actor``,
+    ``causal_factors``, ``preconditions``, ``procedure`` and
+    ``worst_case_threat``. ``actor`` is an object for ``kind: adversarial`` and
+    ``null`` for ``kind: functional``; a functional scenario has no
+    preconditions and no procedure.
     """
 
-    schema_version: Literal["scenario-handoff-v6"] = HANDOFF_SCHEMA_VERSION_V6
+    schema_version: Literal["scenario-handoff-v5"] = HANDOFF_SCHEMA_VERSION_V5  # type: ignore[assignment]
 
 
-#: The published handoff: the version ``generate`` writes today.
-ScenarioHandoff = ScenarioHandoffV5
+#: The published handoff: the version ``generate`` writes.
+ScenarioHandoff = ScenarioHandoffV6
 
 #: The model that validates each published version.
 HANDOFF_MODELS = {
@@ -788,7 +790,7 @@ HANDOFF_MODELS = {
 }
 
 
-def handoff_model(version: str) -> type[ScenarioHandoffV5]:
+def handoff_model(version: str) -> type[ScenarioHandoffV6]:
     """Return the model that validates one published version."""
     try:
         return HANDOFF_MODELS[version]
@@ -798,7 +800,7 @@ def handoff_model(version: str) -> type[ScenarioHandoffV5]:
         ) from None
 
 
-def _wire_payload(handoff: ScenarioHandoffV5) -> dict[str, Any]:
+def _wire_payload(handoff: ScenarioHandoffV6) -> dict[str, Any]:
     """Dump a handoff as its document: v6 renames the party field on the wire."""
 
     return handoff.model_dump(
@@ -817,7 +819,7 @@ def handoff_payload_digest(payload: dict[str, Any]) -> str:
     return compute_framed_digest(domain, payload)
 
 
-def finalize_handoff(handoff: ScenarioHandoffV5) -> ScenarioHandoffV5:
+def finalize_handoff(handoff: ScenarioHandoffV6) -> ScenarioHandoffV6:
     """Return the handoff with its content digest computed and verified."""
     payload = _wire_payload(handoff)
     payload.pop("content_digest", None)
@@ -827,7 +829,7 @@ def finalize_handoff(handoff: ScenarioHandoffV5) -> ScenarioHandoffV5:
     return handoff.model_copy(update={"content_digest": digest})
 
 
-def verify_handoff_digest(handoff: ScenarioHandoffV5) -> None:
+def verify_handoff_digest(handoff: ScenarioHandoffV6) -> None:
     """Fail closed when a handoff's recorded digest does not match its bytes."""
     payload = _wire_payload(handoff)
     payload.pop("content_digest", None)
@@ -1185,7 +1187,8 @@ def _constraint_authority(
 def _sourced_facts(
     envelope: ScenarioEnvelope,
     loss_analysis: LossAnalysis | None,
-    stage_1a_source: Stage1aSource | None = None,
+    stage_1a_source: Stage1aSource | None,
+    version: str,
 ) -> list[HandoffFact]:
     spec = envelope.scenario_spec
     context = spec.scenario_context
@@ -1212,7 +1215,7 @@ def _sourced_facts(
                 "The unsafe outcome condition is expressed semantically; the "
                 "executable check is derived downstream."
             ),
-            source=f"producer handoff contract {HANDOFF_SCHEMA_VERSION_V5}",
+            source=f"producer handoff contract {version}",
             authority="producer_contract",
         )
     )
@@ -1289,7 +1292,7 @@ def scenario_handoff_fields(
     observed_operations: tuple[str, ...] | None = None,
     stage_1a_source: Stage1aSource | None = None,
     deduplication: ScenarioDeduplication | None = None,
-    version: str = HANDOFF_SCHEMA_VERSION_V5,
+    version: str = HANDOFF_SCHEMA_VERSION_V6,
 ) -> dict[str, Any]:
     """Return the shared envelope fields of one scenario's handoff.
 
@@ -1325,7 +1328,7 @@ def scenario_handoff_fields(
         documented_operations=_documented_operations(
             envelope, enriched_operations, observed_operations
         ),
-        sourced_facts=_sourced_facts(envelope, loss_analysis, stage_1a_source),
+        sourced_facts=_sourced_facts(envelope, loss_analysis, stage_1a_source, version),
         assumptions_and_unknowns=_assumptions_and_unknowns(envelope, environment_bound),
         observation=_observation_metadata(envelope),
         discriminating_condition=envelope.scenario_spec.discriminating_condition,
@@ -1368,7 +1371,7 @@ def _tool_call_condition(
 
 
 def write_scenario_handoff(
-    handoff: ScenarioHandoffV5,
+    handoff: ScenarioHandoffV6,
     scenarios_dir: Path,
 ) -> tuple[Path, Path]:
     """Write the ``.feature`` companion first and the handoff YAML last.
@@ -1385,22 +1388,30 @@ def write_scenario_handoff(
     return handoff_path, feature_path
 
 
-def handoff_document(handoff: ScenarioHandoffV5) -> dict[str, Any]:
+def handoff_document(handoff: ScenarioHandoffV6) -> dict[str, Any]:
     """Return the document a writer publishes for one handoff.
 
-    A v5 document is its bare payload: every recorded handoff predates the
-    envelope. A v6 document carries the envelope ``scenario-handoff-v6``'s spec
-    requires, stamped by ``asago_contracts_core.write_envelope`` from the
-    installed spec, so a reader names the version before it validates anything.
+    The document carries the envelope ``scenario-handoff-v6``'s spec requires,
+    stamped by ``asago_contracts_core.write_envelope`` from the installed spec,
+    so a reader names the version before it validates anything.
     """
     payload = _wire_payload(handoff)
-    if handoff.schema_version == HANDOFF_SCHEMA_VERSION_V5:
-        return payload
     return write_envelope(
         payload,
         installed_specs().spec(HANDOFF_CONTRACT, handoff.schema_version),
         writer=HANDOFF_WRITER,
         writer_version=HANDOFF_WRITER_VERSION,
+    )
+
+
+def read_handoff_document(document: Mapping[str, Any]) -> ScenarioHandoff:
+    """Return the handoff a written document holds, without its envelope.
+
+    The envelope states who wrote the document and under which spec, not the
+    handoff's content, and the model refuses fields it does not declare.
+    """
+    return ScenarioHandoff.model_validate(
+        {name: value for name, value in document.items() if name != ENVELOPE_FIELD}
     )
 
 
@@ -1447,6 +1458,7 @@ __all__ = [
     "handoff_payload_digest",
     "handoff_schema_violations",
     "load_ownership_rules",
+    "read_handoff_document",
     "scenario_handoff_fields",
     "verify_handoff_digest",
     "write_scenario_handoff",

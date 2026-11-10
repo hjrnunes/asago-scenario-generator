@@ -15,9 +15,8 @@ from asago_scenario_generator.stpa.models.enriched_threat_set import (
     EnrichedThreatSet,
     StructuralThreat,
 )
-from asago_scenario_generator.stpa.infra.yaml_io import read_yaml
 from asago_scenario_generator.stpa.scenario_prod.handoff import (
-    ScenarioHandoffV5,
+    read_handoff_document,
     verify_handoff_digest,
 )
 from asago_scenario_generator.stpa.scenario_prod.stage5.wire import (
@@ -207,7 +206,9 @@ class TestFullRun:
         stage5_prompt = client.calls[0].user_prompt
         assert context.context_digest not in stage5_prompt
         assert "source_pins" not in stage5_prompt
-        handoff = read_yaml(run_dir / "scenarios/SCN-001.yaml", ScenarioHandoffV5)
+        handoff = read_handoff_document(
+            yaml.safe_load((run_dir / "scenarios/SCN-001.yaml").read_text())
+        )
         verify_handoff_digest(handoff)
         assert handoff.scenario_id == "SCN-001"
 
@@ -315,7 +316,7 @@ class TestFullRun:
             yaml_files = sorted(Path(tmpdir).glob("scenarios/*.yaml"))
             assert len(yaml_files) == 2
             for yaml_file in yaml_files:
-                handoff = read_yaml(yaml_file, ScenarioHandoffV5)
+                handoff = read_handoff_document(yaml.safe_load(yaml_file.read_text()))
                 verify_handoff_digest(handoff)
 
     def test_adversarial_scenario_count_equals_threats(self):
@@ -511,12 +512,12 @@ class TestErrorPaths:
         assert sorted((tmp_path / "scenarios").glob("*.yaml")) == []
 
     def test_adversarial_contract_rejection_is_not_counted(self, monkeypatch, tmp_path):
-        """A handoff rejected by the v5 contract counts no handoff."""
+        """A handoff rejected by the v6 contract counts no handoff."""
         from asago_scenario_generator.stpa.scenario_prod import run as run_module
 
         def reject_handoff(*_args, **_kwargs):
             raise ValueError(
-                "scenario handoff violates the scenario-handoff-v5 contract: "
+                "scenario handoff violates the scenario-handoff-v6 contract: "
                 "missing_field"
             )
 
@@ -533,7 +534,7 @@ class TestErrorPaths:
             result.candidate_outcomes[0].status is SP3CandidateStatus.publication_failed
         )
         assert any(
-            "scenario-handoff-v5 contract" in item
+            "scenario-handoff-v6 contract" in item
             for item in result.candidate_outcomes[0].diagnostics
         )
         manifest = yaml.safe_load((tmp_path / "run-manifest.yaml").read_text())

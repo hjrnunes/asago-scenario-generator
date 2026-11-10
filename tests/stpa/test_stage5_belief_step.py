@@ -25,7 +25,7 @@ from asago_scenario_generator.stpa.infra.provider_record import (
 )
 from asago_scenario_generator.stpa.models.causal_factor import ProcessModelVariable
 from asago_scenario_generator.stpa.scenario_prod.handoff import (
-    ScenarioHandoffV5,
+    ScenarioHandoffV6,
     handoff_ownership_violations,
     verify_handoff_digest,
 )
@@ -627,7 +627,7 @@ def test_a_run_publishes_the_beliefs_through_to_the_handoff(
         document = _published_handoff(run_dir, scenario_id)
         assert list(Draft202012Validator(SCHEMA).iter_errors(document)) == []
         assert handoff_ownership_violations(document) == []
-        verify_handoff_digest(ScenarioHandoffV5.model_validate(document))
+        verify_handoff_digest(ScenarioHandoffV6.model_validate(document))
         for factor in document["causal_factors"]:
             assert factor["process_model_belief"] in (BELIEF, CA_BELIEF)
             assert factor["process_model_variable"]["description"]

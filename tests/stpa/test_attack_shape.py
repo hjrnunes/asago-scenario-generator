@@ -1,4 +1,4 @@
-"""Structural rules of the scenario-handoff-v5 ``attack_shape``.
+"""Structural rules of the scenario-handoff-v6 ``attack_shape``.
 
 The shape holds closed enums, bounded integers and identifiers, so attack text
 cannot fit in it. Each rule (R1-R6, R9) has a test that breaks exactly that
@@ -333,7 +333,7 @@ def test_every_shape_key_is_required_and_absent_values_are_explicit_null(
 
 
 def _schema_errors(payload: dict[str, Any]) -> list[Any]:
-    """Validate against the v5 form: the published schema never renames a field."""
+    """Validate against the model's own field names, which prompts and replies use."""
 
     return list(
         Draft202012Validator(AttackShape.model_json_schema(by_alias=False)).iter_errors(

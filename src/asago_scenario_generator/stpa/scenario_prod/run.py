@@ -5,7 +5,7 @@ Orchestrates the full SP3 pipeline:
     request per Stage 5 spec
   Stage 6: Deterministic narrative, AND/OR attack tree and Gherkin summary;
     one narrate request per scenario and one Gherkin request per published
-    scenario, each with at most one correction; then the scenario-handoff-v5
+    scenario, each with at most one correction; then the scenario-handoff-v6
     handoff
   Stage 7: Validators + eval metrics + coverage gap analysis (0 LLM calls)
 
@@ -123,9 +123,10 @@ from .handoff import (
     HandoffTaxonomyInputs,
     ScenarioHandoff,
     Stage1aSource,
+    handoff_document,
     write_scenario_handoff,
 )
-from .handoff_v5 import build_scenario_handoff_v5
+from .handoff_v5 import build_scenario_handoff_v6
 from .stage5.belief_step import apply_belief_step
 from .model_gherkin import (
     gherkins_payload,
@@ -275,7 +276,7 @@ def run_sp3(
     sends none. Stage 6 renders each scenario's ``and-or-tree-v1``
     attack tree, sends one narrate request per scenario (writing
     ``narratives.json``) and one Gherkin request per publishable scenario
-    (writing ``gherkins.json``), and publishes ``scenario-handoff-v5``: the
+    (writing ``gherkins.json``), and publishes ``scenario-handoff-v6``: the
     accepted paragraph as its narrative, the accepted Gherkin, and the
     scenario's attack path reduced from its tree. A scenario whose request
     fails keeps the code-rendered text.
@@ -1144,7 +1145,7 @@ def _checked_scenario_handoff(
     taxonomy: HandoffTaxonomyInputs | None = None,
 ) -> ScenarioHandoff:
     """Build one scenario's handoff and check the published contract."""
-    handoff = build_scenario_handoff_v5(
+    handoff = build_scenario_handoff_v6(
         envelope,
         loss_analysis=loss_analysis,
         environment_bound=environment_bound,
@@ -1155,14 +1156,11 @@ def _checked_scenario_handoff(
         taxonomy=taxonomy,
     )
     violations = [
-        violation.code
-        for violation in validate_handoff(
-            handoff.model_dump(mode="json", exclude_none=True)
-        )
+        violation.code for violation in validate_handoff(handoff_document(handoff))
     ]
     if violations:
         raise ValueError(
-            "scenario handoff violates the scenario-handoff-v5 contract: "
+            f"scenario handoff violates the {handoff.schema_version} contract: "
             + "; ".join(violations)
         )
     return handoff

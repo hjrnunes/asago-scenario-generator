@@ -1,6 +1,6 @@
 """Process-model gaps: the beliefs no controller's process model holds.
 
-A published v5 handoff may link each causal factor's flawed belief to a
+A published handoff may link each causal factor's flawed belief to a
 process-model variable: ``causal_factors[].process_model_variable`` is
 ``{id, description}``, where ``id`` names the variable (``PM-3-2``) or is
 ``null`` for a gap, and then ``description`` is the variable the controller

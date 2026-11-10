@@ -3,7 +3,7 @@
 The fixture under ``tests/fixtures/generate_report`` holds eight scenarios of a
 recorded MiniKlarna run with the sidecars the report reads; ``calls.jsonl`` has
 no prompt or response text. The run published scenario-handoff-v4 with flat
-attack trees; each handoff is now v5, with its attack path and added fields
+attack trees; each handoff is now v6, with its attack path and added fields
 derived from that tree, so the report reads it like any current run. Tests
 copy the fixture before changing it.
 """

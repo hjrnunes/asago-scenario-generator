@@ -178,7 +178,7 @@ upgrades to its v6 case.
 ## Rules
 
 - `read_handoff(doc)` reads one handoff through the installed
-  `scenario-handoff-v5` spec: an enveloped document is selected by its contract
+  `scenario-handoff` specs: an enveloped document is selected by its contract
   id and version, a legacy one by its `schema_version`. `installed_specs()`
   returns the spec set the package carries, and `load_contract(contract_dir)`
   pairs a selected spec's schema with the ownership rules.
@@ -219,8 +219,8 @@ policy combinations the consumer uses for input digests.
 ## Data
 
 `src/asago_contracts_core/data/` is the spec root: it carries the producer's
-whole `scenario-handoff/` contract directory (the `scenario-handoff-v5/` version
-directory with `spec.json`, `schema.json`, `cases/` and `README.md`, plus
+whole `scenario-handoff/` contract directory (the `scenario-handoff-v5/` and `scenario-handoff-v6/` version
+directories with `spec.json`, `schema.json`, `cases/` and `README.md`, plus
 `ownership-rules.json` and `CONTRACT.lock`) and `envelope-v1.schema.json`, for
 the code to read. `installed_specs()` loads the specs from that root.
 `tests/data/` carries the same contract tree and the tool-call-condition

@@ -1,11 +1,12 @@
 """scenario-handoff-v6 renames one wire field and changes nothing a model sees.
 
 v6 writes ``attack_shape.indirect.party_relation.controlling_party`` where v5
-writes ``controller``, carries the contract envelope its spec requires, and
-signs with its own digest domain. The model keeps the v5 attribute, and the
-Stage 5 shape-step reply never mentions the resolved party relation, so every
-prompt and every structured-output schema stays byte-identical. Every test is
-offline.
+wrote ``controller``, carries the contract envelope its spec requires, and
+signs with its own digest domain. The model keeps the ``controller`` attribute,
+and the Stage 5 shape-step reply never mentions the resolved party relation, so
+every prompt and every structured-output schema stays byte-identical. The v5
+tests derive a v5 document from the v6 handoff, because nothing writes v5 any
+more. Every test is offline.
 """
 
 from __future__ import annotations
@@ -41,12 +42,12 @@ from asago_scenario_generator.stpa.scenario_prod.handoff import (
     handoff_model,
     handoff_payload_digest,
     handoff_schema_violations,
+    read_handoff_document,
     verify_handoff_digest,
     write_scenario_handoff,
 )
 from asago_scenario_generator.stpa.scenario_prod.handoff_schema import handoff_schema
 from asago_scenario_generator.stpa.scenario_prod.handoff_v5 import (
-    build_scenario_handoff_v5,
     build_scenario_handoff_v6,
 )
 from asago_scenario_generator.stpa.scenario_prod.stage5.shape_step import (
@@ -74,7 +75,23 @@ def _relation(document: dict) -> dict:
     return document["attack_shape"]["indirect"]["party_relation"]
 
 
-def test_the_v6_document_writes_controlling_party() -> None:
+def _v5_document() -> dict:
+    """A v5 document as the retired writer wrote it.
+
+    It is bare, names the party field ``controller`` and signs with the v5
+    digest domain. Nothing writes v5 any more, so the test derives it from the
+    v6 handoff.
+    """
+    payload = _built().model_dump(mode="json", exclude_none=True, by_alias=True)
+    payload.pop("content_digest")
+    relation = _relation(payload)
+    relation["controller"] = relation.pop("controlling_party")
+    payload["schema_version"] = HANDOFF_SCHEMA_VERSION_V5
+    payload["content_digest"] = handoff_payload_digest(payload)
+    return payload
+
+
+def test_the_document_writes_controlling_party() -> None:
     handoff = _built()
     document = handoff_document(handoff)
 
@@ -82,22 +99,21 @@ def test_the_v6_document_writes_controlling_party() -> None:
     assert document["schema_version"] == HANDOFF_SCHEMA_VERSION_V6
     assert set(_relation(document)) == {"controlling_party", "benign_user_actor_ref"}
     assert _relation(document)["controlling_party"] == ItemController.THIRD_PARTY.value
-    # The model keeps the v5 attribute; only the document renames it.
+    # The model keeps the attribute name; only the document renames it.
     assert (
         handoff.attack_shape.indirect.party_relation.controller
         is ItemController.THIRD_PARTY
     )
 
 
-def test_the_v5_document_keeps_the_model_facing_name() -> None:
-    handoff = build_scenario_handoff_v5(_envelope(adversarial()))
-    document = handoff.model_dump(mode="json", exclude_none=True)
+def test_the_model_dump_keeps_the_model_facing_name_unless_aliased() -> None:
+    document = _built().model_dump(mode="json", exclude_none=True)
 
     assert set(_relation(document)) == {"controller", "benign_user_actor_ref"}
     assert _relation(document)["controller"] == ItemController.THIRD_PARTY.value
 
 
-def test_the_v6_model_reads_both_the_wire_and_the_model_name() -> None:
+def test_the_model_reads_both_the_wire_and_the_model_name() -> None:
     payload = _built().model_dump(mode="json", exclude_none=True, by_alias=True)
 
     renamed = copy.deepcopy(payload)
@@ -113,16 +129,13 @@ def test_the_v6_model_reads_both_the_wire_and_the_model_name() -> None:
 
 def test_each_model_refuses_the_other_version() -> None:
     v6_payload = _built().model_dump(mode="json", exclude_none=True, by_alias=True)
-    v5_payload = (
-        build_scenario_handoff_v5(_envelope(adversarial()))
-        .model_dump(mode="json", exclude_none=True)
-        .copy()
-    )
+    v5_payload = _v5_document()
 
     with pytest.raises(ValidationError):
         ScenarioHandoffV5.model_validate(v6_payload)
     with pytest.raises(ValidationError):
         ScenarioHandoffV6.model_validate(v5_payload)
+    verify_handoff_digest(ScenarioHandoffV5.model_validate(v5_payload))
 
 
 def test_the_published_versions_and_digest_domains_are_listed() -> None:
@@ -139,7 +152,7 @@ def test_the_published_versions_and_digest_domains_are_listed() -> None:
         handoff_model("scenario-handoff-v9")
 
 
-def test_the_v6_digest_signs_the_aliased_document() -> None:
+def test_the_digest_signs_the_aliased_document() -> None:
     handoff = _built()
     payload = handoff.model_dump(mode="json", exclude_none=True, by_alias=True)
     payload.pop("content_digest")
@@ -159,7 +172,7 @@ def test_the_v6_digest_signs_the_aliased_document() -> None:
         handoff_payload_digest({**payload, "schema_version": "scenario-handoff-v9"})
 
 
-def test_the_v6_writer_stamps_the_envelope_the_spec_requires(
+def test_the_writer_stamps_the_envelope_the_spec_requires(
     tmp_path: Path,
 ) -> None:
     handoff = _built()
@@ -184,32 +197,25 @@ def test_the_v6_writer_stamps_the_envelope_the_spec_requires(
     assert feature_path.read_text(encoding="utf-8") == handoff.gherkin.to_feature_text()
 
 
-def test_the_reader_accepts_both_versions(tmp_path: Path) -> None:
-    v5_path, _ = write_scenario_handoff(
-        build_scenario_handoff_v5(_envelope(adversarial())), tmp_path / "v5"
-    )
-    v6_path, _ = write_scenario_handoff(_built(), tmp_path / "v6")
-
-    v5 = yaml.safe_load(v5_path.read_text(encoding="utf-8"))
+def test_the_reader_still_accepts_a_recorded_v5_document(tmp_path: Path) -> None:
+    v6_path, _ = write_scenario_handoff(_built(), tmp_path)
     v6 = yaml.safe_load(v6_path.read_text(encoding="utf-8"))
 
-    assert read_handoff(v5).version == HANDOFF_SCHEMA_VERSION_V5
+    assert read_handoff(_v5_document()).version == HANDOFF_SCHEMA_VERSION_V5
     assert read_handoff(v6).version == HANDOFF_SCHEMA_VERSION_V6
 
 
-def test_the_v5_writer_keeps_the_recorded_bare_document(tmp_path: Path) -> None:
-    handoff = build_scenario_handoff_v5(_envelope(adversarial()))
-
-    handoff_path, _ = write_scenario_handoff(handoff, tmp_path)
+def test_the_run_writes_only_the_enveloped_document(tmp_path: Path) -> None:
+    handoff_path, _ = write_scenario_handoff(_built(), tmp_path)
     document = yaml.safe_load(handoff_path.read_text(encoding="utf-8"))
 
-    assert ENVELOPE_FIELD not in document
-    assert document["schema_version"] == HANDOFF_SCHEMA_VERSION_V5
-    assert set(_relation(document)) == {"controller", "benign_user_actor_ref"}
-    assert read_handoff(document).version == HANDOFF_SCHEMA_VERSION_V5
+    assert document == handoff_document(_built())
+    assert document["schema_version"] == HANDOFF_SCHEMA_VERSION_V6
+    assert ENVELOPE_FIELD in document
+    assert read_handoff_document(document) == _built()
 
 
-def test_the_v6_schema_publishes_the_wire_name() -> None:
+def test_the_default_schema_publishes_the_wire_name() -> None:
     schema = handoff_schema(HANDOFF_SCHEMA_VERSION_V6)
 
     assert schema["properties"]["schema_version"]["const"] == (
@@ -219,10 +225,12 @@ def test_the_v6_schema_publishes_the_wire_name() -> None:
         "controlling_party",
         "benign_user_actor_ref",
     }
-    assert set(handoff_schema()["$defs"]["PartyRelation"]["properties"]) == {
-        "controller",
-        "benign_user_actor_ref",
-    }
+    assert handoff_schema() == schema
+    assert set(
+        handoff_schema(HANDOFF_SCHEMA_VERSION_V5)["$defs"]["PartyRelation"][
+            "properties"
+        ]
+    ) == {"controller", "benign_user_actor_ref"}
 
 
 @pytest.mark.parametrize(
@@ -272,9 +280,7 @@ def test_the_v6_schema_refuses_controller_though_the_model_reads_it() -> None:
 
 
 def test_the_v5_schema_refuses_controlling_party() -> None:
-    payload = build_scenario_handoff_v5(_envelope(adversarial())).model_dump(
-        mode="json", exclude_none=True
-    )
+    payload = _v5_document()
     relation = _relation(payload)
     relation["controlling_party"] = relation.pop("controller")
 
@@ -292,13 +298,14 @@ def test_the_v5_contract_schema_is_the_one_v5_documents_validate_against() -> No
             encoding="utf-8"
         )
     )
+    published_v6 = json.loads((KIT / "schema.json").read_text(encoding="utf-8"))
     default = ScenarioHandoffV5.model_json_schema()
 
-    # ``handoff_schema`` publishes the v5 field names, and its default version is
-    # v5. The model's default schema publishes the v6 serialization alias instead,
-    # so no caller may validate a v5 document against it.
+    # ``handoff_schema`` publishes each version's own field names. The retired
+    # model's default schema publishes the serialization alias instead, so no
+    # caller may validate a v5 document against it.
     assert handoff_schema(HANDOFF_SCHEMA_VERSION_V5) == published
-    assert handoff_schema() == published
+    assert handoff_schema() == published_v6
     assert default != published
     assert "controlling_party" in default["$defs"]["PartyRelation"]["properties"]
     assert set(published["$defs"]["PartyRelation"]["properties"]) == {

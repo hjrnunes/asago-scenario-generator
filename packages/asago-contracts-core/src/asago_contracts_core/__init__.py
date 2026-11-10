@@ -17,7 +17,7 @@ dcpl.2 support rule. ``upgrade(document)`` applies the registered saved-artifact
 migration and writes the target envelope.
 
 The package needs the standard library and ``jsonschema`` only. It carries the
-``handoff-v5`` schema, the ownership rules and the envelope schema as package
+scenario-handoff schemas, the ownership rules and the envelope schema as package
 data, so it can move to its own repository without a code change.
 """
 

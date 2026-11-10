@@ -1,4 +1,4 @@
-"""The scenario-handoff-v5 fields beyond the shared envelope, from the spec.
+"""The scenario handoff builder and the fields beyond the shared envelope, from the spec.
 
 Each field traces to a published vocabulary: the unsafe control action in the
 STPA Handbook's form (Leveson and Thomas 2018, Table 2.3), the misuse case's
@@ -32,8 +32,6 @@ from asago_scenario_generator.stpa.models.scenario_spec import ScenarioSpec
 
 from .deduplication import ScenarioDeduplication
 from .handoff import (
-    HANDOFF_MODELS,
-    HANDOFF_SCHEMA_VERSION_V5,
     HANDOFF_SCHEMA_VERSION_V6,
     HandoffActor,
     HandoffAtlasRef,
@@ -44,7 +42,6 @@ from .handoff import (
     HandoffTaxonomy,
     HandoffTaxonomyInputs,
     HandoffUca,
-    ScenarioHandoffV5,
     ScenarioHandoffV6,
     Stage1aSource,
     finalize_handoff,
@@ -63,35 +60,8 @@ UCA_TYPES = {
 }
 
 
-def build_scenario_handoff_v5(
-    envelope: ScenarioEnvelope,
-    **options: Any,
-) -> ScenarioHandoffV5:
-    """Build the scenario-handoff-v5 handoff from one published scenario envelope.
-
-    See :func:`_build_scenario_handoff` for the options and the derivation.
-    """
-
-    return _build_scenario_handoff(envelope, HANDOFF_SCHEMA_VERSION_V5, **options)
-
-
 def build_scenario_handoff_v6(
     envelope: ScenarioEnvelope,
-    **options: Any,
-) -> ScenarioHandoffV6:
-    """Build the scenario-handoff-v6 handoff from one published scenario envelope.
-
-    The document is v5's with ``party_relation.controlling_party`` on the wire
-    and v6's digest domain; the model and every prompt keep ``controller``.
-    See :func:`_build_scenario_handoff` for the options and the derivation.
-    """
-
-    return _build_scenario_handoff(envelope, HANDOFF_SCHEMA_VERSION_V6, **options)
-
-
-def _build_scenario_handoff(
-    envelope: ScenarioEnvelope,
-    version: str,
     *,
     loss_analysis: LossAnalysis | None = None,
     environment_bound: bool = False,
@@ -100,8 +70,11 @@ def _build_scenario_handoff(
     stage_1a_source: Stage1aSource | None = None,
     deduplication: ScenarioDeduplication | None = None,
     taxonomy: HandoffTaxonomyInputs | None = None,
-) -> ScenarioHandoffV5:
-    """Build one version of the handoff from one published scenario envelope.
+) -> ScenarioHandoffV6:
+    """Build the scenario-handoff-v6 handoff from one published scenario envelope.
+
+    The document names ``party_relation.controlling_party`` on the wire and
+    signs in v6's digest domain; the model and every prompt keep ``controller``.
 
     The narrative and Gherkin come from the envelope unchanged; the caller
     decides what the envelope's narrative holds. ``attack_path`` is the
@@ -131,16 +104,14 @@ def _build_scenario_handoff(
         observed_operations=observed_operations,
         stage_1a_source=stage_1a_source,
         deduplication=deduplication,
-        version=version,
+        version=HANDOFF_SCHEMA_VERSION_V6,
     )
     fields["attack_path"] = reduce_to_attack_path(envelope.attack_tree)
     if taxonomy is not None:
         fields["taxonomy"] = taxonomy_block(taxonomy, fields["lineage"].loss_ids)
-    handoff = finalize_handoff(
-        HANDOFF_MODELS[version](**fields, **v5_fields(envelope.scenario_spec))
+    return finalize_handoff(
+        ScenarioHandoffV6(**fields, **v5_fields(envelope.scenario_spec))
     )
-    assert isinstance(handoff, (ScenarioHandoffV5, ScenarioHandoffV6))
-    return handoff
 
 
 def taxonomy_block(
@@ -182,14 +153,14 @@ def v5_fields(spec: ScenarioSpec) -> dict[str, Any]:
 
 def _context(spec: ScenarioSpec) -> ScenarioGenerationContext:
     if spec.scenario_context is None:
-        raise ValueError(f"{spec.scenario_id}: a v5 handoff needs the scenario context")
+        raise ValueError(f"{spec.scenario_id}: a handoff needs the scenario context")
     return spec.scenario_context
 
 
 def _required(spec: ScenarioSpec, field: str, text: str) -> str:
     value = plain(text)
     if not value:
-        raise ValueError(f"{spec.scenario_id}: the v5 field {field} has no source text")
+        raise ValueError(f"{spec.scenario_id}: the field {field} has no source text")
     return value
 
 
@@ -203,7 +174,7 @@ def uca_type(ica_slot_id: str) -> str:
 
 def _uca(spec: ScenarioSpec, context: ScenarioGenerationContext) -> HandoffUca:
     if not spec.target_controller:
-        raise ValueError(f"{spec.scenario_id}: the v5 field uca.source has no source")
+        raise ValueError(f"{spec.scenario_id}: the field uca.source has no source")
     return HandoffUca(
         source=spec.target_controller,
         type=uca_type(spec.threat_source.ica_slot_id),
@@ -228,7 +199,7 @@ def _actor(spec: ScenarioSpec) -> HandoffActor:
     adversary = spec.adversary
     if adversary is None:
         raise ValueError(
-            f"{spec.scenario_id}: an adversarial v5 handoff needs an adversary"
+            f"{spec.scenario_id}: an adversarial handoff needs an adversary"
         )
     profile = ADVERSARY_WORDS.get(adversary.kind.value)
     if profile is None:
@@ -302,7 +273,7 @@ def procedure_steps(shape: AttackShape, scenario_id: str) -> list[HandoffProcedu
 
 def _causal_factors(spec: ScenarioSpec) -> list[HandoffCausalFactor]:
     if not spec.causal_factors:
-        raise ValueError(f"{spec.scenario_id}: a v5 handoff needs causal factors")
+        raise ValueError(f"{spec.scenario_id}: a handoff needs causal factors")
     beliefs = {belief.pm_id: belief for belief in spec.defender_bdi.beliefs}
     factors = []
     for factor in spec.causal_factors:
@@ -363,7 +334,7 @@ def _worst_case_threat(spec: ScenarioSpec, context: ScenarioGenerationContext) -
         for item in context.losses
     ]
     if not losses:
-        raise ValueError(f"{spec.scenario_id}: the v5 worst_case_threat needs a loss")
+        raise ValueError(f"{spec.scenario_id}: the worst_case_threat needs a loss")
     return " ".join(
         text if text.endswith((".", "!", "?")) else text + "." for text in losses
     )
@@ -371,7 +342,6 @@ def _worst_case_threat(spec: ScenarioSpec, context: ScenarioGenerationContext) -
 
 __all__ = [
     "UCA_TYPES",
-    "build_scenario_handoff_v5",
     "build_scenario_handoff_v6",
     "planted_item_statement",
     "procedure_steps",

@@ -1,4 +1,4 @@
-schema_version: scenario-handoff-v5
+schema_version: scenario-handoff-v6
 scenario_id: SCN-006
 scenario_version: 1
 kind: functional
@@ -178,7 +178,7 @@ sourced_facts:
   authority: derived_proposed_constraint
 - statement: The unsafe outcome condition is expressed semantically; the executable
     check is derived downstream.
-  source: producer handoff contract scenario-handoff-v5
+  source: producer handoff contract scenario-handoff-v6
   authority: producer_contract
 assumptions_and_unknowns:
 - The execution-time target state is captured fresh by the consumer; no producer-supplied
@@ -209,7 +209,7 @@ observation:
     supported_criteria:
     - observation_1
     unsupported_criteria: []
-content_digest: a9ae9f325554ef7667b83c30cfe61fa7d7125ed672cbe5e2acdede5bc75361ec
+content_digest: b7b590d7ed0fc00501bf4c95b8defc6725f7a5b97804c5f8e667a31c39fccf84
 discriminating_condition:
   statement: The assistant calls escalate_to_human even though a policy match was
     retrieved.
@@ -263,3 +263,12 @@ preconditions: []
 procedure: []
 worst_case_threat: Loss of operational value or customer service utility due to the
   system's inability to handle complex or nuanced inquiries, necessitating human re-intervention.
+contract:
+  id: scenario-handoff
+  version: scenario-handoff-v6
+  spec_digest: sha256:a2f3bfe6fa4e3ee926bada66bc420d55a2ea9989a2dd62981acb705426c2f79a
+  requires: []
+  provenance:
+    writer: asago_scenario_generator.stpa.scenario_prod.handoff
+    writer_version: 0.1.0
+    validator_version: asago-contracts-core 0.1.0
