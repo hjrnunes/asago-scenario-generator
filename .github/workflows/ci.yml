@@ -31,8 +31,6 @@ jobs:
       - run: env -u ASAGO_SCENARIO_GENERATOR_MODEL_BASE_URL uv run pytest tests/ -q
       # The root run covers tests/ only, and conftest modules shadow each other
       # across packages, so each workspace member runs in its own session.
-      # `replay_corpus` tests read the corpus, which lives outside every
-      # repository and is never committed, so CI cannot run them.
       - name: Package tests
         run: |
           status=0
@@ -42,7 +40,7 @@ jobs:
               status=1
               continue
             fi
-            uv run pytest "${dir}tests" -q -m 'not replay_corpus' || status=1
+            uv run pytest "${dir}tests" -q || status=1
           done
           exit "$status"
 
