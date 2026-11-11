@@ -131,7 +131,7 @@ The producer also publishes the `tool-call-condition` contract.
 [`data/contracts/tool-call-condition/`](data/contracts/tool-call-condition/)
 holds `tool-call-condition-v1`'s schema, its validate and evaluate vectors and a
 `CONTRACT.lock` of every digest. Every implementation must agree
-on every vector, and the consumer, MiDojo and the Garak fork each keep a byte
+on every vector, and the consumer and the Garak fork each keep a byte
 copy. `scripts/sync_tool_call_condition.py --check` compares a copy with this
 directory, and `--write` refreshes it.
 

@@ -2,7 +2,7 @@
 """Verify or refresh copies of the ``tool-call-condition`` contract.
 
     python3 scripts/sync_tool_call_condition.py --check \\
-        --consumer ../asago-artifact-generator --midojo ../midojo --garak ../garak
+        --consumer ../asago-artifact-generator --garak ../garak
     python3 scripts/sync_tool_call_condition.py --write --garak ../garak
 
 A copy is a byte copy of ``data/contracts/tool-call-condition`` inside another
@@ -32,7 +32,6 @@ AUTHORITY = "asago-scenario-generator"
 # The copy directory of each repository, relative to the checkout root.
 COPIES = {
     "consumer": Path("contracts/tool-call-condition"),
-    "midojo": Path("tests/fixtures/tool_call_condition"),
     "garak": Path("tests/_assets/detectors/tool_call_condition"),
 }
 
@@ -225,7 +224,7 @@ def main(argv: list[str] | None = None, *, root: Path | None = None) -> int:
     _report(f"producer {root}", producer, f"{version}, {count} files", sys.stdout)
     given = [name for name in COPIES if getattr(args, name) is not None]
     if not given:
-        print("no copies checked (pass --consumer, --midojo or --garak)")
+        print("no copies checked (pass --consumer or --garak)")
         return 1 if producer else 0
 
     failed = bool(producer)

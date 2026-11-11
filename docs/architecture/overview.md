@@ -95,8 +95,8 @@ semantics in its own prose or tests.
 
 The contract directory holds one version, pinned by one lock. The version's
 `README.md` states how a consumer cites it and how to vendor a copy;
-`scripts/sync_tool_call_condition.py --check` verifies the consumer's, MiDojo's
-and Garak's byte copies against the lock, and `--write` refreshes one. Each copy
+`scripts/sync_tool_call_condition.py --check` verifies the consumer's and Garak's
+byte copies against the lock, and `--write` refreshes one. Each copy
 carries the lock, which names the version and every digest, so it references
 the contract without another producer file. Garak's detector implements
 `tool-call-condition-v1`. A `scenario-handoff-v1` handoff carries no

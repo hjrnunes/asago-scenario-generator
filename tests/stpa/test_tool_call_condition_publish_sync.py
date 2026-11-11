@@ -84,27 +84,21 @@ def test_check_verifies_every_copy_it_is_given(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     consumer = _checkout(tmp_path, "consumer")
-    midojo = _checkout(tmp_path, "midojo")
     garak = _checkout(tmp_path, "garak")
 
-    argv = (
-        "--check",
-        "--consumer",
-        str(consumer),
-        "--midojo",
-        str(midojo),
-        "--garak",
-        str(garak),
-    )
+    argv = ("--check", "--consumer", str(consumer), "--garak", str(garak))
     assert _main(*argv) == 0
 
     out = capsys.readouterr().out
-    for name, checkout in (
-        ("consumer", consumer),
-        ("midojo", midojo),
-        ("garak", garak),
-    ):
+    for name, checkout in (("consumer", consumer), ("garak", garak)):
         assert f"{name} copy {checkout / SYNC.COPIES[name]}: verified ({VERSION}" in out
+
+
+def test_the_producer_keeps_copies_for_the_consumer_and_garak_only() -> None:
+    assert set(SYNC.COPIES) == {"consumer", "garak"}
+
+    with pytest.raises(SystemExit):
+        _main("--check", "--midojo", "../midojo")
 
 
 def test_check_fails_on_a_changed_vector_byte(
@@ -141,16 +135,16 @@ def test_check_fails_when_a_copy_has_no_reference(
 def test_check_fails_when_the_reference_names_another_version(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    midojo = _checkout(tmp_path, "midojo")
-    lock = midojo / SYNC.COPIES["midojo"] / "CONTRACT.lock"
+    consumer = _checkout(tmp_path, "consumer")
+    lock = consumer / SYNC.COPIES["consumer"] / "CONTRACT.lock"
     document = json.loads(lock.read_text(encoding="utf-8"))
     document["version"] = "tool-call-condition-v9"
     lock.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
 
-    assert _main("--check", "--midojo", str(midojo)) == 1
+    assert _main("--check", "--consumer", str(consumer)) == 1
 
     out = capsys.readouterr().out
-    assert "midojo copy" in out
+    assert "consumer copy" in out
     assert "reference names tool-call-condition-v9" in out
     assert VERSION in out
 
@@ -180,13 +174,13 @@ def test_check_modifies_no_file(tmp_path: Path) -> None:
 
 
 def test_write_refreshes_a_drifted_copy(tmp_path: Path) -> None:
-    midojo = _checkout(tmp_path, "midojo")
-    copy = midojo / SYNC.COPIES["midojo"]
+    consumer = _checkout(tmp_path, "consumer")
+    copy = consumer / SYNC.COPIES["consumer"]
     (copy / VERSION / "vectors/validate.json").write_bytes(b"{}\n")
     (copy / "CONTRACT.lock").unlink()
 
-    assert _main("--write", "--midojo", str(midojo)) == 0
-    assert _main("--check", "--midojo", str(midojo)) == 0
+    assert _main("--write", "--consumer", str(consumer)) == 0
+    assert _main("--check", "--consumer", str(consumer)) == 0
     assert _tree_digest(copy) == _tree_digest(PRODUCER)
 
 

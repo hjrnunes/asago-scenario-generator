@@ -45,8 +45,8 @@ Verify a copy in one of two ways:
 
 - compare each file's SHA-256 with the digest `CONTRACT.lock` records for its
   path, or
-- run the producer's `scripts/sync_tool_call_condition.py --check` with the
-  consumer's checkout (`--consumer`, `--midojo`, `--garak`).
+- run the producer's `scripts/sync_tool_call_condition.py --check` with a
+  checkout of the consumer (`--consumer`) or the Garak fork (`--garak`).
 
 `--write` refreshes a copy from the producer. A copy that carries
 `CONTRACT.lock` references the contract: the lock names the version and every
