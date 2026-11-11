@@ -76,8 +76,6 @@ from asago_scenario_generator.stpa.scenario_prod.presentation import (
 from asago_scenario_generator.stpa.scenario_prod.run import _narrate, run_sp3
 from asago_scenario_generator.stpa.scenario_prod.stage5.shape_step import (
     ShapeProposal,
-    ShapeStepConfig,
-    response_model_for,
 )
 from tests.helpers.scenario_handoff_publication import (
     _functional_payload,
@@ -110,31 +108,11 @@ EXECUTION = {"id": "AML.TA0005", "name": "Execution"}
 TOOL_DATA_POISONING = {"id": "AML.T0099", "name": "AI Agent Tool Data Poisoning"}
 INDIRECT_INJECTION = {"id": "AML.T0051.001", "name": "LLM Prompt Injection: Indirect"}
 DIRECT_INJECTION = {"id": "AML.T0051.000", "name": "LLM Prompt Injection: Direct"}
-THREAD_POISONING = {"id": "AML.T0080.001", "name": "AI Agent Context Poisoning: Thread"}
 
 DIRECT = AttackShape.model_validate(
     {
         **DIRECT_REPLY,
         "threat_label": None,
-        "source": "stage5_validated",
-        "downgrade_reason": None,
-    }
-)
-FORGED = AttackShape.model_validate(
-    {
-        "channel": "forged_transcript",
-        "turn_count": 3,
-        "turn_plan": [
-            {"position": 1, "speaker": "forged_assistant", "purpose": "forged_history"},
-            {
-                "position": 2,
-                "speaker": "forged_tool_result",
-                "purpose": "forged_history",
-            },
-            {"position": 3, "speaker": "attacker_user", "purpose": "request_action"},
-        ],
-        "indirect": None,
-        "threat_label": "forged_transcript_threat",
         "source": "stage5_validated",
         "downgrade_reason": None,
     }
@@ -239,16 +217,6 @@ def test_a_direct_scenario_has_user_turns_and_no_planted_item() -> None:
     assert steps(fields) == [
         ("S00", ["S01"], EXECUTION, DIRECT_INJECTION, "user_turn"),
         ("S01", [], EXECUTION, DIRECT_INJECTION, "user_turn"),
-    ]
-
-
-def test_a_forged_scenario_poisons_the_thread_then_asks() -> None:
-    fields = fields_of(shaped(FORGED))
-
-    assert steps(fields) == [
-        ("S00", ["S01"], PERSISTENCE, THREAD_POISONING, "forged_history"),
-        ("S01", ["S02"], PERSISTENCE, THREAD_POISONING, "forged_history"),
-        ("S02", [], EXECUTION, DIRECT_INJECTION, "user_turn"),
     ]
 
 
@@ -389,8 +357,8 @@ def test_a_missing_source_fails_instead_of_publishing_blank_text() -> None:
 
 @pytest.mark.parametrize(
     "make",
-    [adversarial, everyday, lambda: shaped(DIRECT), lambda: shaped(FORGED)],
-    ids=["indirect", "functional", "direct", "forged"],
+    [adversarial, everyday, lambda: shaped(DIRECT)],
+    ids=["indirect", "functional", "direct"],
 )
 def test_a_handoff_passes_the_kit_schema_ownership_and_digest(make) -> None:
     document = _wire(build_scenario_handoff(_envelope(make())))
@@ -554,12 +522,10 @@ def test_the_schema_refuses_controller_though_the_model_reads_it() -> None:
 def test_the_alias_never_reaches_the_stage_5_shape_step_schema() -> None:
     """The party relation is resolved after the reply, so its alias is not sent."""
 
-    for forged in (False, True):
-        model = response_model_for(ShapeStepConfig(allow_forged_transcript=forged))
-        schema = portable_request_schema(model.model_json_schema())
-        rendered = json.dumps(schema, sort_keys=True, separators=(",", ":"))
-        assert "controlling_party" not in rendered
-        assert "PartyRelation" not in rendered
+    schema = portable_request_schema(ShapeProposal.model_json_schema())
+    rendered = json.dumps(schema, sort_keys=True, separators=(",", ":"))
+    assert "controlling_party" not in rendered
+    assert "PartyRelation" not in rendered
 
 
 # --- taxonomy -----------------------------------------------------------------

@@ -98,7 +98,6 @@ from .stage5.cross_scenario import (
 from .stage5.generate import generate_bdi_for_context, is_bdi_length_retry_exhausted
 from .stage5.defender import populate_defender_bdi
 from .stage5.shape_step import (
-    ShapeStepConfig,
     apply_shape_step,
     observed_operation_names,
 )
@@ -264,7 +263,6 @@ def run_sp3(
     enriched_operations: Mapping[str, str] | None = None,
     stage_1a_source: Stage1aSource | None = None,
     condition_families: Sequence[CandidateFamilyPlan] | None = None,
-    shape_config: ShapeStepConfig = ShapeStepConfig(),
     handoff_taxonomy: HandoffTaxonomyInputs | None = None,
     ica_process_model_contexts: Mapping[str, Mapping[str, str]] | None = None,
 ) -> SP3RunResult:
@@ -332,9 +330,6 @@ def run_sp3(
             ``condition-families.yaml`` with the hint, the capped-out
             families, whether the published condition honoured the hint,
             the reason rule that chose it, and the cited row's ID.
-        shape_config: Switches for the shape step that runs after Stage 5
-            compiles each adversarial spec. The default keeps the
-            forged-transcript channel out of the shape request.
         handoff_taxonomy: The run's ATLAS release and each loss's OWASP
             references. Every published handoff then carries the ``taxonomy``
             block for its lineage losses; ``None`` publishes none.
@@ -392,7 +387,6 @@ def run_sp3(
         enriched_operations=enriched_operations,
         stage_1a_source=stage_1a_source,
         condition_families=condition_families,
-        shape_config=shape_config,
         handoff_taxonomy=handoff_taxonomy,
         ica_process_model_contexts=ica_process_model_contexts,
     )
@@ -526,7 +520,6 @@ class _SP3Inputs:
     enriched_operations: Mapping[str, str] | None
     stage_1a_source: Stage1aSource | None
     condition_families: Sequence[CandidateFamilyPlan] | None
-    shape_config: ShapeStepConfig
     handoff_taxonomy: HandoffTaxonomyInputs | None = None
     ica_process_model_contexts: Mapping[str, Mapping[str, str]] | None = None
 
@@ -648,7 +641,6 @@ def _run_stages_5_and_6(
         llm_client=inputs.llm_client,
         run_dir=run_dir,
         execution_target_profile=profile,
-        config=inputs.shape_config,
         temperature=inputs.temperature,
         loader=inputs.loader,
     )

@@ -25,9 +25,7 @@ from asago_scenario_generator.stpa.models.scenario_spec import (
     ScenarioSpec,
 )
 from asago_scenario_generator.stpa.scenario_prod.stage5.shape_step import (
-    ForgedShapeProposal,
     ShapeProposal,
-    ShapeStepConfig,
     apply_shape_step,
 )
 from tests.stpa.helpers import make_scenario_spec
@@ -75,7 +73,6 @@ def run_step(
     tmp_path: Path,
     *,
     influence: dict[str, str] | None = None,
-    config: ShapeStepConfig | None = None,
 ) -> list[ScenarioSpec]:
     return apply_shape_step(
         specs,
@@ -84,13 +81,12 @@ def run_step(
         execution_target_profile=profile_with_influence(
             influence or {"get_listing": "indirect", "refund": "unknown"}
         ),
-        config=config or ShapeStepConfig(),
     )
 
 
-def client_replying(reply: object, model: type = ShapeProposal) -> MockLLMClient:
+def client_replying(reply: object) -> MockLLMClient:
     client = MockLLMClient()
-    client.set_response_for(model, reply)
+    client.set_response_for(ShapeProposal, reply)
     return client
 
 
@@ -354,7 +350,6 @@ def test_a_scenario_without_a_target_profile_cannot_confirm_its_carrier(
         llm_client=client,
         run_dir=tmp_path,
         execution_target_profile=None,
-        config=ShapeStepConfig(),
     )
 
     assert client.calls == []
@@ -431,73 +426,30 @@ def test_the_request_log_names_the_stage_and_scenario(tmp_path: Path) -> None:
     assert "SCN-001" in text
 
 
-def test_the_forged_flag_widens_the_response_model_and_the_prompt(
-    tmp_path: Path,
-) -> None:
-    forged = {
-        "channel": "forged_transcript",
-        "turn_count": 2,
-        "turn_plan": [
-            {"position": 1, "speaker": "forged_assistant", "purpose": "forged_history"},
-            {"position": 2, "speaker": "attacker_user", "purpose": "request_action"},
-        ],
-        "indirect": None,
-    }
-    client = client_replying(forged, ForgedShapeProposal)
-
-    (spec,) = run_step(
-        client,
-        [spec_for(AdversaryKind.malicious_customer)],
-        tmp_path,
-        config=ShapeStepConfig(allow_forged_transcript=True),
-    )
-
-    assert client.calls[0].response_format is ForgedShapeProposal
-    assert "forged_transcript" in client.calls[0].user_prompt
-    assert spec.attack_shape.channel is AttackChannel.FORGED_TRANSCRIPT
-
-
-def test_the_default_prompt_never_offers_the_forged_channel(tmp_path: Path) -> None:
-    client = client_replying(DIRECT_REPLY)
-
-    run_step(client, [spec_for(AdversaryKind.malicious_customer)], tmp_path)
-
-    call = client.calls[0]
-    assert "forged" not in call.system_prompt + call.user_prompt
-
-
-def rendered_shape_request(
-    kind: AdversaryKind, tmp_path: Path, config: ShapeStepConfig | None = None
-) -> tuple[str, str]:
-    config = config or ShapeStepConfig()
-    model = ForgedShapeProposal if config.allow_forged_transcript else ShapeProposal
+def rendered_shape_request(kind: AdversaryKind, tmp_path: Path) -> tuple[str, str]:
     reply = (
         INDIRECT_REPLY
         if kind is AdversaryKind.third_party_via_content
         else DIRECT_REPLY
     )
-    client = client_replying(reply, model)
-    run_step(client, [spec_for(kind)], tmp_path, config=config)
+    client = client_replying(reply)
+    run_step(client, [spec_for(kind)], tmp_path)
     call = client.calls[0]
     return call.system_prompt, call.user_prompt
 
 
 @pytest.mark.parametrize(
-    ("kind", "config"),
+    "kind",
     [
-        (AdversaryKind.external_attacker, ShapeStepConfig()),
-        (AdversaryKind.malicious_customer, ShapeStepConfig()),
-        (AdversaryKind.third_party_via_content, ShapeStepConfig()),
-        (
-            AdversaryKind.malicious_customer,
-            ShapeStepConfig(allow_forged_transcript=True),
-        ),
+        AdversaryKind.external_attacker,
+        AdversaryKind.malicious_customer,
+        AdversaryKind.third_party_via_content,
     ],
 )
 def test_the_indirect_field_text_leads_with_the_carrier_requirement(
-    kind: AdversaryKind, config: ShapeStepConfig, tmp_path: Path
+    kind: AdversaryKind, tmp_path: Path
 ) -> None:
-    system, _ = rendered_shape_request(kind, tmp_path, config)
+    system, _ = rendered_shape_request(kind, tmp_path)
 
     (field,) = [line for line in system.splitlines() if line.startswith("`indirect`:")]
     assert field.startswith("`indirect`: required when `channel` is `indirect`")
@@ -505,21 +457,17 @@ def test_the_indirect_field_text_leads_with_the_carrier_requirement(
 
 
 @pytest.mark.parametrize(
-    ("kind", "config"),
+    "kind",
     [
-        (AdversaryKind.external_attacker, ShapeStepConfig()),
-        (AdversaryKind.malicious_customer, ShapeStepConfig()),
-        (AdversaryKind.third_party_via_content, ShapeStepConfig()),
-        (
-            AdversaryKind.third_party_via_content,
-            ShapeStepConfig(allow_forged_transcript=True),
-        ),
+        AdversaryKind.external_attacker,
+        AdversaryKind.malicious_customer,
+        AdversaryKind.third_party_via_content,
     ],
 )
 def test_the_request_never_asks_for_a_record_reference(
-    kind: AdversaryKind, config: ShapeStepConfig, tmp_path: Path
+    kind: AdversaryKind, tmp_path: Path
 ) -> None:
-    system, user = rendered_shape_request(kind, tmp_path, config)
+    system, user = rendered_shape_request(kind, tmp_path)
 
     assert "record_ref" not in system + user
 
@@ -527,13 +475,10 @@ def test_the_request_never_asks_for_a_record_reference(
 @pytest.mark.parametrize(
     "kind", [AdversaryKind.external_attacker, AdversaryKind.malicious_customer]
 )
-@pytest.mark.parametrize("forged", [False, True])
 def test_a_scenario_that_cannot_use_indirect_gets_no_carrier_instruction(
-    kind: AdversaryKind, forged: bool, tmp_path: Path
+    kind: AdversaryKind, tmp_path: Path
 ) -> None:
-    config = ShapeStepConfig(allow_forged_transcript=forged)
-
-    _, user = rendered_shape_request(kind, tmp_path, config)
+    _, user = rendered_shape_request(kind, tmp_path)
 
     assert "Choosing `indirect`" not in user
 

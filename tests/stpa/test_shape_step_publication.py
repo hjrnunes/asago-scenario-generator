@@ -27,9 +27,7 @@ from asago_scenario_generator.stpa.scenario_prod.handoff import (
 from asago_scenario_generator.stpa.scenario_prod.handoff_schema import handoff_schema
 from asago_scenario_generator.stpa.scenario_prod.run import SP3RunResult, run_sp3
 from asago_scenario_generator.stpa.scenario_prod.stage5.shape_step import (
-    ForgedShapeProposal,
     ShapeProposal,
-    ShapeStepConfig,
 )
 from tests.helpers.stpa_builders import (
     make_capability_profile,
@@ -215,38 +213,6 @@ def test_duplicates_keep_the_scenario_whose_shape_the_model_proposed(
         row["scenario_id"]: (row["status"], row["duplicate_of"])
         for row in summary["scenarios"]
     } == {"SCN-001": ("duplicate", "SCN-002"), "SCN-002": ("canonical", None)}
-
-
-def test_the_forged_channel_stays_off_unless_the_run_enables_it(
-    tmp_path: Path,
-) -> None:
-    forged_reply = {
-        "channel": "forged_transcript",
-        "turn_count": 2,
-        "turn_plan": [
-            {"position": 1, "speaker": "forged_assistant", "purpose": "forged_history"},
-            {"position": 2, "speaker": "attacker_user", "purpose": "request_action"},
-        ],
-        "indirect": None,
-    }
-    publish([_normal_semantics_payload()], tmp_path / "off", shape_reply=forged_reply)
-    off = assert_valid(_published_handoff(tmp_path / "off"))
-    assert off.attack_shape.downgrade_reason is ShapeDowngradeReason.SHAPE_CALL_FAILED
-
-    client = MockLLMClient()
-    client.set_response_queue([_normal_semantics_payload()])
-    client.set_response_for(ForgedShapeProposal, forged_reply)
-    run_sp3(
-        llm_client=client,
-        enriched_threat_set=_make_ets(num_threats=1),
-        control_structure=make_cs(),
-        loss_analysis=make_loss_analysis(),
-        run_dir=tmp_path / "on",
-        shape_config=ShapeStepConfig(allow_forged_transcript=True),
-    )
-    on = assert_valid(_published_handoff(tmp_path / "on"))
-    assert on.attack_shape.channel.value == "forged_transcript"
-    assert on.attack_shape.threat_label == "forged_transcript_threat"
 
 
 @pytest.mark.parametrize("scenario_count", [1, 2])

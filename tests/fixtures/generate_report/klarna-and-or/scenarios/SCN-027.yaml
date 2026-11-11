@@ -319,7 +319,7 @@ worst_case_threat: Unauthorized or incorrect modification of customer payment sc
 contract:
   id: scenario-handoff
   version: scenario-handoff-v1
-  spec_digest: sha256:c7fe26b7e19fa5bf9883c9ebdbb6c7028e1aa11f109ae98a47a0b17903e83f48
+  spec_digest: sha256:7daa981741a4eac49eb7ef52a59d67c5877ec8a7557bea1ea9ecc2ec6c9374f6
   requires: []
   provenance:
     writer: asago_scenario_generator.stpa.scenario_prod.handoff

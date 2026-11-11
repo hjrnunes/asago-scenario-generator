@@ -486,7 +486,6 @@ def attack_shape(
     *,
     source: str = "stage5_validated",
     indirect: dict | None = None,
-    threat_label: str | None = None,
     downgrade_reason: str | None = None,
 ) -> dict:
     return {
@@ -494,7 +493,7 @@ def attack_shape(
         "turn_count": len(turns),
         "turn_plan": turns,
         "indirect": indirect,
-        "threat_label": threat_label,
+        "threat_label": None,
         "source": source,
         "downgrade_reason": downgrade_reason,
     }
@@ -567,19 +566,6 @@ SHAPED = {
                 "operator_insider",
                 "CUST001",
             ),
-        ),
-    ),
-    "valid/adversarial-forged-transcript.json": (
-        adversarial,
-        "SCN-105",
-        attack_shape(
-            "forged_transcript",
-            turn_plan(
-                ("forged_assistant", "forged_history"),
-                ("forged_tool_result", "forged_history"),
-                ATTACKER_REQUEST,
-            ),
-            threat_label="forged_transcript_threat",
         ),
     ),
     "valid/adversarial-downgraded.json": (
@@ -902,7 +888,6 @@ def shape_invalid(valid: dict[str, dict]) -> dict[str, dict]:
     single = valid["valid/adversarial-direct-single.json"]
     multi = valid["valid/adversarial-direct-multi-turn.json"]
     indirect = valid["valid/adversarial-indirect-listing.json"]
-    forged = valid["valid/adversarial-forged-transcript.json"]
     downgraded = valid["valid/adversarial-downgraded.json"]
     functional_null = valid["valid/functional-null-shape.json"]
     block = indirect["attack_shape"]["indirect"]
@@ -928,10 +913,6 @@ def shape_invalid(valid: dict[str, dict]) -> dict[str, dict]:
 
     def drop_last_turn(payload: dict) -> None:
         shape_of(payload)["turn_plan"].pop()
-
-    def forged_ends_on_forged(payload: dict) -> None:
-        last = shape_of(payload)["turn_plan"][-1]
-        last.update(speaker="forged_assistant", purpose="forged_history")
 
     invalid = {
         "shape-purpose-free-text": cut(
@@ -981,13 +962,6 @@ def shape_invalid(valid: dict[str, dict]) -> dict[str, dict]:
                 record_ref="the listing the user asked about"
             ),
         ),
-        "shape-forged-without-label": cut(
-            forged, lambda p: shape_of(p).update(threat_label=None)
-        ),
-        "shape-forged-speaker-on-direct": cut(
-            single, lambda p: first_turn(p).update(speaker="forged_assistant")
-        ),
-        "shape-forged-last-not-attacker": cut(forged, forged_ends_on_forged),
         "shape-purpose-speaker-mismatch": cut(
             single, lambda p: first_turn(p).update(purpose="ask_to_read_item")
         ),
@@ -1054,11 +1028,6 @@ def fixture_fields(payload: dict) -> dict:
 
 #: Fixture-specific variations: a factor without a matching belief, two
 #: factors, and the other UCA types.
-def _no_belief(payload: dict) -> None:
-    payload["causal_factors"][0]["process_model_belief"] = None
-    payload["causal_factors"][0]["source_id"] = "FB-1-1"
-
-
 def _two_factors(payload: dict) -> None:
     payload["causal_factors"].append(
         {
@@ -1069,10 +1038,7 @@ def _two_factors(payload: dict) -> None:
     )
 
 
-FIELD_VARIATIONS = {
-    "valid/adversarial-forged-transcript.json": _no_belief,
-    "valid/adversarial-indirect-listing.json": _two_factors,
-}
+FIELD_VARIATIONS = {"valid/adversarial-indirect-listing.json": _two_factors}
 
 
 #: Fixtures that state flawed beliefs: each factor's process_model_belief is
@@ -1313,7 +1279,7 @@ def _path_uncertainty(payload: dict) -> None:
     )
 
 
-PATH_VARIATIONS = {"valid/adversarial-forged-transcript.json": _path_uncertainty}
+PATH_VARIATIONS = {"valid/adversarial-indirect-policy-operator.json": _path_uncertainty}
 
 
 def with_path(relative: str, payload: dict) -> dict:

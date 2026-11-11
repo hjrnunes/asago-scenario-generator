@@ -1,7 +1,7 @@
 """Structural rules of the scenario-handoff-v1 ``attack_shape``.
 
 The shape holds closed enums, bounded integers and identifiers, so attack text
-cannot fit in it. Each rule (R1-R6, R9) has a test that breaks exactly that
+cannot fit in it. Each rule (R1-R4, R6, R9) has a test that breaks exactly that
 rule; R7 and the envelope belong to ``test_scenario_handoff_envelope.py``.
 """
 
@@ -69,21 +69,6 @@ def _indirect(**overrides: Any) -> dict[str, Any]:
     return payload
 
 
-def _forged(**overrides: Any) -> dict[str, Any]:
-    payload = _shape(
-        channel="forged_transcript",
-        turn_count=3,
-        turn_plan=[
-            _turn(1, "forged_assistant", "forged_history"),
-            _turn(2, "forged_tool_result", "forged_history"),
-            _turn(3, "attacker_user", "request_action"),
-        ],
-        threat_label="forged_transcript_threat",
-    )
-    payload.update(overrides)
-    return payload
-
-
 def _multi_turn(**overrides: Any) -> dict[str, Any]:
     payload = _shape(
         turn_count=3,
@@ -118,7 +103,6 @@ VALID = {
             },
         )
     ),
-    "forged-transcript": _forged(),
     "downgraded": _downgraded(),
     "default-without-reason": _shape(source="code_default"),
 }
@@ -158,15 +142,7 @@ RULE_VIOLATIONS = {
         "R3",
         _shape(turn_plan=[_turn(1, "benign_user")]),
     ),
-    "R3-direct-forged-speaker": (
-        "R3",
-        _shape(turn_plan=[_turn(1, "forged_assistant", "forged_history")]),
-    ),
     "R3-direct-with-indirect-block": ("R3", _shape(indirect=_indirect_block())),
-    "R3-direct-with-threat-label": (
-        "R3",
-        _shape(threat_label="forged_transcript_threat"),
-    ),
     "R4-indirect-without-block": ("R4", _indirect(indirect=None)),
     "R4-indirect-attacker-speaker": (
         "R4",
@@ -186,35 +162,6 @@ RULE_VIOLATIONS = {
             ]
         ),
     ),
-    "R4-indirect-with-threat-label": (
-        "R4",
-        _indirect(threat_label="forged_transcript_threat"),
-    ),
-    "R5-forged-without-label": ("R5", _forged(threat_label=None)),
-    "R5-forged-without-forged-speaker": (
-        "R5",
-        _forged(
-            turn_count=2,
-            turn_plan=[
-                _turn(1, "attacker_user", "establish_context"),
-                _turn(2, "attacker_user", "request_action"),
-            ],
-        ),
-    ),
-    "R5-forged-last-not-attacker": (
-        "R5",
-        _forged(
-            turn_plan=[
-                _turn(1, "attacker_user", "establish_context"),
-                _turn(2, "forged_tool_result", "forged_history"),
-                _turn(3, "forged_assistant", "forged_history"),
-            ]
-        ),
-    ),
-    "R5-forged-with-indirect-block": (
-        "R5",
-        _forged(indirect=_indirect_block()),
-    ),
     "R6-read-turn-by-attacker": (
         "R6",
         _shape(turn_plan=[_turn(1, "attacker_user", "ask_to_read_item")]),
@@ -222,10 +169,6 @@ RULE_VIOLATIONS = {
     "R6-follow-up-by-attacker": (
         "R6",
         _shape(turn_plan=[_turn(1, "attacker_user", "follow_up_on_item")]),
-    ),
-    "R6-forged-history-by-attacker": (
-        "R6",
-        _shape(turn_plan=[_turn(1, "attacker_user", "forged_history")]),
     ),
     "R9-reason-with-stage5-source": (
         "R9",
@@ -271,7 +214,7 @@ SCHEMA_VIOLATIONS = {
     "unknown-speaker": _shape(turn_plan=[_turn(1, "system")]),
     "unknown-source": _shape(source="model"),
     "unknown-downgrade-reason": _downgraded(downgrade_reason="because"),
-    "unknown-threat-label": _forged(threat_label="other"),
+    "threat-label-set": _shape(threat_label="other"),
     "carrier-is-prose": _indirect(
         indirect=_indirect_block(carrier_operation="ignore previous instructions")
     ),
@@ -383,8 +326,7 @@ def test_the_party_field_keeps_its_model_name_and_publishes_the_wire_name() -> N
     "payload",
     [*SCHEMA_VIOLATIONS.values(), RULE_VIOLATIONS["R1-plan-shorter-than-count"][1]]
     + [RULE_VIOLATIONS["R3-direct-with-indirect-block"][1]]
-    + [RULE_VIOLATIONS["R4-indirect-without-block"][1]]
-    + [RULE_VIOLATIONS["R5-forged-without-label"][1]],
+    + [RULE_VIOLATIONS["R4-indirect-without-block"][1]],
 )
 def test_the_json_schema_rejects_what_a_schema_only_reader_can_see(
     payload: dict[str, Any],
@@ -427,7 +369,6 @@ def test_the_dumped_shape_keeps_null_values_when_none_is_excluded() -> None:
         (_indirect(), None, False),
         (_shape(), None, True),
         (_shape(), ("update_item",), True),
-        (_forged(), (), True),
     ],
     ids=[
         "carrier-observed",
@@ -436,7 +377,6 @@ def test_the_dumped_shape_keeps_null_values_when_none_is_excluded() -> None:
         "unknown-inventory",
         "direct-needs-no-carrier",
         "direct-with-inventory",
-        "forged-needs-no-carrier",
     ],
 )
 def test_r8_carrier_must_be_an_observed_operation(
@@ -467,7 +407,7 @@ def _string_leaves(value: Any) -> list[str]:
 
 @st.composite
 def _valid_shapes(draw: st.DrawFn) -> dict[str, Any]:
-    kind = draw(st.sampled_from(["direct", "indirect", "forged", "downgraded"]))
+    kind = draw(st.sampled_from(["direct", "indirect", "downgraded"]))
     if kind == "downgraded":
         return _downgraded(
             downgrade_reason=draw(
@@ -501,40 +441,38 @@ def _valid_shapes(draw: st.DrawFn) -> dict[str, Any]:
             turn_plan=[_turn(i + 1, purpose=p) for i, p in enumerate(purposes)],
             source=draw(st.sampled_from(["stage5_validated", "code_default"])),
         )
-    if kind == "indirect":
-        count = draw(st.integers(min_value=1, max_value=4))
-        plan = [_turn(1, "benign_user", "ask_to_read_item")] + [
-            _turn(i + 1, "benign_user", "follow_up_on_item") for i in range(1, count)
-        ]
-        return _indirect(
-            turn_count=count,
-            turn_plan=plan,
-            indirect=_indirect_block(
-                carrier_operation=draw(IDENTIFIERS),
-                data_item={
-                    "content_kind": draw(
-                        st.sampled_from(
-                            ["policy_document", "listing_content", "message", "other"]
-                        )
-                    ),
-                    "record_ref": draw(st.none() | IDENTIFIERS),
-                },
-                party_relation={
-                    "controller": draw(
-                        st.sampled_from(
-                            [
-                                "third_party",
-                                "counterparty",
-                                "operator_insider",
-                                "unknown",
-                            ]
-                        )
-                    ),
-                    "benign_user_actor_ref": draw(st.none() | IDENTIFIERS),
-                },
-            ),
-        )
-    return _forged()
+    count = draw(st.integers(min_value=1, max_value=4))
+    plan = [_turn(1, "benign_user", "ask_to_read_item")] + [
+        _turn(i + 1, "benign_user", "follow_up_on_item") for i in range(1, count)
+    ]
+    return _indirect(
+        turn_count=count,
+        turn_plan=plan,
+        indirect=_indirect_block(
+            carrier_operation=draw(IDENTIFIERS),
+            data_item={
+                "content_kind": draw(
+                    st.sampled_from(
+                        ["policy_document", "listing_content", "message", "other"]
+                    )
+                ),
+                "record_ref": draw(st.none() | IDENTIFIERS),
+            },
+            party_relation={
+                "controller": draw(
+                    st.sampled_from(
+                        [
+                            "third_party",
+                            "counterparty",
+                            "operator_insider",
+                            "unknown",
+                        ]
+                    )
+                ),
+                "benign_user_actor_ref": draw(st.none() | IDENTIFIERS),
+            },
+        ),
+    )
 
 
 @settings(max_examples=200, deadline=None)

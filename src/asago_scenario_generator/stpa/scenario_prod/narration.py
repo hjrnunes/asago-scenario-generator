@@ -106,7 +106,6 @@ _COVERAGE: tuple[tuple[str, tuple[str, ...], bool], ...] = (
 ATLAS_TOOL_DATA_POISONING = ("AML.T0099", "AI Agent Tool Data Poisoning")
 ATLAS_INDIRECT_INJECTION = ("AML.T0051.001", "LLM Prompt Injection: Indirect")
 ATLAS_DIRECT_INJECTION = ("AML.T0051.000", "LLM Prompt Injection: Direct")
-ATLAS_THREAD_POISONING = ("AML.T0080.001", "AI Agent Context Poisoning: Thread")
 # The tactic each technique above achieves (relationships.<technique>.achieves).
 ATLAS_PERSISTENCE = ("AML.TA0006", "Persistence")
 ATLAS_EXECUTION = ("AML.TA0005", "Execution")
@@ -114,17 +113,13 @@ ATLAS_TACTICS = {
     ATLAS_TOOL_DATA_POISONING[0]: ATLAS_PERSISTENCE,
     ATLAS_INDIRECT_INJECTION[0]: ATLAS_EXECUTION,
     ATLAS_DIRECT_INJECTION[0]: ATLAS_EXECUTION,
-    ATLAS_THREAD_POISONING[0]: ATLAS_PERSISTENCE,
 }
 # Where a step's attacker-influenced content enters the agent's context.
 CHANNEL_TOOL_DATA = "tool_data"
 CHANNEL_USER_TURN = "user_turn"
-CHANNEL_FORGED_HISTORY = "forged_history"
 _SPEAKER_CHANNELS = {
     TurnSpeaker.ATTACKER_USER: CHANNEL_USER_TURN,
     TurnSpeaker.BENIGN_USER: CHANNEL_USER_TURN,
-    TurnSpeaker.FORGED_ASSISTANT: CHANNEL_FORGED_HISTORY,
-    TurnSpeaker.FORGED_TOOL_RESULT: CHANNEL_FORGED_HISTORY,
 }
 
 _ANNOTATION = re.compile(
@@ -593,8 +588,6 @@ def _turn_words(turn: TurnShape, shape: AttackShape) -> str:
 
 
 def _turn_technique(turn: TurnShape, shape: AttackShape) -> tuple[str, str] | None:
-    if turn.speaker in (TurnSpeaker.FORGED_ASSISTANT, TurnSpeaker.FORGED_TOOL_RESULT):
-        return ATLAS_THREAD_POISONING
     if turn.speaker is TurnSpeaker.ATTACKER_USER:
         return ATLAS_DIRECT_INJECTION
     if shape.channel is AttackChannel.INDIRECT and turn.purpose in (

@@ -500,7 +500,7 @@ UcaType = Literal[
     "too-early-too-late-or-out-of-order",
     "stopped-too-soon-or-applied-too-long",
 ]
-ProcedureChannel = Literal["tool_data", "user_turn", "forged_history"]
+ProcedureChannel = Literal["tool_data", "user_turn"]
 StepId = Annotated[StrictStr, Field(pattern=r"^S\d{2}$")]
 
 

@@ -10,7 +10,6 @@ from __future__ import annotations
 from asago_contracts_core import (
     CASES_NAME,
     CHANNEL_DIRECT,
-    CHANNEL_FORGED,
     CHANNEL_INDIRECT,
     CONTRACT,
     CONTRACT_DIR,
@@ -49,7 +48,6 @@ from asago_contracts_core import (
 __all__ = [
     "CASES_NAME",
     "CHANNEL_DIRECT",
-    "CHANNEL_FORGED",
     "CHANNEL_INDIRECT",
     "CONTRACT",
     "CONTRACT_DIR",

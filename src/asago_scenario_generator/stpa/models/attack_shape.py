@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from collections.abc import Collection
 from enum import StrEnum
-from typing import Annotated, Literal
+from typing import Annotated
 
 from pydantic import (
     AliasChoices,
@@ -26,7 +26,6 @@ from pydantic import (
 )
 
 MAX_TURNS = 4
-THREAT_LABEL_FORGED_TRANSCRIPT = "forged_transcript_threat"
 
 
 class _NoWhitespaceInSchema:
@@ -55,20 +54,13 @@ class AttackChannel(StrEnum):
 
     DIRECT = "direct"
     INDIRECT = "indirect"
-    FORGED_TRANSCRIPT = "forged_transcript"
 
 
 class TurnSpeaker(StrEnum):
-    """Who speaks a planned turn.
-
-    ``attacker_user`` and ``benign_user`` are real user turns; the ``forged_*``
-    speakers exist only on the ``forged_transcript`` channel.
-    """
+    """Who speaks a planned turn. Both speakers are real user turns."""
 
     ATTACKER_USER = "attacker_user"
     BENIGN_USER = "benign_user"
-    FORGED_ASSISTANT = "forged_assistant"
-    FORGED_TOOL_RESULT = "forged_tool_result"
 
 
 class TurnPurpose(StrEnum):
@@ -80,7 +72,6 @@ class TurnPurpose(StrEnum):
     APPLY_PRESSURE = "apply_pressure"
     ASK_TO_READ_ITEM = "ask_to_read_item"
     FOLLOW_UP_ON_ITEM = "follow_up_on_item"
-    FORGED_HISTORY = "forged_history"
 
 
 class ContentKind(StrEnum):
@@ -125,9 +116,6 @@ class ShapeDowngradeReason(StrEnum):
     SHAPE_CALL_FAILED = "shape_call_failed"
 
 
-_FORGED_SPEAKERS = frozenset(
-    {TurnSpeaker.FORGED_ASSISTANT, TurnSpeaker.FORGED_TOOL_RESULT}
-)
 _BENIGN_ONLY_PURPOSES = frozenset(
     {TurnPurpose.ASK_TO_READ_ITEM, TurnPurpose.FOLLOW_UP_ON_ITEM}
 )
@@ -191,7 +179,7 @@ class AttackShape(_ShapeModel):
     """The structure of an adversarial scenario's attack; never attack text.
 
     Every key is required and an absent value is an explicit ``null``.
-    Cross-field rules R1-R6 and R9 run as model validators; the if/then blocks
+    Cross-field rules R1-R4, R6 and R9 run as model validators; the if/then blocks
     in the JSON schema mirror the ones a schema-only reader needs.
     """
 
@@ -204,25 +192,8 @@ class AttackShape(_ShapeModel):
                         "properties": {"channel": {"const": "indirect"}},
                         "required": ["channel"],
                     },
-                    "then": {
-                        "properties": {
-                            "indirect": {"type": "object"},
-                            "threat_label": {"type": "null"},
-                        }
-                    },
+                    "then": {"properties": {"indirect": {"type": "object"}}},
                     "else": {"properties": {"indirect": {"type": "null"}}},
-                },
-                {
-                    "if": {
-                        "properties": {"channel": {"const": "forged_transcript"}},
-                        "required": ["channel"],
-                    },
-                    "then": {
-                        "properties": {
-                            "threat_label": {"const": THREAT_LABEL_FORGED_TRANSCRIPT}
-                        }
-                    },
-                    "else": {"properties": {"threat_label": {"type": "null"}}},
                 },
                 *(_turn_count_pairing(count) for count in range(1, MAX_TURNS + 1)),
             ]
@@ -233,7 +204,7 @@ class AttackShape(_ShapeModel):
     turn_count: StrictInt = Field(ge=1, le=MAX_TURNS)
     turn_plan: list[TurnShape] = Field(min_length=1, max_length=MAX_TURNS)
     indirect: IndirectShape | None
-    threat_label: Literal["forged_transcript_threat"] | None
+    threat_label: None
     source: ShapeSource
     downgrade_reason: ShapeDowngradeReason | None
 
@@ -255,7 +226,7 @@ class AttackShape(_ShapeModel):
 
     @model_validator(mode="after")
     def _validate_channel(self) -> "AttackShape":
-        """R3, R4 and R5: each channel fixes its speakers, block and label."""
+        """R3 and R4: each channel fixes its speakers and block."""
 
         speakers = [turn.speaker for turn in self.turn_plan]
         if self.channel is AttackChannel.DIRECT:
@@ -264,10 +235,7 @@ class AttackShape(_ShapeModel):
                 "R3: a direct shape has only attacker_user turns",
             )
             _require(self.indirect is None, "R3: a direct shape has no indirect block")
-            _require(
-                self.threat_label is None, "R3: a direct shape has no threat_label"
-            )
-        elif self.channel is AttackChannel.INDIRECT:
+        else:
             _require(
                 self.indirect is not None,
                 "R4: an indirect shape needs an indirect block",
@@ -280,42 +248,17 @@ class AttackShape(_ShapeModel):
                 any(t.purpose is TurnPurpose.ASK_TO_READ_ITEM for t in self.turn_plan),
                 "R4: an indirect shape needs an ask_to_read_item turn",
             )
-            _require(
-                self.threat_label is None, "R4: an indirect shape has no threat_label"
-            )
-        else:
-            _require(
-                self.threat_label == THREAT_LABEL_FORGED_TRANSCRIPT,
-                "R5: a forged_transcript shape carries its threat_label",
-            )
-            _require(
-                any(s in _FORGED_SPEAKERS for s in speakers),
-                "R5: a forged_transcript shape needs a forged speaker",
-            )
-            _require(
-                speakers[-1] is TurnSpeaker.ATTACKER_USER,
-                "R5: a forged_transcript shape ends on attacker_user",
-            )
-            _require(
-                self.indirect is None,
-                "R5: a forged_transcript shape has no indirect block",
-            )
         return self
 
     @model_validator(mode="after")
     def _validate_purposes(self) -> "AttackShape":
-        """R6: item-reading purposes belong to the benign user, forged history to forged speakers."""
+        """R6: item-reading purposes belong to the benign user."""
 
         for turn in self.turn_plan:
             if turn.purpose in _BENIGN_ONLY_PURPOSES:
                 _require(
                     turn.speaker is TurnSpeaker.BENIGN_USER,
                     f"R6: purpose {turn.purpose.value} belongs to benign_user",
-                )
-            if turn.purpose is TurnPurpose.FORGED_HISTORY:
-                _require(
-                    turn.speaker in _FORGED_SPEAKERS,
-                    "R6: purpose forged_history belongs to a forged speaker",
                 )
         return self
 
@@ -375,7 +318,6 @@ def default_attack_shape(reason: ShapeDowngradeReason | None) -> AttackShape:
 
 __all__ = [
     "MAX_TURNS",
-    "THREAT_LABEL_FORGED_TRANSCRIPT",
     "AttackChannel",
     "AttackShape",
     "ContentKind",

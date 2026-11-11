@@ -501,7 +501,6 @@ def test_the_channel_split_counts_extra_canonicals_per_channel() -> None:
     assert build_channel_splits(specs, records) == {
         "direct": 0,
         "indirect": 2,
-        "forged_transcript": 0,
     }
 
 
@@ -515,7 +514,6 @@ def test_the_first_canonical_of_a_group_is_not_a_split() -> None:
     assert build_channel_splits(specs, records) == {
         "direct": 1,
         "indirect": 0,
-        "forged_transcript": 0,
     }
 
 
@@ -533,7 +531,6 @@ def test_ungrouped_canonicals_are_not_splits() -> None:
     assert build_channel_splits(specs, records) == {
         "direct": 0,
         "indirect": 0,
-        "forged_transcript": 0,
     }
 
 
@@ -552,5 +549,4 @@ def test_testability_summary_carries_the_channel_splits_only_when_given() -> Non
     assert summary["channel_splits"] == {
         "direct": 0,
         "indirect": 1,
-        "forged_transcript": 0,
     }

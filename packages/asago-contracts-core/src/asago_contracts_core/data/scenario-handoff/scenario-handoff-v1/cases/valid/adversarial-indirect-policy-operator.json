@@ -66,6 +66,7 @@
       "node_id": "AP-FAIL",
       "safe_outcome": "The update_item operation is attempted only for items owned by the authenticated user."
     },
+    "source_uncertainty": "Free-form text named a structural source outside the selected causal path; that source was not treated as path evidence.",
     "steps": [
       {
         "asset": "update_item",
@@ -149,7 +150,7 @@
     ],
     "status": "satisfied"
   },
-  "content_digest": "784d10cdebb146f0d64e6f892195ce69fb7d2c3ef2e2bd80bb7f5532c7ae4248",
+  "content_digest": "ddd07f3d0d75891fd210a5583a05e8c6f43d29997720695a66c3e342ad2241c4",
   "deduplication": {
     "key": {
       "claim_level": "command_attempt",

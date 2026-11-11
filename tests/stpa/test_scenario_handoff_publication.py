@@ -262,7 +262,6 @@ def test_testability_summary_counts_the_channel_splits(tmp_path: Path) -> None:
     assert summary["channel_splits"] == {
         "direct": 0,
         "indirect": 0,
-        "forged_transcript": 0,
     }
 
 

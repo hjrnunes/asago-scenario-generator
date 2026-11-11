@@ -60,8 +60,7 @@
       "description": "How the attack reaches the target agent. Structure only.",
       "enum": [
         "direct",
-        "indirect",
-        "forged_transcript"
+        "indirect"
       ],
       "title": "AttackChannel",
       "type": "string"
@@ -491,35 +490,6 @@
             "properties": {
               "indirect": {
                 "type": "object"
-              },
-              "threat_label": {
-                "type": "null"
-              }
-            }
-          }
-        },
-        {
-          "else": {
-            "properties": {
-              "threat_label": {
-                "type": "null"
-              }
-            }
-          },
-          "if": {
-            "properties": {
-              "channel": {
-                "const": "forged_transcript"
-              }
-            },
-            "required": [
-              "channel"
-            ]
-          },
-          "then": {
-            "properties": {
-              "threat_label": {
-                "const": "forged_transcript_threat"
               }
             }
           }
@@ -605,7 +575,7 @@
           }
         }
       ],
-      "description": "The structure of an adversarial scenario's attack; never attack text.\n\nEvery key is required and an absent value is an explicit ``null``.\nCross-field rules R1-R6 and R9 run as model validators; the if/then blocks\nin the JSON schema mirror the ones a schema-only reader needs.",
+      "description": "The structure of an adversarial scenario's attack; never attack text.\n\nEvery key is required and an absent value is an explicit ``null``.\nCross-field rules R1-R4, R6 and R9 run as model validators; the if/then blocks\nin the JSON schema mirror the ones a schema-only reader needs.",
       "properties": {
         "channel": {
           "$ref": "#/$defs/AttackChannel"
@@ -636,16 +606,8 @@
           ]
         },
         "threat_label": {
-          "anyOf": [
-            {
-              "const": "forged_transcript_threat",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Threat Label"
+          "title": "Threat Label",
+          "type": "null"
         },
         "source": {
           "$ref": "#/$defs/ShapeSource"
@@ -1233,8 +1195,7 @@
         "channel": {
           "enum": [
             "tool_data",
-            "user_turn",
-            "forged_history"
+            "user_turn"
           ],
           "title": "Channel",
           "type": "string"
@@ -2628,8 +2589,7 @@
         "request_action",
         "apply_pressure",
         "ask_to_read_item",
-        "follow_up_on_item",
-        "forged_history"
+        "follow_up_on_item"
       ],
       "title": "TurnPurpose",
       "type": "string"
@@ -2660,12 +2620,10 @@
       "type": "object"
     },
     "TurnSpeaker": {
-      "description": "Who speaks a planned turn.\n\n``attacker_user`` and ``benign_user`` are real user turns; the ``forged_*``\nspeakers exist only on the ``forged_transcript`` channel.",
+      "description": "Who speaks a planned turn. Both speakers are real user turns.",
       "enum": [
         "attacker_user",
-        "benign_user",
-        "forged_assistant",
-        "forged_tool_result"
+        "benign_user"
       ],
       "title": "TurnSpeaker",
       "type": "string"

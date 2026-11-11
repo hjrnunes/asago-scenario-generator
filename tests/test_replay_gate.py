@@ -1534,7 +1534,7 @@ def _testability(root: Path, **blocks: Any) -> None:
     (root / "testability.yaml").write_text(yaml.safe_dump(document))
 
 
-_NO_SPLITS = {"direct": 0, "indirect": 0, "forged_transcript": 0}
+_NO_SPLITS = {"direct": 0, "indirect": 0}
 
 
 def test_a_recording_without_an_added_field_is_compared_without_it(trees) -> None:

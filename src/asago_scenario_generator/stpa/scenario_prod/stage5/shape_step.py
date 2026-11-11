@@ -31,7 +31,6 @@ from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 
 from asago_scenario_generator.stpa.models.attack_shape import (
     MAX_TURNS,
-    THREAT_LABEL_FORGED_TRANSCRIPT,
     AttackChannel,
     AttackShape,
     ContentKind,
@@ -65,17 +64,6 @@ SHAPE_STEP = "shape"
 
 
 @dataclass(frozen=True)
-class ShapeStepConfig:
-    """Run-level switches for the shape step.
-
-    ``allow_forged_transcript`` is off by default: the forged-transcript
-    channel stays out of the response vocabulary until a run opts in.
-    """
-
-    allow_forged_transcript: bool = False
-
-
-@dataclass(frozen=True)
 class ShapeFacts:
     """What code knows about one scenario when it judges a proposal.
 
@@ -87,7 +75,6 @@ class ShapeFacts:
     adversary_kind: AdversaryKind
     observed_operations: Collection[str] | None
     influenced_operations: frozenset[str]
-    config: ShapeStepConfig = ShapeStepConfig()
 
 
 class _WireModel(BaseModel):
@@ -121,7 +108,7 @@ class ProposedTurn(_WireModel):
 
 
 class ShapeProposal(_WireModel):
-    """The shape reply when the forged-transcript channel is not allowed."""
+    """The shape reply."""
 
     channel: Literal["direct", "indirect"]
     turn_count: StrictInt = Field(ge=1, le=MAX_TURNS)
@@ -129,52 +116,12 @@ class ShapeProposal(_WireModel):
     indirect: ProposedCarrier | None
 
 
-class ForgedProposedTurn(_WireModel):
-    """One planned turn, with the forged speakers and purpose available."""
-
-    position: StrictInt = Field(ge=1, le=MAX_TURNS)
-    speaker: Literal[
-        "attacker_user", "benign_user", "forged_assistant", "forged_tool_result"
-    ]
-    purpose: Literal[
-        "establish_context",
-        "assert_authority",
-        "request_action",
-        "apply_pressure",
-        "ask_to_read_item",
-        "follow_up_on_item",
-        "forged_history",
-    ]
-
-
-class ForgedShapeProposal(_WireModel):
-    """The shape reply when the run allows the forged-transcript channel."""
-
-    channel: Literal["direct", "indirect", "forged_transcript"]
-    turn_count: StrictInt = Field(ge=1, le=MAX_TURNS)
-    turn_plan: list[ForgedProposedTurn] = Field(min_length=1, max_length=MAX_TURNS)
-    indirect: ProposedCarrier | None
-
-
-def response_model_for(
-    config: ShapeStepConfig,
-) -> type[ShapeProposal] | type[ForgedShapeProposal]:
-    """Return the reply model whose vocabulary matches ``config``."""
-    if config.allow_forged_transcript:
-        return ForgedShapeProposal
-    return ShapeProposal
-
-
-def allowed_channels(
-    adversary_kind: AdversaryKind, config: ShapeStepConfig
-) -> frozenset[AttackChannel]:
+def allowed_channels(adversary_kind: AdversaryKind) -> frozenset[AttackChannel]:
     """Return the channels an adversary kind may use."""
     if adversary_kind is AdversaryKind.third_party_via_content:
         return frozenset({AttackChannel.INDIRECT})
     if adversary_kind is AdversaryKind.none:
         return frozenset()
-    if config.allow_forged_transcript:
-        return frozenset({AttackChannel.DIRECT, AttackChannel.FORGED_TRANSCRIPT})
     return frozenset({AttackChannel.DIRECT})
 
 
@@ -203,9 +150,7 @@ def observed_operation_names(
     return tuple(tool.name for tool in profile.inventory.tools)
 
 
-def _indirect_shape(
-    proposal: ShapeProposal | ForgedShapeProposal,
-) -> IndirectShape | None:
+def _indirect_shape(proposal: ShapeProposal) -> IndirectShape | None:
     carrier = proposal.indirect
     if carrier is None:
         return None
@@ -220,10 +165,9 @@ def _indirect_shape(
     )
 
 
-def _shape_fields(proposal: ShapeProposal | ForgedShapeProposal) -> dict[str, object]:
-    channel = AttackChannel(proposal.channel)
+def _shape_fields(proposal: ShapeProposal) -> dict[str, object]:
     return dict(
-        channel=channel,
+        channel=AttackChannel(proposal.channel),
         # The plan is the structure; a reply whose count disagrees with it is
         # not a different shape.
         turn_count=len(proposal.turn_plan),
@@ -236,11 +180,7 @@ def _shape_fields(proposal: ShapeProposal | ForgedShapeProposal) -> dict[str, ob
             for turn in proposal.turn_plan
         ],
         indirect=_indirect_shape(proposal),
-        threat_label=(
-            THREAT_LABEL_FORGED_TRANSCRIPT
-            if channel is AttackChannel.FORGED_TRANSCRIPT
-            else None
-        ),
+        threat_label=None,
         source=ShapeSource.STAGE5_VALIDATED,
         downgrade_reason=None,
     )
@@ -267,7 +207,7 @@ def _fact_failures(
 ) -> list[tuple[ShapeDowngradeReason, str]]:
     """Name each fact about the scenario or target the shape contradicts."""
     failures = []
-    allowed = allowed_channels(facts.adversary_kind, facts.config)
+    allowed = allowed_channels(facts.adversary_kind)
     if shape.channel not in allowed:
         names = ", ".join(f"`{channel.value}`" for channel in sorted(allowed))
         failures.append(
@@ -306,9 +246,7 @@ class _Judgement:
     failures: tuple[str, ...]
 
 
-def _judge(
-    proposal: ShapeProposal | ForgedShapeProposal, facts: ShapeFacts
-) -> _Judgement:
+def _judge(proposal: ShapeProposal, facts: ShapeFacts) -> _Judgement:
     fields = _shape_fields(proposal)
     rule_failures = _model_rule_failures(fields)
     fact_failures = _fact_failures(AttackShape.model_construct(**fields), facts)
@@ -322,9 +260,7 @@ def _judge(
     return _Judgement(default_attack_shape(reason), failures)
 
 
-def resolve_attack_shape(
-    proposal: ShapeProposal | ForgedShapeProposal, facts: ShapeFacts
-) -> AttackShape:
+def resolve_attack_shape(proposal: ShapeProposal, facts: ShapeFacts) -> AttackShape:
     """Validate a proposal into a shape, or return the code default with its reason."""
     return _judge(proposal, facts).shape
 
@@ -339,18 +275,16 @@ class _ShapeRejectedError(ExactFeedbackError):
 
 def _rejection_message(failures: tuple[str, ...], facts: ShapeFacts) -> str:
     lines = ["the reply breaks these rules:", *(f"- {text}" for text in failures)]
-    if AttackChannel.INDIRECT in allowed_channels(facts.adversary_kind, facts.config):
+    if AttackChannel.INDIRECT in allowed_channels(facts.adversary_kind):
         names = ", ".join(f"`{name}`" for name in sorted(facts.influenced_operations))
         lines.append(f"Operations marked `outside content: yes`: {names}.")
     return "\n".join(lines)
 
 
-def _rule_check(
-    facts: ShapeFacts,
-) -> Callable[[ShapeProposal | ForgedShapeProposal], None]:
+def _rule_check(facts: ShapeFacts) -> Callable[[ShapeProposal], None]:
     """Return the result validator that turns a broken rule into a correction."""
 
-    def check(proposal: ShapeProposal | ForgedShapeProposal) -> None:
+    def check(proposal: ShapeProposal) -> None:
         judgement = _judge(proposal, facts)
         if judgement.failures:
             raise _ShapeRejectedError(
@@ -380,7 +314,6 @@ class _ShapeRun:
     llm_client: LLMClient
     run_dir: Path
     loader: TemplateLoader
-    config: ShapeStepConfig
     temperature: float
     observed_operations: tuple[str, ...] | None
     influenced_operations: frozenset[str]
@@ -399,7 +332,6 @@ def _render_prompts(spec: ScenarioSpec, adversary_kind: AdversaryKind, run: _Sha
         "stage5_shape_system.j2",
         max_turns=MAX_TURNS,
         content_kinds=[kind.value for kind in ContentKind],
-        allow_forged_transcript=run.config.allow_forged_transcript,
     )
     user = run.loader.render_prompt(
         "stage5_shape_user.j2",
@@ -407,7 +339,7 @@ def _render_prompts(spec: ScenarioSpec, adversary_kind: AdversaryKind, run: _Sha
         adversary_kind=adversary_kind.value,
         adversary_gain=spec.adversary.gain if spec.adversary else "",
         allowed_channels=sorted(
-            channel.value for channel in allowed_channels(adversary_kind, run.config)
+            channel.value for channel in allowed_channels(adversary_kind)
         ),
         account=render_scenario_summary(spec)[0],
         operations=operations,
@@ -423,7 +355,7 @@ def _no_carrier_reason(
     Every reply such a scenario could give would be downgraded for the same
     reason, so asking would spend a request on a known outcome.
     """
-    if allowed_channels(adversary_kind, run.config) != {AttackChannel.INDIRECT}:
+    if allowed_channels(adversary_kind) != {AttackChannel.INDIRECT}:
         return None
     if run.observed_operations is None:
         return ShapeDowngradeReason.CARRIER_NOT_OBSERVED
@@ -446,13 +378,12 @@ def _shape_for(spec: ScenarioSpec, run: _ShapeRun) -> AttackShape | None:
         adversary_kind=adversary.kind,
         observed_operations=run.observed_operations,
         influenced_operations=run.influenced_operations,
-        config=run.config,
     )
     outcome = call_with_policy(
         llm_client=run.llm_client,
         system_prompt=system,
         user_prompt=user,
-        response_format=response_model_for(run.config),
+        response_format=ShapeProposal,
         run_dir=run.run_dir,
         stage=SHAPE_STAGE,
         step=SHAPE_STEP,
@@ -475,7 +406,6 @@ def apply_shape_step(
     llm_client: LLMClient,
     run_dir: Path,
     execution_target_profile: ExecutionTargetProfile | None,
-    config: ShapeStepConfig = ShapeStepConfig(),
     temperature: float | None = None,
     loader: TemplateLoader | None = None,
 ) -> list[ScenarioSpec]:
@@ -491,7 +421,6 @@ def apply_shape_step(
         llm_client=llm_client,
         run_dir=run_dir,
         loader=loader or TemplateLoader(PROMPTS_DIR),
-        config=config,
         temperature=DEFAULT_TEMPERATURE if temperature is None else temperature,
         observed_operations=observed_operation_names(execution_target_profile),
         influenced_operations=attacker_influenced_operations(execution_target_profile),

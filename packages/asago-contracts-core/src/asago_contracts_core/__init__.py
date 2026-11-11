@@ -100,7 +100,6 @@ from .semver import (
 )
 from .shape import (
     CHANNEL_DIRECT,
-    CHANNEL_FORGED,
     CHANNEL_INDIRECT,
     attack_shape_violation,
 )
@@ -115,7 +114,6 @@ from .violations import (
 __all__ = [
     "CASES_NAME",
     "CHANNEL_DIRECT",
-    "CHANNEL_FORGED",
     "CHANNEL_INDIRECT",
     "CONSUMER_ENCODING",
     "CONTRACT",

@@ -4,14 +4,14 @@
   "files": {
     "ownership-rules.json": "d1c57c1298fc4eacf098508cf8294b95366a36041719bd4ebf906fb7f9e4742d",
     "scenario-handoff-v1/README.md": "f366d4d4e8bb65a91d72afc3ef91d7d9ea83c9dd8ca0ac481e9e7f0d2647c76b",
-    "scenario-handoff-v1/cases/canonical-digests.json": "367e3f38e005837f345cab581fa23251cc71fc7dc01827c47cc701d0609e8fdb",
+    "scenario-handoff-v1/cases/canonical-digests.json": "2839d752e16c56e503c5aefc87db2042ba14abb6fc4fe0f5cb10577158e2ca78",
     "scenario-handoff-v1/cases/companions/feature-companion-comments.json": "0875d9a1673c5031ee70933272ad8994a3a44eb62ed2b2fd1278378d06b8595e",
     "scenario-handoff-v1/cases/companions/feature-companion-feature-line.json": "f382bead00448acf962c344304f5d211eab0d1e4b8f9e1b5c11718babb80afd8",
     "scenario-handoff-v1/cases/companions/feature-companion-holds.json": "4dc59085c83cfb0a3b2056a965be725f033899c77ef6dec76474442a78fce58f",
     "scenario-handoff-v1/cases/companions/feature-companion-scenario-line.json": "3f733c1b3deb5c5cb44d9306df09ed6b23c8dc4a07e70bc315f38bbcb6d21140",
     "scenario-handoff-v1/cases/companions/feature-companion-steps.json": "d01308bb948fbb4d741410386a984b077f5741ab3dc45af306a0c8473a8c289b",
     "scenario-handoff-v1/cases/conformance-cases.json": "9d8902943e694296d8b48fc9023ac6db1c4974c89c6577aa6cd7881870b3549f",
-    "scenario-handoff-v1/cases/expected-violations.json": "9123f6c8493aa7ff73e75f41e788d3b3c8050249ecc2bad9afa1555086118969",
+    "scenario-handoff-v1/cases/expected-violations.json": "6c19b6827e3cbb852d85adfafb5e1ca918c1f66bab130388dc6ec1563f16e4e8",
     "scenario-handoff-v1/cases/invalid/actor-blank-goal.json": "e715e2e2ce80ff02938a5f8fc7e9e1b8680c99e4689475452204a5662ff22228",
     "scenario-handoff-v1/cases/invalid/actor-missing.json": "0c200f7edf86e5584b705ebd1fe978c61bdb1f11ed2a587ce6d20424c90ea58d",
     "scenario-handoff-v1/cases/invalid/actor-null-on-adversarial.json": "87ceae6efc311514fd954628a5d694d6ba0b658426efbd469625753127955436",
@@ -132,9 +132,6 @@
     "scenario-handoff-v1/cases/invalid/shape-direct-with-benign-speaker.json": "160266ff51bbebd7cd4c9f0bd8e13c84e7d7bafd1317f6b441b10e0900dba054",
     "scenario-handoff-v1/cases/invalid/shape-direct-with-indirect-block.json": "89c7b96db4224060497b3671e42ba240d91986996640cd5a295f0fc8e830a5fc",
     "scenario-handoff-v1/cases/invalid/shape-downgrade-without-default.json": "e5e3ac8e7e6b82c05db02dc80377e88d10024e8c7620757b190fed6ddb5edac8",
-    "scenario-handoff-v1/cases/invalid/shape-forged-last-not-attacker.json": "b0321e9d939ce7e51595c69b61d23ae39b3cb47d649f3203cb10c1f281da41fe",
-    "scenario-handoff-v1/cases/invalid/shape-forged-speaker-on-direct.json": "60edb5be69e5c148ea2571b7fb5c0b393d15263e1e29a62ce2e3e2d1da0dc047",
-    "scenario-handoff-v1/cases/invalid/shape-forged-without-label.json": "b0eefe57a39b5ffa7d1608207ce0d835bf0894d3c8beffb11b4d77662cf96b28",
     "scenario-handoff-v1/cases/invalid/shape-functional-with-shape.json": "07f644f9375902922ce9e7e203bcccfb79a769d0de22608d63ab4749d16cb05f",
     "scenario-handoff-v1/cases/invalid/shape-indirect-attacker-speaker.json": "3bef7731e0b7e355a96058d2f61c86ee35888195ccb0aaf388f7e05b8a8d06ef",
     "scenario-handoff-v1/cases/invalid/shape-indirect-no-read-turn.json": "1f738ef5da2787664c0a47728c927253ee6e82c157d27fd28ee9b4f655f2208e",
@@ -171,9 +168,8 @@
     "scenario-handoff-v1/cases/valid/adversarial-direct-multi-turn.json": "8d50adb432447628c71fcefd07c55e572f42011a0ced3ed8e9538e8d0a5451e1",
     "scenario-handoff-v1/cases/valid/adversarial-direct-single.json": "bde778fb6c46dbde68916b4186a2590cb5d9f6fc070c80f035b5e35fa5a9d24a",
     "scenario-handoff-v1/cases/valid/adversarial-downgraded.json": "e861bc71e106469f45c52eda7dcd0dd4bbcc83d3377747f2d1d56f3cdcfce821",
-    "scenario-handoff-v1/cases/valid/adversarial-forged-transcript.json": "406d01ab4f63bb612d2a714880206a3ebffa92577d638fd570e784400e744707",
     "scenario-handoff-v1/cases/valid/adversarial-indirect-listing.json": "e8cada0acfb50bfc9a44fbef114d54be6a5c66356c29b51a015f624a6dd567a3",
-    "scenario-handoff-v1/cases/valid/adversarial-indirect-policy-operator.json": "d4ac4472822e8aeb4b88da23abd02b6b260edacb269128bc447afbc9e3c8ad9c",
+    "scenario-handoff-v1/cases/valid/adversarial-indirect-policy-operator.json": "056c8e2ef694f3b91ce4b85ce706205a07965e3a428d111b2e55c0a27af9b902",
     "scenario-handoff-v1/cases/valid/adversarial-observed-record.json": "cc5b035b7caa95345ba45059b26d7447dd62acf1b7d3a5a726686002f4a6d64e",
     "scenario-handoff-v1/cases/valid/adversarial-stated-beliefs.json": "adf7a9279ea8b485dd45110fa6538f9aa6a4cbd2e8f344c966460d52aef464cf",
     "scenario-handoff-v1/cases/valid/analytical-only.json": "4f99ed779cbb4c37ef119ff3e59aa0894f7b29091e4014981ffeed7b96fee06b",
@@ -185,8 +181,8 @@
     "scenario-handoff-v1/cases/valid/safe-call-arguments.json": "6474a3a183248bd682316bf7372c129d76abe3560066d8d307ec9fd6338664cc",
     "scenario-handoff-v1/cases/valid/safe-call-not-made.json": "1cda0f7f469ef820ac20c5f3513cb58b3a679fbd95a274a1ab254002621b6ff1",
     "scenario-handoff-v1/cases/valid/taxonomy-block.json": "ed5740405f58050ee55fc9f06171e38cc3ad3b735376f06592875b361530f429",
-    "scenario-handoff-v1/schema.json": "e22d8fc8bc9c22ff50350c6e5d10a7933ef8ed54078afd97fa42d87fb63dae20",
-    "scenario-handoff-v1/spec.json": "328232b87e89d3cf0c46d086f0c9fa796b3eadb825686b9baf3945c7b51a4318"
+    "scenario-handoff-v1/schema.json": "166cb48957133d25c35e0d68f3af8defd0287bd6452743d27e3e2c426d336903",
+    "scenario-handoff-v1/spec.json": "1f1ba7afc58355d4ffd520262c92a843670139e18fa6c9b8a9953769bf8b40bc"
   },
   "schema_version": "scenario-handoff-v1"
 }

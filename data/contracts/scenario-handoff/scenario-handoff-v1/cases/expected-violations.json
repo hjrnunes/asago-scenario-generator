@@ -369,15 +369,6 @@
   "invalid/shape-downgrade-without-default.json": [
     "schema_violation:attack_shape"
   ],
-  "invalid/shape-forged-last-not-attacker.json": [
-    "schema_violation:attack_shape"
-  ],
-  "invalid/shape-forged-speaker-on-direct.json": [
-    "schema_violation:attack_shape"
-  ],
-  "invalid/shape-forged-without-label.json": [
-    "schema_violation:attack_shape"
-  ],
   "invalid/shape-functional-with-shape.json": [
     "schema_violation:<root>"
   ],

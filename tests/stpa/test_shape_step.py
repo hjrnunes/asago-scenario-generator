@@ -1,7 +1,7 @@
 """The shape step's response model, validation and code default.
 
 The model proposes structure only. Code takes turn_count from the plan,
-validates the proposal (rules R2-R6 and R8, the channels the adversary kind
+validates the proposal (rules R2-R4, R6 and R8, the channels the adversary kind
 allows) and replaces a proposal that fails with the single-turn direct default,
 carrying the reason. Nothing here makes a model request.
 """
@@ -21,15 +21,12 @@ from asago_scenario_generator.stpa.models.attack_shape import (
 )
 from asago_scenario_generator.stpa.models.scenario_spec import AdversaryKind
 from asago_scenario_generator.stpa.scenario_prod.stage5.shape_step import (
-    ForgedShapeProposal,
     ShapeFacts,
     ShapeProposal,
-    ShapeStepConfig,
     allowed_channels,
     attacker_influenced_operations,
     default_attack_shape,
     resolve_attack_shape,
-    response_model_for,
 )
 from tests.stpa.shape_fixtures import profile_with_influence
 
@@ -80,40 +77,23 @@ def indirect_proposal(**overrides: Any) -> dict[str, Any]:
     return payload
 
 
-def forged_proposal(**overrides: Any) -> dict[str, Any]:
-    payload: dict[str, Any] = {
-        "channel": "forged_transcript",
-        "turn_count": 2,
-        "turn_plan": [
-            _turn(1, "forged_assistant", "forged_history"),
-            _turn(2, "attacker_user", "request_action"),
-        ],
-        "indirect": None,
-    }
-    payload.update(overrides)
-    return payload
-
-
 def facts(
     kind: AdversaryKind = AdversaryKind.malicious_customer,
     *,
     observed: tuple[str, ...] | None = ("get_listing", "refund"),
     influenced: tuple[str, ...] = ("get_listing",),
-    allow_forged: bool = False,
 ) -> ShapeFacts:
     return ShapeFacts(
         adversary_kind=kind,
         observed_operations=observed,
         influenced_operations=frozenset(influenced),
-        config=ShapeStepConfig(allow_forged_transcript=allow_forged),
     )
 
 
 def resolve(
     payload: dict[str, Any], shape_facts: ShapeFacts | None = None
 ) -> AttackShape:
-    config = (shape_facts or facts()).config
-    proposal = response_model_for(config).model_validate(payload)
+    proposal = ShapeProposal.model_validate(payload)
     return resolve_attack_shape(proposal, shape_facts or facts())
 
 
@@ -205,11 +185,8 @@ def test_a_carrier_reply_may_leave_record_ref_out_or_still_send_it(
     assert shape.indirect.data_item.record_ref is None
 
 
-@pytest.mark.parametrize("config", [ShapeStepConfig(), ShapeStepConfig(True)])
-def test_the_carrier_schema_requires_the_three_fields_the_prompt_explains(
-    config: ShapeStepConfig,
-) -> None:
-    schema = response_model_for(config).model_json_schema()
+def test_the_carrier_schema_requires_the_three_fields_the_prompt_explains() -> None:
+    schema = ShapeProposal.model_json_schema()
 
     carrier = schema["$defs"]["ProposedCarrier"]
     assert sorted(carrier["required"]) == [
@@ -346,66 +323,17 @@ def test_an_unobserved_carrier_downgrades_before_the_influence_check() -> None:
 def test_a_user_adversary_may_only_use_the_direct_channel(
     kind: AdversaryKind,
 ) -> None:
-    assert allowed_channels(kind, ShapeStepConfig()) == {AttackChannel.DIRECT}
+    assert allowed_channels(kind) == {AttackChannel.DIRECT}
 
 
 def test_a_content_adversary_may_only_use_the_indirect_channel() -> None:
-    allowed = allowed_channels(AdversaryKind.third_party_via_content, ShapeStepConfig())
+    allowed = allowed_channels(AdversaryKind.third_party_via_content)
 
     assert allowed == {AttackChannel.INDIRECT}
 
 
 def test_a_functional_scenario_has_no_allowed_channel() -> None:
-    assert allowed_channels(AdversaryKind.none, ShapeStepConfig()) == frozenset()
-
-
-def test_the_forged_flag_adds_the_forged_channel_for_user_adversaries_only() -> None:
-    config = ShapeStepConfig(allow_forged_transcript=True)
-
-    assert allowed_channels(AdversaryKind.malicious_customer, config) == {
-        AttackChannel.DIRECT,
-        AttackChannel.FORGED_TRANSCRIPT,
-    }
-    assert allowed_channels(AdversaryKind.third_party_via_content, config) == {
-        AttackChannel.INDIRECT
-    }
-
-
-def test_a_forged_proposal_resolves_with_its_label_when_the_flag_is_on() -> None:
-    shape = resolve(forged_proposal(), facts(allow_forged=True))
-
-    assert shape.source is ShapeSource.STAGE5_VALIDATED
-    assert shape.channel is AttackChannel.FORGED_TRANSCRIPT
-    assert shape.threat_label == "forged_transcript_threat"
-
-
-def test_the_forged_flag_is_off_by_default() -> None:
-    assert ShapeStepConfig().allow_forged_transcript is False
-    assert response_model_for(ShapeStepConfig()) is ShapeProposal
-    assert response_model_for(ShapeStepConfig(allow_forged_transcript=True)) is (
-        ForgedShapeProposal
-    )
-
-
-@pytest.mark.parametrize(
-    "payload",
-    [
-        pytest.param(forged_proposal(), id="forged channel"),
-        pytest.param(
-            direct_proposal(turn_plan=[_turn(1, "forged_assistant", "forged_history")]),
-            id="forged speaker",
-        ),
-        pytest.param(
-            direct_proposal(turn_plan=[_turn(1, "attacker_user", "forged_history")]),
-            id="forged purpose",
-        ),
-    ],
-)
-def test_the_default_response_model_cannot_carry_a_forged_transcript(
-    payload: dict[str, Any],
-) -> None:
-    with pytest.raises(ValidationError):
-        ShapeProposal.model_validate(payload)
+    assert allowed_channels(AdversaryKind.none) == frozenset()
 
 
 @pytest.mark.parametrize(
@@ -465,9 +393,8 @@ def _string_nodes(schema: Any, definitions: dict[str, Any]) -> list[dict[str, An
     return found
 
 
-@pytest.mark.parametrize("config", [ShapeStepConfig(), ShapeStepConfig(True)])
-def test_the_response_model_has_no_free_text_field(config: ShapeStepConfig) -> None:
-    schema = response_model_for(config).model_json_schema()
+def test_the_response_model_has_no_free_text_field() -> None:
+    schema = ShapeProposal.model_json_schema()
     nodes = _string_nodes(schema["properties"], schema.get("$defs", {}))
 
     assert nodes

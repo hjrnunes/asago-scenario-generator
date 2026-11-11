@@ -16,10 +16,8 @@ from jsonschema.exceptions import best_match
 
 CHANNEL_DIRECT = "direct"
 CHANNEL_INDIRECT = "indirect"
-CHANNEL_FORGED = "forged_transcript"
 _ATTACKER = "attacker_user"
 _BENIGN = "benign_user"
-_FORGED_SPEAKERS = frozenset({"forged_assistant", "forged_tool_result"})
 _BENIGN_ONLY_PURPOSES = frozenset({"ask_to_read_item", "follow_up_on_item"})
 
 
@@ -70,7 +68,7 @@ def _plan_rule(shape: dict[str, Any]) -> tuple[str, str] | None:
 
 
 def _channel_rule(shape: dict[str, Any]) -> tuple[str, str] | None:
-    """R3, R4 and R5: each channel fixes its speakers, block and label."""
+    """R3 and R4: each channel fixes its speakers and block."""
 
     speakers = [turn["speaker"] for turn in shape["turn_plan"]]
     check = _CHANNEL_RULES[shape["channel"]]
@@ -83,8 +81,6 @@ def _direct_reason(shape: dict[str, Any], speakers: list[str]) -> str | None:
         return "R3: a direct shape has only attacker_user turns"
     if shape["indirect"] is not None:
         return "R3: a direct shape has no indirect block"
-    if shape["threat_label"] is not None:
-        return "R3: a direct shape has no threat_label"
     return None
 
 
@@ -95,32 +91,17 @@ def _indirect_reason(shape: dict[str, Any], speakers: list[str]) -> str | None:
         return "R4: an indirect shape has only benign_user turns"
     if not any(turn["purpose"] == "ask_to_read_item" for turn in shape["turn_plan"]):
         return "R4: an indirect shape needs an ask_to_read_item turn"
-    if shape["threat_label"] is not None:
-        return "R4: an indirect shape has no threat_label"
-    return None
-
-
-def _forged_reason(shape: dict[str, Any], speakers: list[str]) -> str | None:
-    if shape["threat_label"] != "forged_transcript_threat":
-        return "R5: a forged_transcript shape carries its threat_label"
-    if not any(speaker in _FORGED_SPEAKERS for speaker in speakers):
-        return "R5: a forged_transcript shape needs a forged speaker"
-    if speakers[-1] != _ATTACKER:
-        return "R5: a forged_transcript shape ends on attacker_user"
-    if shape["indirect"] is not None:
-        return "R5: a forged_transcript shape has no indirect block"
     return None
 
 
 _CHANNEL_RULES: Mapping[str, Callable[[dict[str, Any], list[str]], str | None]] = {
     CHANNEL_DIRECT: _direct_reason,
     CHANNEL_INDIRECT: _indirect_reason,
-    CHANNEL_FORGED: _forged_reason,
 }
 
 
 def _purpose_rule(shape: dict[str, Any]) -> tuple[str, str] | None:
-    """R6: item-reading purposes belong to the benign user, forged history to forged speakers."""
+    """R6: item-reading purposes belong to the benign user."""
 
     for index, turn in enumerate(shape["turn_plan"]):
         reason = _purpose_reason(turn)
@@ -133,8 +114,6 @@ def _purpose_reason(turn: dict[str, Any]) -> str | None:
     purpose, speaker = turn["purpose"], turn["speaker"]
     if purpose in _BENIGN_ONLY_PURPOSES and speaker != _BENIGN:
         return f"R6: purpose {purpose} belongs to benign_user"
-    if purpose == "forged_history" and speaker not in _FORGED_SPEAKERS:
-        return "R6: purpose forged_history belongs to a forged speaker"
     return None
 
 
@@ -160,7 +139,6 @@ _CROSS_FIELD_RULES = (_plan_rule, _channel_rule, _purpose_rule, _downgrade_rule)
 
 __all__ = [
     "CHANNEL_DIRECT",
-    "CHANNEL_FORGED",
     "CHANNEL_INDIRECT",
     "attack_shape_violation",
 ]

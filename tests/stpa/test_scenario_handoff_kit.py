@@ -35,7 +35,6 @@ VALID = {
     "adversarial-direct-multi-turn.json",
     "adversarial-direct-single.json",
     "adversarial-downgraded.json",
-    "adversarial-forged-transcript.json",
     "adversarial-indirect-listing.json",
     "adversarial-indirect-policy-operator.json",
     "adversarial-observed-record.json",
@@ -76,9 +75,6 @@ INVALID: dict[str, tuple[list[str], str | None, bool]] = {
     "shape-indirect-no-read-turn.json": ([SHAPE], "R4", False),
     "shape-carrier-with-prose.json": ([SHAPE], None, True),
     "shape-record-ref-with-prose.json": ([SHAPE], None, True),
-    "shape-forged-without-label.json": ([SHAPE], "R5", True),
-    "shape-forged-speaker-on-direct.json": ([SHAPE], "R3", False),
-    "shape-forged-last-not-attacker.json": ([SHAPE], "R5", False),
     "shape-purpose-speaker-mismatch.json": ([SHAPE], "R6", False),
     "shape-adversarial-null.json": ([ROOT_CODE], "R7", True),
     "shape-functional-with-shape.json": ([ROOT_CODE], "R7", True),
@@ -195,7 +191,7 @@ def test_the_kit_holds_exactly_the_listed_fixtures() -> None:
         if not path.name.startswith("schema-") and path.name not in field_cases
     }
     assert listed == set(INVALID)
-    assert len(INVALID) == 52
+    assert len(INVALID) == 49
 
 
 @pytest.mark.parametrize("name", sorted(VALID))
@@ -224,7 +220,7 @@ def test_valid_fixtures_cover_each_channel_and_the_downgrade_and_null_cases() ->
     shapes = {name: _load(f"valid/{name}")["attack_shape"] for name in VALID}
 
     channels = {shape["channel"] for shape in shapes.values() if shape}
-    assert channels == {"direct", "indirect", "forged_transcript"}
+    assert channels == {"direct", "indirect"}
     assert shapes["functional-null-shape.json"] is None
     assert {shape["turn_count"] for shape in shapes.values() if shape} >= {1, 2, 3}
     downgraded = shapes["adversarial-downgraded.json"]
@@ -233,9 +229,7 @@ def test_valid_fixtures_cover_each_channel_and_the_downgrade_and_null_cases() ->
     operator = shapes["adversarial-indirect-policy-operator.json"]["indirect"]
     assert operator["party_relation"]["controlling_party"] == "operator_insider"
     assert operator["data_item"]["record_ref"] is None
-    forged = shapes["adversarial-forged-transcript.json"]
-    assert forged["threat_label"] == "forged_transcript_threat"
-    assert forged["turn_plan"][-1]["speaker"] == "attacker_user"
+    assert all(shape["threat_label"] is None for shape in shapes.values() if shape)
 
 
 def test_only_the_failure_call_fixture_carries_a_failure_call() -> None:
@@ -305,7 +299,7 @@ def test_each_invalid_fixture_is_rejected_with_its_recorded_codes(name: str) -> 
 
 def test_every_invalid_fixture_breaks_one_thing_in_a_valid_base() -> None:
     names = {name for name in INVALID if name.startswith("shape-")}
-    assert len(names) == 24
+    assert len(names) == 21
     for name in INVALID:
         assert _load(f"invalid/{name}")["schema_version"] == "scenario-handoff-v1"
 
