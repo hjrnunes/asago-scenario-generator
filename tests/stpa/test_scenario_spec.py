@@ -6,6 +6,7 @@ Covers ScenarioSpec-01 through ScenarioSpec-11 from the Gherkin feature file.
 from __future__ import annotations
 
 import pytest
+from pydantic import ValidationError
 
 from asago_scenario_generator.stpa.models.control_structure import (
     ControlAction,
@@ -178,11 +179,10 @@ class TestScenarioSpecValidation:
         spec = _make_scenario_spec(provenance="structural")
         spec.validate_against(cs)
 
-    def test_ss_09_threat_source_catalog_only_provenance_passes(self):
-        """SS-09: threat source with catalog_only provenance passes."""
-        cs = _make_control_structure()
-        spec = _make_scenario_spec(provenance="catalog_only")
-        spec.validate_against(cs)
+    def test_ss_09_threat_source_accepts_only_structural_provenance(self):
+        """SS-09: a threat source with any other provenance fails."""
+        with pytest.raises(ValidationError, match="provenance"):
+            _make_scenario_spec(provenance="catalog_only")
 
     def test_ss_10_attacker_bdi_free_form_strings_passes(self):
         """SS-10: attacker BDI with free-form strings passes."""

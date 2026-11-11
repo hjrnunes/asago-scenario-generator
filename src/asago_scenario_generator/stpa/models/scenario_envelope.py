@@ -85,7 +85,7 @@ class ScenarioEnvelope(BaseModel):
     # Faceting metadata for querying/filtering
     target_responsibility: str
     ica_type: UCAType
-    provenance: str  # "structural" or "catalog_only"
+    provenance: str  # the spec's threat source provenance, always "structural"
 
     @model_validator(mode="after")
     def validate_scenario_id_match(self) -> ScenarioEnvelope:

@@ -140,7 +140,7 @@ class ThreatSource(BaseModel):
     """The source threat for a scenario."""
 
     ica_slot_id: str  # RESP-X:CA-Y:TYPE-Z or CL-X:CM-Y:TYPE-Z
-    provenance: Literal["structural", "catalog_only"]
+    provenance: Literal["structural"]
     ica_id: str | None = None
 
 
