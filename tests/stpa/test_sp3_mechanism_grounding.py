@@ -135,4 +135,3 @@ def test_stage5_prompt_contains_only_actionable_context_and_defines_references()
     assert context.target_control_path.process_model_parts[0].element_id not in prompt
     assert context.target_control_path.feedback[0].element_id not in prompt
     assert "source_pins:" not in prompt
-    assert "catalog_context:" not in prompt

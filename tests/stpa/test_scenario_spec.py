@@ -16,7 +16,6 @@ from asago_scenario_generator.stpa.models.control_structure import (
     ReferenceType,
     Responsibility,
 )
-from asago_scenario_generator.stpa.models.enriched_threat_set import CatalogMapping
 from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
 from asago_scenario_generator.stpa.models.scenario_spec import (
     AttackerBDI,
@@ -85,7 +84,6 @@ def _make_scenario_spec(
     desire_resp_id: str = "RESP-1",
     intention_ca_id: str = "CA-1-1",
     provenance: str = "structural",
-    catalog_context: list[CatalogMapping] | None = None,
 ) -> ScenarioSpec:
     return ScenarioSpec(
         scenario_id="SCN-001",
@@ -116,7 +114,6 @@ def _make_scenario_spec(
             desires=["Attacker wants"],
             intentions=["Attacker intends"],
         ),
-        catalog_context=catalog_context or [],
         loss_scenario="Loss scenario text",
     )
 
@@ -198,18 +195,6 @@ class TestScenarioSpecValidation:
         )
         spec.validate_against(cs)
 
-    def test_ss_11_scenario_spec_with_catalog_context_passes(self):
-        """SS-11: scenario spec with catalog context passes."""
-        cs = _make_control_structure()
-        spec = _make_scenario_spec(
-            catalog_context=[
-                CatalogMapping(
-                    catalog="OWASP_AGENTIC",
-                    id="T2-T3",
-                    name="Prompt injection",
-                    confidence="high",
-                )
-            ]
-        )
-        spec.validate_against(cs)
-        assert spec.catalog_context[0].id == "T2-T3"
+    def test_ss_11_scenario_spec_has_no_catalog_context(self):
+        """SS-11: a scenario spec carries no catalog context field."""
+        assert "catalog_context" not in ScenarioSpec.model_fields

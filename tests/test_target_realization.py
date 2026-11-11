@@ -1349,10 +1349,7 @@ def test_target_derived_both_operations_reach_stage5_with_exact_constraints():
         ICAEnumeration(slots=[]),
         enhanced,
     )
-    enriched = enrich_threats(
-        projection.ica_enumeration,
-        projection.control_structure,
-    )
+    enriched = enrich_threats(projection.ica_enumeration)
 
     derived_action_ids = {
         action.control_action_id for action in enhanced.target_derived_control_actions
@@ -1933,10 +1930,7 @@ def test_stpa_projection_returns_valid_additive_models_without_mutating_authorit
     assert projection.ica_enumeration.slots[0].icas[0].ica_id == (
         "RESP-1:CA-1-2:INCORRECT:1"
     )
-    enriched = enrich_threats(
-        projection.ica_enumeration,
-        projection.control_structure,
-    )
+    enriched = enrich_threats(projection.ica_enumeration)
     assert [item.ica_id for item in enriched.structural_threats] == [
         "RESP-1:CA-1-2:INCORRECT:1"
     ]

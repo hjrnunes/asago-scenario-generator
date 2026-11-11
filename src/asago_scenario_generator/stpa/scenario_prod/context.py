@@ -21,7 +21,6 @@ from asago_scenario_generator.stpa.models.scenario_context import (
     DescribedControlAction,
     DescribedElement,
     ReachableCapability,
-    ScenarioCatalogContext,
     ScenarioConstraint,
     ScenarioCoordinationPath,
     ScenarioControlPath,
@@ -114,15 +113,6 @@ def build_scenario_generation_context(
         "constraints": constraints,
         "obligation_considerations": tuple(obligation_considerations),
         "reachable_capabilities": capability_records,
-        "catalog_context": tuple(
-            ScenarioCatalogContext(
-                catalog=item.catalog,
-                entry_id=item.id,
-                name=item.name,
-                confidence=item.confidence,
-            )
-            for item in threat.catalog_mappings
-        ),
     }
     return ScenarioGenerationContext.create(**context_values)
 

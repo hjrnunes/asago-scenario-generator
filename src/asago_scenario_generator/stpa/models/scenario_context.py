@@ -290,15 +290,6 @@ class ReachableCapability(ScenarioContextModel):
     access_path: tuple[str, ...] = Field(min_length=1)
 
 
-class ScenarioCatalogContext(ScenarioContextModel):
-    """One catalog mapping selected on the source structural threat."""
-
-    catalog: str = Field(min_length=1)
-    entry_id: str = Field(min_length=1)
-    name: str = Field(min_length=1)
-    confidence: Literal["high", "medium", "low"]
-
-
 class ScenarioGenerationContext(ScenarioContextModel):
     """Content-addressed authority carried unchanged through scenario production."""
 
@@ -315,17 +306,12 @@ class ScenarioGenerationContext(ScenarioContextModel):
     constraints: tuple[ScenarioConstraint, ...] = Field(min_length=1)
     obligation_considerations: tuple[ScenarioObligationConsideration, ...] = ()
     reachable_capabilities: tuple[ReachableCapability, ...] = ()
-    catalog_context: tuple[ScenarioCatalogContext, ...] = ()
 
     @classmethod
     def create(cls, **values: Any) -> "ScenarioGenerationContext":
         """Construct the context with its canonical semantic digest."""
         payload = {"schema_version": "scenario-generation-context-v1", **values}
-        for field_name in (
-            "obligation_considerations",
-            "reachable_capabilities",
-            "catalog_context",
-        ):
+        for field_name in ("obligation_considerations", "reachable_capabilities"):
             payload.setdefault(field_name, ())
         payload["context_digest"] = _context_digest(payload)
         return cls.model_validate(payload)

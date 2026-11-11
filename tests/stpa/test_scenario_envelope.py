@@ -8,7 +8,6 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from asago_scenario_generator.stpa.models.enriched_threat_set import CatalogMapping
 from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
 from asago_scenario_generator.stpa.models.scenario_envelope import (
     GherkinSpec,
@@ -26,7 +25,6 @@ def _make_envelope(
     target_responsibility: str = "RESP-1",
     ica_type: UCAType = UCAType.not_provided,
     provenance: str = "structural",
-    catalog_mappings: list[CatalogMapping] | None = None,
 ) -> ScenarioEnvelope:
     return ScenarioEnvelope(
         scenario_id=scenario_id,
@@ -43,7 +41,6 @@ def _make_envelope(
         ),
         target_responsibility=target_responsibility,
         ica_type=ica_type,
-        catalog_mappings=catalog_mappings or [],
         provenance=provenance,
     )
 
@@ -82,17 +79,6 @@ class TestScenarioEnvelope:
         assert envelope.ica_type == UCAType.not_provided
         assert envelope.provenance == "structural"
 
-    def test_se_04_envelope_with_catalog_mappings_passes(self):
-        """SE-04: envelope with catalog mappings in faceting passes."""
-        envelope = _make_envelope(
-            catalog_mappings=[
-                CatalogMapping(
-                    catalog="OWASP_AGENTIC",
-                    id="T2-T3",
-                    name="Prompt injection",
-                    confidence="high",
-                )
-            ]
-        )
-        assert len(envelope.catalog_mappings) == 1
-        assert envelope.catalog_mappings[0].id == "T2-T3"
+    def test_se_04_envelope_has_no_catalog_mappings(self):
+        """SE-04: the faceting metadata carries no catalog mapping field."""
+        assert "catalog_mappings" not in ScenarioEnvelope.model_fields

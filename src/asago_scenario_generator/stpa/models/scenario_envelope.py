@@ -6,9 +6,8 @@ plus the ScenarioSpec and faceting metadata.
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, model_validator
 
-from asago_scenario_generator.stpa.models.enriched_threat_set import CatalogMapping
 from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
 from asago_scenario_generator.stpa.models.scenario_spec import ScenarioSpec
 
@@ -86,7 +85,6 @@ class ScenarioEnvelope(BaseModel):
     # Faceting metadata for querying/filtering
     target_responsibility: str
     ica_type: UCAType
-    catalog_mappings: list[CatalogMapping] = Field(default_factory=list)
     provenance: str  # "structural" or "catalog_only"
 
     @model_validator(mode="after")

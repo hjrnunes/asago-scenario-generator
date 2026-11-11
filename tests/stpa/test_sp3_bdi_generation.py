@@ -16,10 +16,7 @@ from asago_scenario_generator.stpa.models.control_structure import (
     Responsibility,
     ControlledProcess,
 )
-from asago_scenario_generator.stpa.models.enriched_threat_set import (
-    CatalogMapping,
-    StructuralThreat,
-)
+from asago_scenario_generator.stpa.models.enriched_threat_set import StructuralThreat
 from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
 from asago_scenario_generator.stpa.models.loss_analysis import (
     Hazard,
@@ -151,7 +148,6 @@ def _make_control_structure(
 
 def _make_structural_threat(
     slot_id: str = "RESP-1:CA-1-1:NOT_PROVIDED",
-    catalog_mappings: list[CatalogMapping] | None = None,
 ) -> StructuralThreat:
     return StructuralThreat(
         ica_slot_id=slot_id,
@@ -162,7 +158,6 @@ def _make_structural_threat(
         loss_scenario="The user believes a refund is being processed.",
         related_hazards=["H-1"],
         related_constraints=["SC-1"],
-        catalog_mappings=catalog_mappings or [],
     )
 
 
@@ -282,25 +277,15 @@ def _compile_spec(threat, declared, *, scenario_index: int = 0):
 class TestCompileScenarioSpec:
     """Tests for the ScenarioSpec that Stage 5 compilation assembles."""
 
-    def test_threat_source_and_catalog_context(self):
-        """SP3-BDI-09: ScenarioSpec assembled with threat source and catalog."""
-        threat = _make_structural_threat(
-            catalog_mappings=[
-                CatalogMapping(
-                    catalog="OWASP_AGENTIC",
-                    id="T1",
-                    name="Prompt Injection",
-                    confidence="low",
-                )
-            ]
-        )
+    def test_threat_source(self):
+        """SP3-BDI-09: ScenarioSpec assembled with its threat source."""
+        threat = _make_structural_threat()
         spec = _compile_spec(threat, [_STALE_INTENT])
         assert spec.threat_source.ica_slot_id == "RESP-1:CA-1-1:NOT_PROVIDED"
         assert spec.threat_source.provenance == "structural"
         assert spec.target_controller == "RESP-1"
         assert spec.target_control_action == "CA-1-1"
         assert spec.ica_type == UCAType.not_provided
-        assert len(spec.catalog_context) == 1
 
     def test_scenario_id_format(self):
         """SP3-BDI-10: scenario ID follows SCN-NNN format."""

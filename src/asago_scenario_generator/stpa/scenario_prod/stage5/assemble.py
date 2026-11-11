@@ -143,7 +143,6 @@ def _assemble(
         target_control_action=slot_parts["control_action"],
         ica_type=UCAType(slot_parts["ica_type"]),
         defender_bdi=assembly.defender_bdi,
-        catalog_context=threat.catalog_mappings,
         loss_scenario=threat.loss_scenario,
         causal_factors=causal_factors,
         unsafe_outcome_hazard_refs=[item.hazard_id for item in context.hazards],

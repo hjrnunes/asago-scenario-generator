@@ -81,12 +81,13 @@ from tests.stpa.test_ica_context_coverage import _structure as _coverage_structu
 from tests.stpa.test_stage2_source_selection import _provider_payload
 
 # The context digest and the SHA-256 of the JSON dump of
-# ``_wrong_timing_context()`` as the code before the field produced them.
+# ``_wrong_timing_context()`` as the code produces them when no assessment
+# adds the ``authority_for_update`` key.
 _EARLIER_CONTEXT_DIGEST = (
-    "0fd74a17ce98c619e67f7e49ad0a0ab62e236fce85d05a8d8408934cc4f48bfb"
+    "7914c184f0a29272cd7671a9863c290b42efb38784613057a03364a46addc996"
 )
 _EARLIER_CONTEXT_DUMP_SHA256 = (
-    "e46210f2fc6d86df58bd7ca728d3ce9c0956ec1dfb03e17cdb9abfee39b5829f"
+    "725adf3321674351b9c6659dc597828583da72bdea7d8315ba6baf26c3bcd5c2"
 )
 _AUTHORITY_VIEW = {"status": "non_authoritative", "basis": AUTHORITY.basis}
 

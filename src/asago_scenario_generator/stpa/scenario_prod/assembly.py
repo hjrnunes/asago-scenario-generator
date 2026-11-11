@@ -53,6 +53,5 @@ def assemble_envelope(
         gherkin_raw=gherkin_raw,
         target_responsibility=scenario_spec.target_controller,
         ica_type=scenario_spec.ica_type,
-        catalog_mappings=scenario_spec.catalog_context,
         provenance=scenario_spec.threat_source.provenance,
     )

@@ -303,12 +303,6 @@ class TestRunSp3ProductionWiring:
                     "na": 0,
                     "coverage_rate": 1.0,
                 },
-                structural_consideration={
-                    "total_slots": 1,
-                    "considered": 1,
-                    "rate": 1.0,
-                },
-                na_quality={"na_count": 0, "quality_count": 0, "quality_rate": 1.0},
             ),
         )
 

@@ -831,8 +831,6 @@ def test_run_sp3_realizes_coordination_slot_without_relabeled_identity(
         structural_threats=[threat],
         coverage_analysis=CoverageAnalysis(
             structural_coverage={"total_slots": 1, "non_na": 1, "na": 0},
-            structural_consideration={"total_slots": 1, "considered": 1},
-            na_quality={},
         ),
     )
     client = MockLLMClient()
@@ -978,7 +976,6 @@ def test_context_factory_hashes_model_defaults_when_optional_collections_omitted
             "context_digest",
             "obligation_considerations",
             "reachable_capabilities",
-            "catalog_context",
         },
     )
 
@@ -986,7 +983,6 @@ def test_context_factory_hashes_model_defaults_when_optional_collections_omitted
 
     assert rebuilt.obligation_considerations == ()
     assert rebuilt.reachable_capabilities == ()
-    assert rebuilt.catalog_context == ()
 
 
 def test_context_digest_must_cover_the_typed_action_semantics() -> None:

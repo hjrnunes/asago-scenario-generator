@@ -26,7 +26,6 @@ from asago_scenario_generator.stpa.models.causal_factor import (
     CausalFactor,
     validate_factor_sources,
 )
-from asago_scenario_generator.stpa.models.enriched_threat_set import CatalogMapping
 from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
 from asago_scenario_generator.stpa.models.scenario_context import (
     ScenarioGenerationContext,
@@ -155,7 +154,6 @@ class ScenarioSpec(BaseModel):
     ica_type: UCAType
     defender_bdi: DefenderBDI
     attacker_bdi: AttackerBDI
-    catalog_context: list[CatalogMapping] = Field(default_factory=list)
     loss_scenario: str  # carried from Stage 3
     # Stage 5 declared, evidence-backed causal factors in declared order.
     # Only factors the LLM explicitly declared with evidence are stored;

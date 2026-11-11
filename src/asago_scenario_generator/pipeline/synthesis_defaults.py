@@ -543,7 +543,7 @@ def _default_scenarios(
     # ICA enumeration and the exact obligation/slot evidence needed by
     # accounting.  SP3 consumes only the ordinary enumeration.
     ordinary_icas = _ordinary_icas(ica_enumeration)
-    enriched = enrich_threats(ordinary_icas, control_structure)
+    enriched = enrich_threats(ordinary_icas)
     reasons = ica_reasons(ordinary_icas, control_structure)
     # An intent-type INCORRECT tool-call ICA is routed here, before Stage 5:
     # its candidate is recorded as not applicable and sends no request.

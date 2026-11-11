@@ -96,24 +96,6 @@ def test_selected_criterion_mutation_reaches_each_normal_representation():
     )
 
 
-def test_unrelated_catalog_metadata_does_not_change_semantic_publication():
-    original = _spec()
-    changed = original.model_copy(
-        update={
-            "catalog_context": [
-                {
-                    "catalog": "ATLAS",
-                    "id": "AML.T9999",
-                    "name": "Unrelated bookkeeping label",
-                    "confidence": "low",
-                }
-            ]
-        }
-    )
-
-    assert render_scenario_summary(original) == render_scenario_summary(changed)
-
-
 def test_unsupported_factor_relation_remains_explicitly_flat():
     _narrative, tree, _gherkin = render_scenario_summary(_spec())
 

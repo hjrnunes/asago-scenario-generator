@@ -56,8 +56,6 @@ def _make_ets(num_threats: int = 2) -> EnrichedThreatSet:
                 "na": 2,
                 "coverage_rate": 0.5,
             },
-            structural_consideration={"total_slots": 4, "considered": 4, "rate": 1.0},
-            na_quality={"na_count": 2, "quality_count": 2, "quality_rate": 1.0},
         ),
     )
 
