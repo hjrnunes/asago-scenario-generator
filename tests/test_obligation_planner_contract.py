@@ -129,21 +129,21 @@ def _qualification_fact_set(snapshot: CapabilityFactSnapshot) -> Any:
 
 
 def test_rejected_candidate_identity_collisions_fail_closed() -> None:
-    """Two different rejects cannot share one candidate-v2 identity."""
+    """Two different rejects cannot share one candidate-v1 identity."""
     issue = ProjectionIssue(
         code="missing_compatible_resource",
         pattern_id="AP-T1-01",
         detail="no compatible resource",
     )
     candidate = RejectedProjectionCandidate(
-        candidate_id="cand:v2:" + "a" * 32,
+        candidate_id="cand:v1:" + "a" * 32,
         pattern_id=issue.pattern_id,
         reason=issue.detail,
         issue=issue,
     )
     conflicting = candidate.model_copy(update={"reason": "different reason"})
 
-    with pytest.raises(ValueError, match="rejected candidate-v2 identity collision"):
+    with pytest.raises(ValueError, match="rejected candidate-v1 identity collision"):
         _deduplicate_rejected_candidates([candidate, conflicting])
 
 
@@ -434,7 +434,7 @@ def test_persisted_obligation_row_has_the_normative_closed_shape() -> None:
 
 
 def test_candidate_records_are_derived_with_ingress_and_resource_bindings() -> None:
-    """The planner derives candidate-v2 details from the authoritative projection."""
+    """The planner derives candidate-v1 details from the authoritative projection."""
     candidate, _pattern_value, _snapshot = _projection_fixture()
     row = _plan_row(_plan(_make_inputs()))
     records = row["candidate_records"]

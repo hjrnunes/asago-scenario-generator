@@ -24,7 +24,7 @@ from asago_scenario_generator.stpa.models.scenario_envelope import (
 )
 from asago_scenario_generator.stpa.scenario_prod.handoff import (
     HandoffGherkin,
-    ScenarioHandoffV6,
+    ScenarioHandoff,
     verify_handoff_digest,
 )
 from asago_scenario_generator.stpa.scenario_prod.model_gherkin import (
@@ -490,7 +490,7 @@ def test_a_run_publishes_each_accepted_gherkin_in_the_handoff_and_feature(
     assert len(requests) == 2
     for scenario_id in SCENARIOS:
         document = _published_handoff(tmp_path, scenario_id)
-        verify_handoff_digest(ScenarioHandoffV6.model_validate(document))
+        verify_handoff_digest(ScenarioHandoff.model_validate(document))
         gherkin = document["gherkin"]
         assert gherkin["given"][0].startswith("Given the agent handles")
         assert gherkin["then_unsafe_alternative"] == [

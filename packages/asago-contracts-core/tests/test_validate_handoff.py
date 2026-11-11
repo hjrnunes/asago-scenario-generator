@@ -16,7 +16,7 @@ from typing import Any
 import pytest
 
 from asago_contracts_core import (
-    HANDOFF_SCHEMA_VERSION_V6,
+    HANDOFF_SCHEMA_VERSION,
     OTHER_VERSION_VIOLATIONS,
     VERSION,
     Violation,
@@ -27,7 +27,7 @@ from asago_contracts_core import (
 )
 
 CONTRACT_DIR = Path(__file__).resolve().parent / "data" / "scenario-handoff"
-KIT_DIR = CONTRACT_DIR / HANDOFF_SCHEMA_VERSION_V6 / "cases"
+KIT_DIR = CONTRACT_DIR / HANDOFF_SCHEMA_VERSION / "cases"
 
 
 def _load(path: Path) -> Any:
@@ -147,8 +147,8 @@ def test_the_contract_can_come_from_a_kit_directory(tmp_path: Path) -> None:
 
 
 def test_the_packaged_contract_states_the_published_version() -> None:
-    assert HANDOFF_SCHEMA_VERSION_V6 == "scenario-handoff-v6"
-    assert VERSION == HANDOFF_SCHEMA_VERSION_V6
+    assert HANDOFF_SCHEMA_VERSION == "scenario-handoff-v1"
+    assert VERSION == HANDOFF_SCHEMA_VERSION
     contract = load_contract()
     assert contract.schema["properties"]["schema_version"]["const"] == VERSION
     assert isinstance(Violation("c", "p", "r"), tuple)

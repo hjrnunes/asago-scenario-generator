@@ -104,7 +104,7 @@ _VOLATILE = ("run_id", "created_at", "semantic_digest")
 # funnel's second denominator (``applicable_without_llm_fan_out``), and with
 # the ``not_applicable`` candidate count beside the other scenario counts.
 _NO_CANDIDATES_MANIFEST_DIGEST = (
-    "982167293e2acb0a523cd912b4dd6daf97a9525d60718aa130fa64d8e59337d0"
+    "4f9f95a0d64638ebd277ce5d6b5b4daaa725f0699f062a4c4848c25da81ace00"
 )
 
 

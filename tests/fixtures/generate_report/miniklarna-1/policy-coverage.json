@@ -3546,5 +3546,5 @@
     }
   ],
   "rule": "loss-source-risk-cards",
-  "schema_version": "policy-coverage-v2"
+  "schema_version": "policy-coverage-v1"
 }

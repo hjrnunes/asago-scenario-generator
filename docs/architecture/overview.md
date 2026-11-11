@@ -18,7 +18,7 @@ The capability profile's computed boolean fields (`has_persistent_memory`,
 derived from `kc_subcodes`, included in serialized output, and legacy input
 values warn only when they conflict with the derived result.
 
-Authoritative projection contracts (candidate-v2 identity, digest helpers,
+Authoritative projection contracts (candidate-v1 identity, digest helpers,
 capability-fact snapshots, and slot-matching policy) live in
 `pipeline.projection_contracts`. Resource matching, qualification, and
 allocation depend inward on that leaf.
@@ -37,11 +37,11 @@ commands.
 
 ## Current ownership and historical seams
 
-The normal producer `generate` publishes one semantics-only `scenario-handoff-v6`
-through its handoff model, `ScenarioHandoffV6`, which carries the scenario's
+The normal producer `generate` publishes one semantics-only `scenario-handoff-v1`
+through its handoff model, `ScenarioHandoff`, which carries the scenario's
 `attack_path` (`attack_path.py` reduces the and-or tree to it) and adds the
 UCA, actor, causal factors, preconditions, ATLAS procedure, and worst case threat
-that `build_scenario_handoff_v6` in `handoff.py` derives from the scenario spec. `model_gherkin.py` asks
+that `build_scenario_handoff` in `handoff.py` derives from the scenario spec. `model_gherkin.py` asks
 the model for a declarative Gherkin per published scenario, and code falls back
 to the rendered Gherkin when the reply fails its checks. The envelope carries
 the Stage 5 `discriminating_condition`, its code-owned `condition_check`, and an
@@ -63,7 +63,7 @@ reaches no prompt, and a run without SSSOM rows or risk cards omits it. The owne
 scan reads its forbidden keys and prose patterns from `ownership-rules.json`
 beside the kit; the lock pins that file, and the shared core ships it to the
 consumer, so both sides enforce one list. `scripts/gen_handoff_kit.py` regenerates the kit and
-the lock; every kit file must come out byte-identical. `scenario-handoff-v6/schema.json`
+the lock; every kit file must come out byte-identical. `scenario-handoff-v1/schema.json`
 states the rules JSON Schema can express, composed from the model's own schema,
 so a reader that holds only the schema reaches the verdicts the Pydantic model
 enforces; the rules it cannot state stay model-only. The kit carries the
@@ -82,7 +82,7 @@ The producer also owns what a bound `tool_call_condition` means. The
 the condition's structure, how comparisons combine, how calls are assigned to
 operations, and the three outcomes with their reasons. The vectors hold the
 results of Garak's `validate_condition` and `evaluate_condition` at the revision
-the vector files name; the one reference evaluator, `evaluate_condition_v2` in
+the vector files name; the one reference evaluator, `evaluate_condition` in
 `packages/asago-handoff` (`asago_handoff.condition_eval`, which
 `scripts/gen_tool_call_condition_vectors.py` imports and
 `stpa.tool_call_condition_eval` re-exports), must agree with every evaluate
@@ -99,7 +99,7 @@ The contract directory holds one version, pinned by one lock. The version's
 and Garak's byte copies against the lock, and `--write` refreshes one. Each copy
 carries the lock, which names the version and every digest, so it references
 the contract without another producer file. Garak's detector implements
-`tool-call-condition-v2`. A `scenario-handoff-v6` handoff carries no
+`tool-call-condition-v1`. A `scenario-handoff-v1` handoff carries no
 condition-version field: the evaluator states the version it implements by the
 kit it mirrors and the vectors it reproduces. The producer never emits
 `blocked`; the capture sets it. The Stage 5 condition checks do not reason about
@@ -113,7 +113,7 @@ the frozen content, immediate pre-dispatch dependency checks, command/reply
 receipts, and separate backend/state observations. A command-level detector
 does not establish a completed backend effect.
 
-The current workflow is producer `generate` → `scenario-handoff-v6` →
+The current workflow is producer `generate` → `scenario-handoff-v1` →
 consumer `generate` → consumer `check`.
 
 ## Taxonomy obligation planning (observational Phase 1)
@@ -130,7 +130,7 @@ the plan; it is not part of the pure planner.
 
 The input carries two distinct mapping authorities: `mapping_pins.sssom` is the
 taxonomy-context `mapping_set_digest`; `mapping_pins.obligation_edges` is the
-`obligation-mapping-bundle-v2` digest over the complete typed LLM-to-pattern
+`obligation-mapping-bundle-v1` digest over the complete typed LLM-to-pattern
 and SSSOM rows. Both pins are required.
 
 The planner owns risk-to-pattern traversal, capability scope, qualification,
@@ -786,7 +786,7 @@ scenarios are siblings when they are on the same control action and their
 ICAs cite the same process-model context (the variable values of one
 context-table row; an ICA that cites none has no sibling). For every ordered
 pair of siblings (A, B), B's bound `tool_call_condition` is evaluated with the
-`tool-call-condition-v2` reference evaluator on the one call A's safe outcome
+`tool-call-condition-v1` reference evaluator on the one call A's safe outcome
 states the agent makes, of its `operation_name`. The safe behavior may be to
 call that operation or not to call it; the safe outcome's optional
 `call_made` says which (`true` or `false`, on a `command_attempt` outcome
@@ -977,8 +977,8 @@ and Stage 5 cites records only from them; a capture that holds only part of
 a collection would make the entitled set too small.
 
 The bound status detail says when a selection was replaced. Every result
-stays within `tool-call-condition-v2`; the condition still flags a call the
-target refuses, since v2 carries no call outcome.
+stays within `tool-call-condition-v1`; the condition still flags a call the
+target refuses, since the contract carries no call outcome.
 Runtime-readiness
 concerns (chat surfaces, clocks, observers, locators, credentials, and endpoint
 details) belong to the consumer. A caller-requested environment basis
@@ -1243,7 +1243,7 @@ renders the context-table row its ICA cites (resolved by the row's ID, with each
 variable's description, value and evidence references) and asks that a selected
 record agree with it; an ICA that cites no row gets no row section. The run
 writes each candidate's hint, the rule that chose it, and the cited row's ID to
-`condition-families.yaml` (`condition-families-v2`).
+`condition-families.yaml` (`condition-families-v1`).
 
 ### Intent-type INCORRECT ICAs are routed before Stage 5
 

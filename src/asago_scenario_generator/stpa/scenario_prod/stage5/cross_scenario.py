@@ -6,7 +6,7 @@ row of the action's context table). Every scenario of the run is a
 candidate, functional tests (adversary kind ``none``) included: a functional
 test's condition is run too, and its safe outcome states what is safe. For
 every ordered pair of siblings (A, B), B's bound ``tool_call_condition`` is
-evaluated with the ``tool-call-condition-v2`` reference evaluator on the call
+evaluated with the ``tool-call-condition-v1`` reference evaluator on the call
 A's safe outcome states the agent makes. When it is ``detected``, the pair
 asks the judge for opposite verdicts on the same behavior: what A states as
 safe is B's failure.
@@ -78,7 +78,7 @@ from typing import Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, StrictStr
 
-from asago_handoff import DETECTED, INCONCLUSIVE, evaluate_condition_v2
+from asago_handoff import DETECTED, INCONCLUSIVE, evaluate_condition
 
 from asago_scenario_generator.stpa.models.control_structure import (
     ControlStructure,
@@ -331,7 +331,7 @@ def check_cross_scenario_conflicts(
             continue
         evaluated += 1
         # complete=False: the safe outcome does not exclude other calls.
-        result, result_reason, _ = evaluate_condition_v2(
+        result, result_reason, _ = evaluate_condition(
             condition.model_dump(mode="json"), [pair.call], False
         )
         if result not in decided:
@@ -383,9 +383,7 @@ def _satisfies_own_condition(
     if outcome is None or condition is None:
         return False
     call = {"name": outcome.operation_name, "arguments": dict(arguments)}
-    result, _, _ = evaluate_condition_v2(
-        condition.model_dump(mode="json"), [call], False
-    )
+    result, _, _ = evaluate_condition(condition.model_dump(mode="json"), [call], False)
     return result == DETECTED
 
 

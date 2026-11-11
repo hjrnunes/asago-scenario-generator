@@ -332,7 +332,7 @@ def test_a_decision_still_contradictory_after_the_retry_stays_actionable(
     assert entry.reason.startswith("Not classified by the model after one retry")
     assert outcome.record.status == "partial"
     persisted = yaml.safe_load((tmp_path / ARTIFACT_FILENAME).read_text())
-    assert persisted["schema_version"] == "risk-actionability-v2"
+    assert persisted["schema_version"] == "risk-actionability-v1"
     assert persisted["entries"][0]["source"] == "fallback"
     assert "system_action" not in persisted["entries"][0]
     assert RiskActionabilityRecord.model_validate(persisted) == outcome.record
@@ -412,7 +412,7 @@ def test_a_current_record_accepts_model_and_fallback_entries() -> None:
         )
     )
 
-    assert record.schema_version == "risk-actionability-v2"
+    assert record.schema_version == "risk-actionability-v1"
 
 
 def test_the_recorded_run_fixture_loads_as_a_current_record() -> None:
@@ -423,7 +423,7 @@ def test_the_recorded_run_fixture_loads_as_a_current_record() -> None:
 
     loaded = RiskActionabilityRecord.model_validate(yaml.safe_load(fixture.read_text()))
 
-    assert loaded.schema_version == "risk-actionability-v2"
+    assert loaded.schema_version == "risk-actionability-v1"
 
 
 def test_no_cards_makes_no_call(tmp_path: Path) -> None:

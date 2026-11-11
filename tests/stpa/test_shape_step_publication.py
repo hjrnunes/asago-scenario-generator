@@ -1,4 +1,4 @@
-"""A run publishes scenario-handoff-v6 with the shape the shape step produced.
+"""A run publishes scenario-handoff-v1 with the shape the shape step produced.
 
 The offline end-to-end tests drive ``run_sp3`` with a fake client: Stage 5
 replies first, then one shape reply per adversarial scenario. The counts
@@ -19,8 +19,8 @@ from asago_scenario_generator.stpa.models.attack_shape import (
     ShapeSource,
 )
 from asago_scenario_generator.stpa.scenario_prod.handoff import (
-    HANDOFF_SCHEMA_VERSION_V6,
-    ScenarioHandoffV6,
+    HANDOFF_SCHEMA_VERSION,
+    ScenarioHandoff,
     handoff_ownership_violations,
     verify_handoff_digest,
 )
@@ -98,11 +98,11 @@ def publish(
     return result, client
 
 
-def assert_valid(document: dict) -> ScenarioHandoffV6:
+def assert_valid(document: dict) -> ScenarioHandoff:
     errors = list(Draft202012Validator(SCHEMA).iter_errors(document))
     assert errors == []
     assert handoff_ownership_violations(document) == []
-    handoff = ScenarioHandoffV6.model_validate(document)
+    handoff = ScenarioHandoff.model_validate(document)
     verify_handoff_digest(handoff)
     return handoff
 
@@ -113,7 +113,7 @@ def test_an_adversarial_run_publishes_the_validated_shape(
     result, client = publish([_normal_semantics_payload()], tmp_path)
 
     document = _published_handoff(tmp_path)
-    assert document["schema_version"] == HANDOFF_SCHEMA_VERSION_V6
+    assert document["schema_version"] == HANDOFF_SCHEMA_VERSION
     handoff = assert_valid(document)
     assert handoff.attack_shape is not None
     assert handoff.attack_shape.source is ShapeSource.STAGE5_VALIDATED
@@ -173,7 +173,7 @@ def test_a_functional_scenario_publishes_a_null_shape_and_costs_no_request(
     result, client = publish([_functional_payload()], tmp_path)
 
     document = _published_handoff(tmp_path)
-    assert document["schema_version"] == HANDOFF_SCHEMA_VERSION_V6
+    assert document["schema_version"] == HANDOFF_SCHEMA_VERSION
     assert document["kind"] == "functional"
     assert "attack_shape" in document and document["attack_shape"] is None
     assert_valid(document)

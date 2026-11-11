@@ -169,7 +169,7 @@ class ContractSpec:
 
         The name's prefix is not required to equal the contract's name: an
         installed kit may keep a historical prefix such as
-        ``artifact-runtime-contract-v3`` for the ``runtime-contract`` contract.
+        ``artifact-runtime-contract-v1`` for the ``runtime-contract`` contract.
         """
 
         return parse_version_name(self.version).version

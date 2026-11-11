@@ -516,7 +516,7 @@ class ProjectionIssue(ProjectionModel):
 class RejectedProjectionCandidate(ProjectionModel):
     """One concrete or aggregate projection rejection retained for planning."""
 
-    candidate_id: str = Field(pattern=r"^cand:v2:[0-9a-f]{32}$")
+    candidate_id: str = Field(pattern=r"^cand:v1:[0-9a-f]{32}$")
     pattern_id: str = Field(min_length=1)
     canonical_ingress: EntryPointResourceReference | None = None
     resource_bindings: tuple[ResourceBinding, ...] = ()
@@ -554,9 +554,9 @@ class ProjectionBatch(ProjectionModel):
 
 
 class ProjectedCandidate(ProjectionModel):
-    """Sole candidate-v2 contract intended for future generation stages."""
+    """Sole candidate-v1 contract intended for future generation stages."""
 
-    candidate_id: str = Field(pattern=r"^cand:v2:[0-9a-f]{32}$")
+    candidate_id: str = Field(pattern=r"^cand:v1:[0-9a-f]{32}$")
     pattern_id: str
     chain_id: str
     chain_semantic_digest: Digest
@@ -637,8 +637,8 @@ def _verify_canonical_ingress(
 def _verify_candidate_identity(
     candidate_id: str, pattern_id: str, projection: ProjectionSnapshot
 ) -> None:
-    if candidate_id != _candidate_v2_id(pattern_id, projection):
-        raise ValueError("candidate_id does not match candidate-v2 identity inputs")
+    if candidate_id != _candidate_id(pattern_id, projection):
+        raise ValueError("candidate_id does not match candidate-v1 identity inputs")
 
 
 def _expected_precondition_key_map(
@@ -821,7 +821,7 @@ def _evaluate_precondition(
     )
 
 
-def _candidate_v2_id(pattern_id: str, projection: ProjectionSnapshot) -> str:
+def _candidate_id(pattern_id: str, projection: ProjectionSnapshot) -> str:
     """Compute the stable candidate identity from projection content."""
     chain = projection.source_chain
     bindings = sorted(
@@ -843,10 +843,10 @@ def _candidate_v2_id(pattern_id: str, projection: ProjectionSnapshot) -> str:
         "canonical_ingress": ingress,
         "bindings": bindings,
     }
-    return f"cand:v2:{compute_framed_digest('asago-scenario-generator:candidate:v2', identity)[:32]}"
+    return f"cand:v1:{compute_framed_digest('asago-scenario-generator:candidate:v1', identity)[:32]}"
 
 
-def _rejected_candidate_v2_id(
+def _rejected_candidate_id(
     pattern_id: str,
     issue: ProjectionIssue,
     resource_bindings: tuple[ResourceBinding, ...] = (),
@@ -857,7 +857,7 @@ def _rejected_candidate_v2_id(
         key=lambda item: (item["slot_id"], canonical_json(item["resource_ref"])),
     )
     return (
-        "cand:v2:"
+        "cand:v1:"
         + compute_framed_digest(
             "asago-scenario-generator:candidate-infeasible:v1",
             {

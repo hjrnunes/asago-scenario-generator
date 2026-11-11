@@ -139,7 +139,7 @@ def test_entry_point_resource_id_is_the_canonical_identifier(
 def test_digest_uses_domain_separator() -> None:
     """Domain-separated digests differ from a bare SHA-256 of the payload."""
     payload = {"pattern_id": "AP-T1-01"}
-    digest = compute_framed_digest("asago-scenario-generator:candidate:v2", payload)
+    digest = compute_framed_digest("asago-scenario-generator:candidate:v1", payload)
     bare = hashlib.sha256(canonical_json_bytes(payload)).hexdigest()
     assert digest != bare
     assert len(digest) == 64

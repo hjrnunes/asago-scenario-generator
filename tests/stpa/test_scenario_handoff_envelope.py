@@ -1,6 +1,6 @@
-"""The scenario-handoff-v6 envelope and its required ``attack_shape`` key.
+"""The scenario-handoff-v1 envelope and its required ``attack_shape`` key.
 
-The producer emits v6 through its one handoff model. These tests pin the
+The producer emits the handoff through its one handoff model. These tests pin the
 constants, the pairing of ``kind`` with the shape (R7), the digest domain,
 null-preserving serialization, and the JSON schema a schema-only reader uses.
 """
@@ -20,9 +20,9 @@ from asago_scenario_generator.stpa.models import attack_shape as shape_module
 from asago_scenario_generator.stpa.models.attack_shape import ShapeSource
 from asago_scenario_generator.stpa.scenario_prod.handoff import (
     _FORBIDDEN_KEYS,
-    HANDOFF_DIGEST_DOMAIN_V6,
-    HANDOFF_SCHEMA_VERSION_V6,
-    ScenarioHandoffV6,
+    HANDOFF_DIGEST_DOMAIN,
+    HANDOFF_SCHEMA_VERSION,
+    ScenarioHandoff,
     finalize_handoff,
     handoff_ownership_violations,
     handoff_payload_digest,
@@ -33,7 +33,7 @@ from asago_scenario_generator.stpa.scenario_prod.handoff_schema import handoff_s
 
 KIT_VALID = (
     Path(__file__).resolve().parents[2]
-    / "data/contracts/scenario-handoff/scenario-handoff-v6/cases/valid"
+    / "data/contracts/scenario-handoff/scenario-handoff-v1/cases/valid"
 )
 OTHER_VERSION_CODES = [
     "schema_violation:schema_version",
@@ -91,9 +91,9 @@ def _functional(shape: dict[str, Any] | None = None) -> dict[str, Any]:
     return _kit_payload("functional-not-called", shape)
 
 
-def test_constants_name_v6() -> None:
-    assert HANDOFF_SCHEMA_VERSION_V6 == "scenario-handoff-v6"
-    assert HANDOFF_DIGEST_DOMAIN_V6 == "scenario-handoff-v6"
+def test_constants_name_v1() -> None:
+    assert HANDOFF_SCHEMA_VERSION == "scenario-handoff-v1"
+    assert HANDOFF_DIGEST_DOMAIN == "scenario-handoff-v1"
 
 
 @pytest.mark.parametrize("version", ["scenario-handoff-v9", None], ids=str)
@@ -126,7 +126,7 @@ def test_r7_pairs_the_scenario_kind_with_the_shape(
     payload: dict[str, Any], label: str
 ) -> None:
     with pytest.raises(ValueError, match=r"\bR7\b"):
-        ScenarioHandoffV6.model_validate(payload)
+        ScenarioHandoff.model_validate(payload)
     assert handoff_schema_violations(payload) == ["schema_violation:<root>"], label
 
 
@@ -151,8 +151,8 @@ def test_a_bound_status_requires_a_tool_call_condition() -> None:
 
 
 def test_a_finalized_handoff_keeps_null_shape_values_in_the_digested_payload() -> None:
-    adversarial = finalize_handoff(ScenarioHandoffV6.model_validate(_adversarial()))
-    functional = finalize_handoff(ScenarioHandoffV6.model_validate(_functional()))
+    adversarial = finalize_handoff(ScenarioHandoff.model_validate(_adversarial()))
+    functional = finalize_handoff(ScenarioHandoff.model_validate(_functional()))
 
     payload = adversarial.model_dump(mode="json", exclude_none=True, by_alias=True)
     assert payload["attack_shape"] == DIRECT_SHAPE
@@ -160,29 +160,29 @@ def test_a_finalized_handoff_keeps_null_shape_values_in_the_digested_payload() -
 
 
 def test_the_digest_uses_its_own_domain_and_verifies() -> None:
-    handoff = finalize_handoff(ScenarioHandoffV6.model_validate(_adversarial()))
+    handoff = finalize_handoff(ScenarioHandoff.model_validate(_adversarial()))
     payload = handoff.model_dump(mode="json", exclude_none=True, by_alias=True)
     payload.pop("content_digest")
 
     assert handoff.content_digest == compute_framed_digest(
-        HANDOFF_DIGEST_DOMAIN_V6, payload
+        HANDOFF_DIGEST_DOMAIN, payload
     )
     assert handoff.content_digest == handoff_payload_digest(payload)
     verify_handoff_digest(handoff)
 
 
 def test_a_finalized_payload_round_trips_through_the_model() -> None:
-    handoff = finalize_handoff(ScenarioHandoffV6.model_validate(_adversarial()))
+    handoff = finalize_handoff(ScenarioHandoff.model_validate(_adversarial()))
     dumped = handoff.model_dump(mode="json", exclude_none=True, by_alias=True)
 
-    again = ScenarioHandoffV6.model_validate(dumped)
+    again = ScenarioHandoff.model_validate(dumped)
 
     assert again == handoff
     verify_handoff_digest(again)
 
 
 def test_a_tampered_shape_fails_digest_verification() -> None:
-    handoff = finalize_handoff(ScenarioHandoffV6.model_validate(_adversarial()))
+    handoff = finalize_handoff(ScenarioHandoff.model_validate(_adversarial()))
     tampered = handoff.model_copy(
         update={
             "attack_shape": handoff.attack_shape.model_copy(
@@ -234,7 +234,7 @@ def _schema_keys(node: Any) -> set[str]:
 
 
 def test_no_schema_key_name_is_forbidden_by_the_ownership_scan() -> None:
-    keys = _schema_keys(ScenarioHandoffV6.model_json_schema())
+    keys = _schema_keys(ScenarioHandoff.model_json_schema())
 
     assert {"attack_shape", "channel", "turn_plan", "carrier_operation"} <= keys
     assert not {key.lower() for key in keys} & _FORBIDDEN_KEYS
@@ -256,13 +256,11 @@ def _shape_field_names() -> set[str]:
 
 
 def test_the_schema_requires_the_shape_and_carries_its_pairings() -> None:
-    schema = ScenarioHandoffV6.model_json_schema()
+    schema = ScenarioHandoff.model_json_schema()
 
     assert schema["title"] == "ScenarioHandoff"
-    assert schema["properties"]["schema_version"]["const"] == HANDOFF_SCHEMA_VERSION_V6
-    assert (
-        schema["properties"]["schema_version"]["default"] == HANDOFF_SCHEMA_VERSION_V6
-    )
+    assert schema["properties"]["schema_version"]["const"] == HANDOFF_SCHEMA_VERSION
+    assert schema["properties"]["schema_version"]["default"] == HANDOFF_SCHEMA_VERSION
     assert "attack_shape" in schema["required"]
     assert schema["additionalProperties"] is False
     assert {"if", "then", "else"}.isdisjoint(schema)
@@ -280,7 +278,7 @@ def _schema_errors(payload: dict[str, Any]) -> list[Any]:
 
 
 def _finalized(payload: dict[str, Any]) -> dict[str, Any]:
-    return finalize_handoff(ScenarioHandoffV6.model_validate(payload)).model_dump(
+    return finalize_handoff(ScenarioHandoff.model_validate(payload)).model_dump(
         mode="json", exclude_none=True, by_alias=True
     )
 
@@ -298,8 +296,8 @@ def test_the_json_schema_accepts_valid_payloads_and_enforces_the_pairings() -> N
     assert _schema_errors(missing_shape)
 
 
-def test_the_json_schema_accepts_the_party_relation_v6_publishes() -> None:
-    """v6 publishes ``party_relation.controlling_party``; the schema must accept it."""
+def test_the_json_schema_accepts_the_party_relation_v1_publishes() -> None:
+    """The handoff publishes ``party_relation.controlling_party``; the schema must accept it."""
 
     document = _finalized(_adversarial(INDIRECT_SHAPE))
 

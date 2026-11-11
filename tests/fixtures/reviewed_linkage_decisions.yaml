@@ -140,7 +140,7 @@
     it under the injected instruction.'' The data is assembled in the agent''s internal working
     context before any endpoint delivery — this is agent-internal state, not an entry-point
     ingress, tool, integration, or output surface. The agent_state observation kind and agent_internal
-    slot kind truthfully represent this surface. Candidate-v2 resolves it as the intrinsic
+    slot kind truthfully represent this surface. Candidate-v1 resolves it as the intrinsic
     singleton working state of a profile with an active reasoning zone, without fabricating
     a tool or integration identity.'
 - pattern_id: AP-T5-02

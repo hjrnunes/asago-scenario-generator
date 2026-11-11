@@ -45,7 +45,7 @@ from asago_scenario_generator.stpa.scenario_prod.tool_call_binding import (
     bind_tool_call_condition,
 )
 from asago_scenario_generator.stpa.tool_call_condition_eval import (
-    evaluate_condition_v2,
+    evaluate_condition,
 )
 from asago_scenario_generator.stpa.scenario_prod.stage5.generate import (
     generate_bdi_for_context,
@@ -214,11 +214,11 @@ def test_a_record_key_selection_binds_every_order_the_subject_does_not_own() -> 
 
     assert comparisons == [not_in("lookup_order", "order_id", ["ORD-101", "ORD-102"])]
     # The other customer's record the selection did not name now counts too.
-    condition_v2 = {"comparisons": comparisons}
+    comparison_condition = {"comparisons": comparisons}
     other = [{"name": "lookup_order", "arguments": {"order_id": "ORD-301"}}]
     own = [{"name": "lookup_order", "arguments": {"order_id": "ORD-102"}}]
-    assert evaluate_condition_v2(condition_v2, other, True)[0] == "detected"
-    assert evaluate_condition_v2(condition_v2, own, True)[0] == "not_detected"
+    assert evaluate_condition(comparison_condition, other, True)[0] == "detected"
+    assert evaluate_condition(comparison_condition, own, True)[0] == "not_detected"
 
 
 def test_the_widened_binding_says_so_in_its_detail() -> None:
@@ -915,7 +915,7 @@ def test_an_order_key_compared_with_the_customer_keeps_its_pin(
         eq("lookup_order", "order_id", other),
     ]
     own_call = [{"name": "lookup_order", "arguments": {"order_id": owned}}]
-    assert evaluate_condition_v2(bound_condition, own_call, True)[0] == "not_detected"
+    assert evaluate_condition(bound_condition, own_call, True)[0] == "not_detected"
 
 
 @ID_SETS
@@ -949,8 +949,8 @@ def test_an_order_key_with_an_owner_comparison_binds_the_unowned_keys(
     ]
     own_call = [{"name": "lookup_order", "arguments": {"order_id": owned}}]
     other_call = [{"name": "lookup_order", "arguments": {"order_id": other}}]
-    assert evaluate_condition_v2(bound_condition, own_call, True)[0] == "not_detected"
-    assert evaluate_condition_v2(bound_condition, other_call, True)[0] == "detected"
+    assert evaluate_condition(bound_condition, own_call, True)[0] == "not_detected"
+    assert evaluate_condition(bound_condition, other_call, True)[0] == "detected"
 
 
 # Observations that do not settle the entitled set.
@@ -1177,7 +1177,7 @@ def test_a_read_value_that_is_also_a_record_key_keeps_the_pin() -> None:
         eq("lookup_order", "order_id", "2002"),
     ]
     owned = [{"name": "lookup_order", "arguments": {"order_id": "2001"}}]
-    assert evaluate_condition_v2(bound_condition, owned, True)[0] == "not_detected"
+    assert evaluate_condition(bound_condition, owned, True)[0] == "not_detected"
 
 
 def test_overlapping_ids_with_an_owner_comparison_bind_the_unowned_keys() -> None:
@@ -1202,12 +1202,12 @@ def test_overlapping_ids_with_an_owner_comparison_bind_the_unowned_keys() -> Non
     ]
     owned = [{"name": "lookup_order", "arguments": {"order_id": "2001"}}]
     other = [{"name": "lookup_order", "arguments": {"order_id": "2002"}}]
-    assert evaluate_condition_v2(bound_condition, owned, True)[0] == "not_detected"
-    assert evaluate_condition_v2(bound_condition, other, True)[0] == "detected"
+    assert evaluate_condition(bound_condition, owned, True)[0] == "not_detected"
+    assert evaluate_condition(bound_condition, other, True)[0] == "detected"
 
 
-# An argument compared with a field of the selected record has no v2 form
-# over every record, and a selection on a second operation leaves the
+# An argument compared with a field of the selected record has no condition
+# form over every record, and a selection on a second operation leaves the
 # condition about more than one call: the whole binding is kept.
 
 
@@ -1436,7 +1436,7 @@ def test_a_collection_where_the_subject_owns_records_is_not_its_own() -> None:
         eq("lookup_order", "order_id", "2002"),
     ]
     owned = [{"name": "lookup_order", "arguments": {"order_id": "2001"}}]
-    assert evaluate_condition_v2(bound_condition, owned, True)[0] == "not_detected"
+    assert evaluate_condition(bound_condition, owned, True)[0] == "not_detected"
 
 
 def test_another_record_naming_the_subject_disqualifies_its_collection() -> None:

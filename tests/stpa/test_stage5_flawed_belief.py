@@ -58,7 +58,7 @@ from tests.helpers.normal_authoring_wire import (
 from tests.stpa.sp1_helpers import MockLLMClient
 from tests.stpa.test_and_or_tree import nodes, tree_of
 from tests.stpa.test_narration import adversarial
-from tests.stpa.test_scenario_handoff_v6 import fields_of
+from tests.stpa.test_scenario_handoff_v1 import fields_of
 
 BELIEF = "The payment batch was already approved by the account holder."
 CA_BELIEF = "The account holder asked for this exact batch of payments."

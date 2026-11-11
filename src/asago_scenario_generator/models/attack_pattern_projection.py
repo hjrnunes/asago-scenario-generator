@@ -65,7 +65,7 @@ class AgentInternalResourceReference(ContractModel):
     agent's own working context — neither an external entry point, tool,
     integration, nor trust boundary.  It is the intrinsic singleton working
     state of the profiled agent, so it requires no adapter inventory identity.
-    Candidate-v2 resolves exactly this typed singleton rather than laundering
+    Candidate-v1 resolves exactly this typed singleton rather than laundering
     it through an unrelated tool or integration binding.
     """
 

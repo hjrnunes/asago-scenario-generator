@@ -1,11 +1,11 @@
-"""Validate and evaluate a tool-call condition as tool-call-condition-v2 states it.
+"""Validate and evaluate a tool-call condition as tool-call-condition-v1 states it.
 
-``contracts/tool-call-condition/tool-call-condition-v2/README.md`` is the shared
+``contracts/tool-call-condition/tool-call-condition-v1/README.md`` is the shared
 semantics; the producer owns it. This module is the one evaluator the producer,
 the consumer and the orchestrator use, and it follows the producer's
 implementation, which the vectors pin. A reader that only checks a condition
 calls :func:`validate_condition` first; a reader that evaluates one calls
-:func:`evaluate_condition_v2` and gets a :class:`ConditionEvaluation`.
+:func:`evaluate_condition` and gets a :class:`ConditionEvaluation`.
 
 The producer's behaviour wins where the two former evaluators differed. Each
 difference is a named case in ``tests/test_condition_eval.py``:
@@ -322,8 +322,8 @@ def _assignment(comparisons, calls, complete) -> tuple[bool | None, list[int]]:
     return (None if unknown or not complete else False), []
 
 
-def evaluate_condition_v2(condition, calls, complete) -> ConditionEvaluation:
-    """Evaluate a valid condition under tool-call-condition-v2."""
+def evaluate_condition(condition, calls, complete) -> ConditionEvaluation:
+    """Evaluate a valid condition under tool-call-condition-v1."""
 
     comparisons = condition["comparisons"]
     parts = [
@@ -350,6 +350,6 @@ __all__ = [
     "INCONCLUSIVE",
     "NOT_DETECTED",
     "ConditionEvaluation",
-    "evaluate_condition_v2",
+    "evaluate_condition",
     "validate_condition",
 ]

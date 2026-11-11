@@ -46,7 +46,7 @@ def yaml_text(
             contract that requires explicit ``null`` values.
         by_alias: Dump serialization aliases instead of field names. Pass
             ``True`` for a document whose published name differs from the
-            model-facing one, such as scenario-handoff-v6.
+            model-facing one, such as scenario-handoff-v1.
         post_process: Optional callable that receives the dumped dict
             and returns a (possibly modified) dict before YAML
             serialization.  Used by callers to inject companion display

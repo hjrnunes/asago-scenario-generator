@@ -93,7 +93,7 @@ def test_indivisible_requests_are_left_whole_for_provider_preflight() -> None:
 
     _fill(adapter, briefs, routes)
 
-    ids = tuple(route.obligation_id for route in routes)
+    ids = tuple(sorted(route.obligation_id for route in routes))
     assert [part for part in adapter.parts if part[0] == slot.slot_id] == [
         (slot.slot_id, ids)
     ]

@@ -47,7 +47,7 @@ Compact obligation questions:
     label: broad_category_expansion
     meaning: The risk reached this pattern through a broader taxonomy category. Shared
       category membership does not establish risk alignment.
-  obligation_handle: ob:v1:1a8c8860e0b497e57e052ca84ab3c4487ce90d777fbc4f35f90715fec34c37e0
+  obligation_handle: ob:v1:0117f3ec13c4e2b546efc871d3f819ff96ffcea5be7903fb3a3cb9df798ba266
   reviewed_risk:
     consequence: null
     description: A reviewed risk used by planner tests.

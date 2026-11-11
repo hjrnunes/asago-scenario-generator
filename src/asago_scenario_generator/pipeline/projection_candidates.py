@@ -25,7 +25,7 @@ from asago_scenario_generator.pipeline.projection_contracts import (
     CapabilityFactSnapshot,
     PreconditionEvaluationResult,
     ProjectedCandidate,
-    _candidate_v2_id,
+    _candidate_id,
 )
 from asago_scenario_generator.pipeline.projection_relations import (
     _source_influence_relation,
@@ -140,7 +140,7 @@ def _build_candidate_from_combination(
     if issue is not None:
         return None, issue
     candidate = ProjectedCandidate(
-        candidate_id=_candidate_v2_id(pattern_id, projection),
+        candidate_id=_candidate_id(pattern_id, projection),
         pattern_id=pattern_id,
         chain_id=chain.chain_id,
         chain_semantic_digest=chain.semantic_digest,

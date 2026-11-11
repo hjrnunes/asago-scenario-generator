@@ -1,4 +1,4 @@
-schema_version: scenario-handoff-v6
+schema_version: scenario-handoff-v1
 scenario_id: SCN-003
 scenario_version: 1
 kind: adversarial
@@ -193,7 +193,7 @@ sourced_facts:
   authority: derived_proposed_constraint
 - statement: The unsafe outcome condition is expressed semantically; the executable
     check is derived downstream.
-  source: producer handoff contract scenario-handoff-v6
+  source: producer handoff contract scenario-handoff-v1
   authority: producer_contract
 assumptions_and_unknowns:
 - The execution-time target state is captured fresh by the consumer; no producer-supplied
@@ -224,7 +224,7 @@ observation:
     supported_criteria:
     - observation_1
     unsupported_criteria: []
-content_digest: 33142738445c3927a5f5900818703ae546391c0c3b6da2ff8c5cf8ba8c75b8cd
+content_digest: d9479de62b3db3b2898e410ad1e51fdadba2a8b0201d4c3063e70d93cb60b336
 discriminating_condition:
   statement: The order ID used in a refund or payment operation belongs to a customer
     other than the authenticated session customer.
@@ -337,8 +337,8 @@ worst_case_threat: Incorrect financial transactions or unauthorized handling of 
   financial records, leading to monetary loss or regulatory non-compliance.
 contract:
   id: scenario-handoff
-  version: scenario-handoff-v6
-  spec_digest: sha256:a2f3bfe6fa4e3ee926bada66bc420d55a2ea9989a2dd62981acb705426c2f79a
+  version: scenario-handoff-v1
+  spec_digest: sha256:c7fe26b7e19fa5bf9883c9ebdbb6c7028e1aa11f109ae98a47a0b17903e83f48
   requires: []
   provenance:
     writer: asago_scenario_generator.stpa.scenario_prod.handoff

@@ -35,7 +35,7 @@ from asago_scenario_generator.stpa.models.control_structure import (
 )
 
 
-_MANIFEST_SCHEMA = "stpa-synthesis-manifest-v2"
+_MANIFEST_SCHEMA = "stpa-synthesis-manifest-v1"
 
 
 # The domain also frames every artifact digest (``_manifest_artifact_identity``),

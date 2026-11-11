@@ -23,14 +23,14 @@ from typing import Any
 
 from .envelope import ContractSpec, SpecSet, UnsupportedVersionError, load_specs
 
-HANDOFF_SCHEMA_VERSION_V6 = "scenario-handoff-v6"
+HANDOFF_SCHEMA_VERSION = "scenario-handoff-v1"
 #: The version's directory, as the contract layout names it.
-KIT_V6 = HANDOFF_SCHEMA_VERSION_V6
+HANDOFF_KIT = HANDOFF_SCHEMA_VERSION
 CASES_NAME = "cases"
 OWNERSHIP_RULES_NAME = "ownership-rules.json"
 CONTRACT = "scenario-handoff"
 #: The published version, the one a writer publishes.
-VERSION = HANDOFF_SCHEMA_VERSION_V6
+VERSION = HANDOFF_SCHEMA_VERSION
 #: The installed spec root: ``<data>/<contract>/<version>/spec.json``.
 DATA_DIR = Path(__file__).resolve().parent / "data"
 CONTRACT_DIR = DATA_DIR / CONTRACT
@@ -142,8 +142,8 @@ __all__ = [
     "DATA_DIR",
     "Contract",
     "ContractError",
-    "HANDOFF_SCHEMA_VERSION_V6",
-    "KIT_V6",
+    "HANDOFF_SCHEMA_VERSION",
+    "HANDOFF_KIT",
     "OWNERSHIP_RULES_NAME",
     "VERSION",
     "installed_specs",

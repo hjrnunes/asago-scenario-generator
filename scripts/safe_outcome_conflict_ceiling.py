@@ -72,7 +72,7 @@ from asago_scenario_generator.stpa.scenario_prod.stage5.cross_scenario import (
 )
 from asago_scenario_generator.stpa.tool_call_condition import ToolCallCondition
 from asago_scenario_generator.stpa.tool_call_condition_eval import (
-    evaluate_condition_v2,
+    evaluate_condition,
 )
 
 _OTHER = "\x00value-equal-to-no-literal"
@@ -207,7 +207,7 @@ def _outcomes(
     outcomes = set()
     for choice in choices[:_MAX_ASSIGNMENTS]:
         call = {"name": operation, "arguments": dict(zip(names, choice))}
-        outcomes.add(evaluate_condition_v2(condition, [call], complete)[0])
+        outcomes.add(evaluate_condition(condition, [call], complete)[0])
     return outcomes
 
 
@@ -268,8 +268,8 @@ def measure_pair(
             {comparison["kind"] for comparison in condition["comparisons"]}
         ),
         "arguments_read": sorted(candidates),
-        "today": evaluate_condition_v2(condition, [call], False)[0],
-        "complete": evaluate_condition_v2(condition, [call], True)[0],
+        "today": evaluate_condition(condition, [call], False)[0],
+        "complete": evaluate_condition(condition, [call], True)[0],
         "argument_values": _summarize(
             _outcomes(condition, operation, candidates, False)
         ),
@@ -277,10 +277,10 @@ def measure_pair(
             _outcomes(condition, operation, candidates, True)
         ),
         "stated_values": stated,
-        "stated_values_outcome": evaluate_condition_v2(condition, [stated_call], False)[
+        "stated_values_outcome": evaluate_condition(condition, [stated_call], False)[
             0
         ],
-        "stated_values_complete_outcome": evaluate_condition_v2(
+        "stated_values_complete_outcome": evaluate_condition(
             condition, [stated_call], True
         )[0],
     }

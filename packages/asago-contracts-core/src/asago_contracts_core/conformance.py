@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from .companion import feature_violations
-from .contract import CASES_NAME, KIT_V6, ContractError, load_contract
+from .contract import CASES_NAME, HANDOFF_KIT, ContractError, load_contract
 from .violation import Violation
 from .violations import validate_handoff
 
@@ -77,7 +77,7 @@ def _names(violation_code: str, rule_code: str) -> bool:
 
 
 def load_conformance_cases(
-    contract_dir: Path, version: str = KIT_V6
+    contract_dir: Path, version: str = HANDOFF_KIT
 ) -> list[ConformanceCase]:
     """Read one kit's manifest and every document it names."""
 
@@ -95,7 +95,7 @@ def load_conformance_cases(
 
 
 def run_conformance(
-    contract_dir: Path, version: str = KIT_V6
+    contract_dir: Path, version: str = HANDOFF_KIT
 ) -> list[ConformanceResult]:
     """Run every case one kit's manifest names against the shared rules."""
 

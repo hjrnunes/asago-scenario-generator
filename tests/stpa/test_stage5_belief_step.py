@@ -25,7 +25,7 @@ from asago_scenario_generator.stpa.infra.provider_record import (
 )
 from asago_scenario_generator.stpa.models.causal_factor import ProcessModelVariable
 from asago_scenario_generator.stpa.scenario_prod.handoff import (
-    ScenarioHandoffV6,
+    ScenarioHandoff,
     handoff_ownership_violations,
     verify_handoff_digest,
 )
@@ -66,7 +66,7 @@ from tests.helpers.sp3_run import _make_ets
 from tests.helpers.stpa_builders import make_cs, make_loss_analysis
 from tests.stpa.sp1_helpers import MockLLMClient
 from tests.stpa.test_and_or_tree import nodes, tree_of
-from tests.stpa.test_scenario_handoff_v6 import SCHEMA
+from tests.stpa.test_scenario_handoff_v1 import SCHEMA
 
 BELIEF = "The payment batch was already approved by the account holder."
 CA_BELIEF = "The account holder asked for this exact batch of payments."
@@ -627,7 +627,7 @@ def test_a_run_publishes_the_beliefs_through_to_the_handoff(
         document = _published_handoff(run_dir, scenario_id)
         assert list(Draft202012Validator(SCHEMA).iter_errors(document)) == []
         assert handoff_ownership_violations(document) == []
-        verify_handoff_digest(ScenarioHandoffV6.model_validate(document))
+        verify_handoff_digest(ScenarioHandoff.model_validate(document))
         for factor in document["causal_factors"]:
             assert factor["process_model_belief"] in (BELIEF, CA_BELIEF)
             assert factor["process_model_variable"]["description"]

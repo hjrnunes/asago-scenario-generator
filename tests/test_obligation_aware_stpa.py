@@ -55,6 +55,7 @@ from asago_scenario_generator.stpa.obligation_aware.prompts import (
     project_revision_context,
     audit_prompt_contract,
 )
+from asago_scenario_generator.stpa.obligation_aware.briefs import obligation_order_key
 from asago_scenario_generator.stpa.obligation_aware.provider import (
     ObligationAwareLLMAdapter,
 )
@@ -147,7 +148,7 @@ def test_neutral_briefs_and_batches_are_canonical_and_non_prescriptive() -> None
 
     batches = create_obligation_batches(tuple(reversed(briefs)), max_batch_size=1)
     assert [[brief.obligation_id for brief in batch] for batch in batches] == [
-        [brief.obligation_id] for brief in briefs
+        [brief.obligation_id] for brief in sorted(briefs, key=obligation_order_key)
     ]
 
 

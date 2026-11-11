@@ -725,7 +725,7 @@ def test_sidecar_records_hint_capped_families_and_honoured(tmp_path) -> None:
     _write_condition_families(tmp_path, builders, plans, [spec])
 
     payload = yaml.safe_load((tmp_path / "condition-families.yaml").read_text())
-    assert payload["schema_version"] == "condition-families-v2"
+    assert payload["schema_version"] == "condition-families-v1"
     first, second = payload["scenarios"]
     assert first["scenario_id"] == "SCN-001"
     assert first["family"]["kind"] == "ownership"

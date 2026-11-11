@@ -1,4 +1,4 @@
-schema_version: stpa-synthesis-manifest-v2
+schema_version: stpa-synthesis-manifest-v1
 run_id: synthesis-20261018T010216Z
 created_at: '2026-10-18T01:02:16.192843+00:00'
 catalog_pins:
@@ -7,7 +7,7 @@ catalog_pins:
     digest: 9c8fe2d5952aa9dec0f27aab9ff149e90931a8dae4578369b6fcf6a62bc5a7d8
 mapping_pins:
   obligation_edges:
-    release: obligation-mapping-bundle-v2
+    release: obligation-mapping-bundle-v1
     digest: a8b4c3c8088a267e69661ea020eded92bbc662dad0c52816015e6791f3fedbcf
   sssom:
     release: '2026.05'

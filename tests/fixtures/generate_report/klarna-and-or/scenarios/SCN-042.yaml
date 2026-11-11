@@ -1,4 +1,4 @@
-schema_version: scenario-handoff-v6
+schema_version: scenario-handoff-v1
 scenario_id: SCN-042
 scenario_version: 1
 kind: adversarial
@@ -158,7 +158,7 @@ sourced_facts:
   authority: derived_proposed_constraint
 - statement: The unsafe outcome condition is expressed semantically; the executable
     check is derived downstream.
-  source: producer handoff contract scenario-handoff-v6
+  source: producer handoff contract scenario-handoff-v1
   authority: producer_contract
 assumptions_and_unknowns:
 - The execution-time target state is captured fresh by the consumer; no producer-supplied
@@ -186,7 +186,7 @@ observation:
     supported_criteria: []
     unsupported_criteria:
     - criterion_1
-content_digest: eb882dfd6ad7cebe55ae38a4d79662ec95c7800f0c662d3552bdcb47515b4511
+content_digest: fdb0791e9835594b4a54377967822623c733d94b74b3c84dad40de70791d3444
 condition_omitted_reason: The discriminating condition failed validation after two
   corrections (discriminating_condition_check_failed); the response declares no reply
   criterion the contract supports, so the command_attempt claim cannot run without
@@ -283,8 +283,8 @@ worst_case_threat: Unauthorized or incorrect modification of customer payment sc
   (installments), causing financial distress or plan misalignment.
 contract:
   id: scenario-handoff
-  version: scenario-handoff-v6
-  spec_digest: sha256:a2f3bfe6fa4e3ee926bada66bc420d55a2ea9989a2dd62981acb705426c2f79a
+  version: scenario-handoff-v1
+  spec_digest: sha256:c7fe26b7e19fa5bf9883c9ebdbb6c7028e1aa11f109ae98a47a0b17903e83f48
   requires: []
   provenance:
     writer: asago_scenario_generator.stpa.scenario_prod.handoff

@@ -367,7 +367,7 @@ def test_a_2025_scheme_row_is_refused(object_id: str, source: str) -> None:
         build(sssom=[mapping(object_id, source)])
 
 
-def test_a_built_document_with_tags_validates_against_v2() -> None:
+def test_a_built_document_with_tags_validates_against_v1() -> None:
     sssom = [
         mapping("llm072026-misinformation", "owasp-llm-2026"),
         mapping("asi02-tool-misuse-and-exploitation", "owasp-asi-2026"),
@@ -409,7 +409,7 @@ def test_the_policy_block_counts_entries_and_names_the_document() -> None:
         }
     )
 
-    assert document["schema_version"] == SCHEMA_VERSION == "policy-coverage-v2"
+    assert document["schema_version"] == SCHEMA_VERSION == "policy-coverage-v1"
     assert document["rule"] == "loss-source-risk-cards"
     assert document["policy"] == {
         "risk_extraction": "extraction.json",
@@ -512,7 +512,7 @@ def test_the_document_is_the_same_on_every_build() -> None:
 
 
 CONTRACTS = Path(__file__).resolve().parents[1] / "data/contracts/policy-coverage"
-CONTRACT = CONTRACTS / "policy-coverage-v2"
+CONTRACT = CONTRACTS / "policy-coverage-v1"
 
 
 def validator() -> Draft202012Validator:
@@ -527,7 +527,7 @@ def test_a_built_document_validates_against_the_contract_schema() -> None:
     assert list(validator().iter_errors(document)) == []
 
 
-def test_a_built_document_with_hazards_validates_against_the_v2_contract_schema() -> (
+def test_a_built_document_with_hazards_validates_against_the_v1_contract_schema() -> (
     None
 ):
     document = build(
@@ -538,7 +538,7 @@ def test_a_built_document_with_hazards_validates_against_the_v2_contract_schema(
     assert list(validator().iter_errors(document)) == []
 
 
-def test_the_v2_schema_requires_hazards_and_each_harms_hazard_ids() -> None:
+def test_the_v1_schema_requires_hazards_and_each_harms_hazard_ids() -> None:
     document = build()
     del document["hazards"]
     del document["harms"][0]["hazard_ids"]

@@ -5,7 +5,7 @@ Orchestrates the full SP3 pipeline:
     request per Stage 5 spec
   Stage 6: Deterministic narrative, AND/OR attack tree and Gherkin summary;
     one narrate request per scenario and one Gherkin request per published
-    scenario, each with at most one correction; then the scenario-handoff-v6
+    scenario, each with at most one correction; then the scenario-handoff-v1
     handoff
   Stage 7: Validators + eval metrics + coverage gap analysis (0 LLM calls)
 
@@ -121,9 +121,9 @@ from .narration import (
 )
 from .handoff import (
     HandoffTaxonomyInputs,
-    ScenarioHandoffV6,
+    ScenarioHandoff,
     Stage1aSource,
-    build_scenario_handoff_v6,
+    build_scenario_handoff,
     handoff_document,
     write_scenario_handoff,
 )
@@ -276,7 +276,7 @@ def run_sp3(
     sends none. Stage 6 renders each scenario's ``and-or-tree-v1``
     attack tree, sends one narrate request per scenario (writing
     ``narratives.json``) and one Gherkin request per publishable scenario
-    (writing ``gherkins.json``), and publishes ``scenario-handoff-v6``: the
+    (writing ``gherkins.json``), and publishes ``scenario-handoff-v1``: the
     accepted paragraph as its narrative, the accepted Gherkin, and the
     scenario's attack path reduced from its tree. A scenario whose request
     fails keeps the code-rendered text.
@@ -1110,7 +1110,7 @@ def _write_scenario_handoff_artifacts(
     stage_1a_source: Stage1aSource | None = None,
     deduplication: ScenarioDeduplication | None = None,
     taxonomy: HandoffTaxonomyInputs | None = None,
-) -> ScenarioHandoffV6:
+) -> ScenarioHandoff:
     """Write the versioned scenario handoff for one published scenario.
 
     The normal product run publishes scenario meaning only: narrative, attack
@@ -1143,9 +1143,9 @@ def _checked_scenario_handoff(
     stage_1a_source: Stage1aSource | None = None,
     deduplication: ScenarioDeduplication | None = None,
     taxonomy: HandoffTaxonomyInputs | None = None,
-) -> ScenarioHandoffV6:
+) -> ScenarioHandoff:
     """Build one scenario's handoff and check the published contract."""
-    handoff = build_scenario_handoff_v6(
+    handoff = build_scenario_handoff(
         envelope,
         loss_analysis=loss_analysis,
         environment_bound=environment_bound,

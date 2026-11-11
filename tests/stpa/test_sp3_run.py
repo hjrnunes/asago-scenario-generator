@@ -512,12 +512,12 @@ class TestErrorPaths:
         assert sorted((tmp_path / "scenarios").glob("*.yaml")) == []
 
     def test_adversarial_contract_rejection_is_not_counted(self, monkeypatch, tmp_path):
-        """A handoff rejected by the v6 contract counts no handoff."""
+        """A handoff rejected by the handoff contract counts no handoff."""
         from asago_scenario_generator.stpa.scenario_prod import run as run_module
 
         def reject_handoff(*_args, **_kwargs):
             raise ValueError(
-                "scenario handoff violates the scenario-handoff-v6 contract: "
+                "scenario handoff violates the scenario-handoff-v1 contract: "
                 "missing_field"
             )
 
@@ -534,7 +534,7 @@ class TestErrorPaths:
             result.candidate_outcomes[0].status is SP3CandidateStatus.publication_failed
         )
         assert any(
-            "scenario-handoff-v6 contract" in item
+            "scenario-handoff-v1 contract" in item
             for item in result.candidate_outcomes[0].diagnostics
         )
         manifest = yaml.safe_load((tmp_path / "run-manifest.yaml").read_text())

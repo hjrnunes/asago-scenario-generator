@@ -77,7 +77,7 @@ from asago_scenario_generator.stpa.system_model.semantic_review import (
 
 STEP_RISK_COVERAGE_REVIEW = "risk_coverage_review"
 ARTIFACT_FILENAME = "loss-analysis-risk-coverage-review.yaml"
-SCHEMA_VERSION = "loss-analysis-risk-coverage-review-v3"
+SCHEMA_VERSION = "loss-analysis-risk-coverage-review-v1"
 
 # The advisory review may issue at most four calls.  The ceiling is a
 # call-limit policy constant, not a retry budget.
@@ -278,7 +278,7 @@ class RiskCoverageArtifact(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    schema_version: Literal["loss-analysis-risk-coverage-review-v3"] = SCHEMA_VERSION
+    schema_version: Literal["loss-analysis-risk-coverage-review-v1"] = SCHEMA_VERSION
     reviewed_loss_analysis_digest: StrictStr
     risk_set_digest: StrictStr
     status: Literal["completed", "partial", "unavailable"]
@@ -423,7 +423,7 @@ def _build_coverage_source_excerpts(
     card's name, description, and consequence).  Local handles are therefore
     unique even when two excerpts share one durable ``canonical_ref``.  The
     provider sees this index and selects handles; code owns the exact bytes
-    and canonical reference materialized into the v3 artifact.
+    and canonical reference materialized into the artifact.
     """
 
     excerpts: list[_CoverageSourceExcerpt] = []
@@ -654,7 +654,7 @@ def _to_row(
     source_excerpts: dict[str, _CoverageSourceExcerpt],
 ) -> RiskCoverageRow:
     """Convert a validated wire row into the artifact row."""
-    # The durable v3 row deliberately retains its historical flat evidence
+    # The durable row deliberately retains its historical flat evidence
     # list.  The provider wire nests constraint evidence to keep the model
     # from maintaining a second positional/parallel registry; this adapter
     # flattens the selected, exact material once at publication time.

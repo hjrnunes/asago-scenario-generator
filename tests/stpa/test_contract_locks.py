@@ -13,20 +13,20 @@ from pathlib import Path
 import pytest
 
 from asago_scenario_generator.stpa.scenario_prod.handoff import (
-    HANDOFF_SCHEMA_VERSION_V6,
+    HANDOFF_SCHEMA_VERSION,
 )
 
 DATA = Path(__file__).resolve().parents[2] / "data/contracts"
 AUTHORITY = "asago-scenario-generator"
 
 LOCKS = {
-    "scenario-handoff": {"schema_version": HANDOFF_SCHEMA_VERSION_V6},
+    "scenario-handoff": {"schema_version": HANDOFF_SCHEMA_VERSION},
     "target-profile": {
         "schema_version": "execution-target-profile-v1",
         "digest_domain": "execution-target-profile-v1",
     },
-    "tool-call-condition": {"version": "tool-call-condition-v2"},
-    "policy-coverage": {"schema_version": "policy-coverage-v2"},
+    "tool-call-condition": {"version": "tool-call-condition-v1"},
+    "policy-coverage": {"schema_version": "policy-coverage-v1"},
     "attack-flow": {"schema_version": "attack-flow-2.0.0"},
     "model-profile": {"version": "model-profile-v1"},
 }

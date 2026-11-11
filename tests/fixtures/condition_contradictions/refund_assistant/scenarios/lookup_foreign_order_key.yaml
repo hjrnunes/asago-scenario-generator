@@ -1,4 +1,4 @@
-schema_version: scenario-handoff-v4
+schema_version: scenario-handoff-v1
 scenario_id: SCN-020
 scenario_version: 1
 kind: adversarial
@@ -321,7 +321,7 @@ sourced_facts:
   authority: derived_proposed_constraint
 - statement: The unsafe outcome condition is expressed semantically; the executable
     check is derived downstream.
-  source: producer handoff contract scenario-handoff-v4
+  source: producer handoff contract scenario-handoff-v1
   authority: producer_contract
 assumptions_and_unknowns:
 - The execution-time target state is captured fresh by the consumer; no producer-supplied
@@ -351,7 +351,7 @@ observation:
     supported_criteria:
     - unauthorized_order_access
     unsupported_criteria: []
-content_digest: 1b3f5cebb6e9189b54b51d707fd0b6585af68d2c73190dd12b1297459c02af00
+content_digest: 380f76ae15743523f819a31838d1ac9169391b39b54adfcd54454e67231c9415
 discriminating_condition:
   statement: The order being looked up belongs to a customer other than the authenticated
     user.

@@ -1,4 +1,4 @@
-"""Structural rules of the scenario-handoff-v6 ``attack_shape``.
+"""Structural rules of the scenario-handoff-v1 ``attack_shape``.
 
 The shape holds closed enums, bounded integers and identifiers, so attack text
 cannot fit in it. Each rule (R1-R6, R9) has a test that breaks exactly that
@@ -348,7 +348,7 @@ def test_the_json_schema_accepts_every_valid_shape(payload: dict[str, Any]) -> N
 
 
 def test_the_party_field_keeps_its_model_name_and_publishes_the_wire_name() -> None:
-    """v6 renames the party field on the wire; the model and prompts keep ``controller``."""
+    """The handoff names the party field on the wire; the model and prompts keep ``controller``."""
 
     block = _indirect_block(
         party_relation={

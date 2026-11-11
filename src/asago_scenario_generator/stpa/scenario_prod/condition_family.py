@@ -95,7 +95,7 @@ DEFAULT_CANDIDATE_CAP = 4
 FAN_OUT_SLOT_TYPE = "INCORRECT"
 PRIOR_READ_SLOT_TYPE = "WRONG_TIMING"
 CONDITION_FAMILIES_FILENAME = "condition-families.yaml"
-CONDITION_FAMILIES_SCHEMA_VERSION = "condition-families-v2"
+CONDITION_FAMILIES_SCHEMA_VERSION = "condition-families-v1"
 
 _READ_EFFECTS = frozenset({"read", "observe"})
 _NUMERIC_TYPES = frozenset({"number", "integer"})

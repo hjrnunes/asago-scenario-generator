@@ -1,5 +1,5 @@
 {
-  "id": "bundle--18578dac-52df-5de1-aef5-a9886f9fff3d",
+  "id": "bundle--b7927193-462a-5523-ad66-b0b889d85882",
   "objects": [
     {
       "created": "2022-08-02T19:34:35.143Z",
@@ -57,16 +57,16 @@
           "extension_type": "new-sdo"
         }
       },
-      "id": "attack-flow--1dede124-c889-5549-a4bb-4d70aea8c852",
+      "id": "attack-flow--4469353a-69c4-57d3-8a41-ca8ca88ff3e8",
       "modified": "2026-01-01T00:00:00.000Z",
       "name": "H-9: scenarios that reach the hazard",
       "scope": "attack-tree",
       "spec_version": "2.1",
       "start_refs": [
-        "attack-condition--686f1738-786c-5e3c-bc60-6c49f84f572f",
-        "attack-condition--ded4c6a1-1f87-5b49-bc95-a51bf22f02cf",
-        "attack-condition--bc9a8705-4113-5540-9145-37970f01dc74",
-        "attack-action--d1b02206-d2c4-5979-a32e-8c84493bc82e"
+        "attack-condition--17d763e3-2274-558c-8f8f-6226bb68dfba",
+        "attack-condition--f5177e20-5976-5202-8810-b90769cfd930",
+        "attack-condition--d8a89a09-7e62-5913-a099-61cd512b2a4d",
+        "attack-action--7c82f6e5-2e3e-57f8-940e-de79eac98caa"
       ],
       "type": "attack-flow"
     },
@@ -79,7 +79,7 @@
           "extension_type": "new-sdo"
         }
       },
-      "id": "attack-action--196f278d-c99c-5fa3-94c2-03c226f29f65",
+      "id": "attack-action--e672ab21-f519-548b-a40f-d5a65da64855",
       "modified": "2026-01-01T00:00:00.000Z",
       "name": "H-9: The assistant executes `operation:schedule_payment` with incorrect `next_due` dates or `plan_id` parameters that do not align with the customer's actual plan.",
       "spec_version": "2.1",
@@ -89,14 +89,14 @@
       "created": "2026-01-01T00:00:00.000Z",
       "created_by_ref": "identity--e22a400a-8d51-53af-ab61-ee2096184980",
       "effect_refs": [
-        "attack-action--196f278d-c99c-5fa3-94c2-03c226f29f65"
+        "attack-action--e672ab21-f519-548b-a40f-d5a65da64855"
       ],
       "extensions": {
         "extension-definition--fb9c968a-745b-4ade-9b25-c324172197f4": {
           "extension_type": "new-sdo"
         }
       },
-      "id": "attack-operator--8d732e4e-f50e-57ac-9a07-4e21fbc25a7f",
+      "id": "attack-operator--5127b89d-0e14-578c-822d-2f44183b7023",
       "modified": "2026-01-01T00:00:00.000Z",
       "operator": "OR",
       "spec_version": "2.1",
@@ -107,14 +107,14 @@
       "created_by_ref": "identity--e22a400a-8d51-53af-ab61-ee2096184980",
       "description": "Kind: attack (adversarial). Deduplication: canonical. Unsafe control action: RESP-1 providing-causes-hazard: Schedule or modify a payment. Failure: The assistant executes schedule_payment with a plan_id that belongs to a customer other than the authenticated session user.",
       "effect_refs": [
-        "attack-operator--8d732e4e-f50e-57ac-9a07-4e21fbc25a7f"
+        "attack-operator--5127b89d-0e14-578c-822d-2f44183b7023"
       ],
       "extensions": {
         "extension-definition--fb9c968a-745b-4ade-9b25-c324172197f4": {
           "extension_type": "new-sdo"
         }
       },
-      "id": "attack-action--b53be495-7fc3-504b-84d3-5316ce497d40",
+      "id": "attack-action--9c3b5596-903b-5d01-af3f-48775a02b963",
       "modified": "2026-01-01T00:00:00.000Z",
       "name": "SCN-027: A third party uses deceptive order content to modify another customer's plan",
       "spec_version": "2.1",
@@ -124,14 +124,14 @@
       "created": "2026-01-01T00:00:00.000Z",
       "created_by_ref": "identity--e22a400a-8d51-53af-ab61-ee2096184980",
       "effect_refs": [
-        "attack-action--b53be495-7fc3-504b-84d3-5316ce497d40"
+        "attack-action--9c3b5596-903b-5d01-af3f-48775a02b963"
       ],
       "extensions": {
         "extension-definition--fb9c968a-745b-4ade-9b25-c324172197f4": {
           "extension_type": "new-sdo"
         }
       },
-      "id": "attack-operator--93a44b24-56b0-5957-b06d-b101f60990ad",
+      "id": "attack-operator--4f512797-63f9-5874-9427-23a171860bfb",
       "modified": "2026-01-01T00:00:00.000Z",
       "operator": "AND",
       "spec_version": "2.1",
@@ -146,10 +146,10 @@
           "extension_type": "new-sdo"
         }
       },
-      "id": "attack-condition--686f1738-786c-5e3c-bc60-6c49f84f572f",
+      "id": "attack-condition--17d763e3-2274-558c-8f8f-6226bb68dfba",
       "modified": "2026-01-01T00:00:00.000Z",
       "on_true_refs": [
-        "attack-action--b53be495-7fc3-504b-84d3-5316ce497d40"
+        "attack-action--9c3b5596-903b-5d01-af3f-48775a02b963"
       ],
       "spec_version": "2.1",
       "type": "attack-condition"
@@ -163,10 +163,10 @@
           "extension_type": "new-sdo"
         }
       },
-      "id": "attack-condition--ded4c6a1-1f87-5b49-bc95-a51bf22f02cf",
+      "id": "attack-condition--f5177e20-5976-5202-8810-b90769cfd930",
       "modified": "2026-01-01T00:00:00.000Z",
       "on_true_refs": [
-        "attack-action--b53be495-7fc3-504b-84d3-5316ce497d40"
+        "attack-action--9c3b5596-903b-5d01-af3f-48775a02b963"
       ],
       "spec_version": "2.1",
       "type": "attack-condition"
@@ -180,10 +180,10 @@
           "extension_type": "new-sdo"
         }
       },
-      "id": "attack-condition--bc9a8705-4113-5540-9145-37970f01dc74",
+      "id": "attack-condition--d8a89a09-7e62-5913-a099-61cd512b2a4d",
       "modified": "2026-01-01T00:00:00.000Z",
       "on_true_refs": [
-        "attack-action--b53be495-7fc3-504b-84d3-5316ce497d40"
+        "attack-action--9c3b5596-903b-5d01-af3f-48775a02b963"
       ],
       "spec_version": "2.1",
       "type": "attack-condition"
@@ -193,14 +193,14 @@
       "created_by_ref": "identity--e22a400a-8d51-53af-ab61-ee2096184980",
       "description": "A third party plants an order content item in what lookup_order returns. Asset: lookup_order.",
       "effect_refs": [
-        "attack-action--5373c3c2-ae48-500b-af63-beefbeda961a"
+        "attack-action--c854db80-8909-514b-9552-793309e7bac8"
       ],
       "extensions": {
         "extension-definition--fb9c968a-745b-4ade-9b25-c324172197f4": {
           "extension_type": "new-sdo"
         }
       },
-      "id": "attack-action--d1b02206-d2c4-5979-a32e-8c84493bc82e",
+      "id": "attack-action--7c82f6e5-2e3e-57f8-940e-de79eac98caa",
       "modified": "2026-01-01T00:00:00.000Z",
       "name": "SCN-027 step 1: AI Agent Tool Data Poisoning",
       "spec_version": "2.1",
@@ -213,14 +213,14 @@
       "created_by_ref": "identity--e22a400a-8d51-53af-ab61-ee2096184980",
       "description": "The benign user asks the agent to read the planted item through lookup_order.",
       "effect_refs": [
-        "attack-action--c595ac33-d9e7-54f3-873b-113c33625087"
+        "attack-action--0d0022df-a695-5af3-9ca3-1fa50ec5fa6d"
       ],
       "extensions": {
         "extension-definition--fb9c968a-745b-4ade-9b25-c324172197f4": {
           "extension_type": "new-sdo"
         }
       },
-      "id": "attack-action--5373c3c2-ae48-500b-af63-beefbeda961a",
+      "id": "attack-action--c854db80-8909-514b-9552-793309e7bac8",
       "modified": "2026-01-01T00:00:00.000Z",
       "name": "SCN-027 step 2: LLM Prompt Injection: Indirect",
       "spec_version": "2.1",
@@ -233,14 +233,14 @@
       "created_by_ref": "identity--e22a400a-8d51-53af-ab61-ee2096184980",
       "description": "The benign user follows up on what the planted item says.",
       "effect_refs": [
-        "attack-action--64787775-5279-59a7-9318-51cce05873ce"
+        "attack-action--461dc2b5-51cd-5cba-a5fc-b9246e35c1c6"
       ],
       "extensions": {
         "extension-definition--fb9c968a-745b-4ade-9b25-c324172197f4": {
           "extension_type": "new-sdo"
         }
       },
-      "id": "attack-action--c595ac33-d9e7-54f3-873b-113c33625087",
+      "id": "attack-action--0d0022df-a695-5af3-9ca3-1fa50ec5fa6d",
       "modified": "2026-01-01T00:00:00.000Z",
       "name": "SCN-027 step 3: LLM Prompt Injection: Indirect",
       "spec_version": "2.1",
@@ -253,14 +253,14 @@
       "created_by_ref": "identity--e22a400a-8d51-53af-ab61-ee2096184980",
       "description": "Conversational engagement and response generation provides 'Schedule or modify a payment' with an unsafe value/effect because the plan_id or next_due date does not align with the customer's actual payment plans. Violates SC-8: The assistant must only modify payments using a `plan_id` and `next_due` date that correspond to the `session:authenticated_customer_id`'s existing `payment_plans`.",
       "effect_refs": [
-        "attack-operator--93a44b24-56b0-5957-b06d-b101f60990ad"
+        "attack-operator--4f512797-63f9-5874-9427-23a171860bfb"
       ],
       "extensions": {
         "extension-definition--fb9c968a-745b-4ade-9b25-c324172197f4": {
           "extension_type": "new-sdo"
         }
       },
-      "id": "attack-action--64787775-5279-59a7-9318-51cce05873ce",
+      "id": "attack-action--461dc2b5-51cd-5cba-a5fc-b9246e35c1c6",
       "modified": "2026-01-01T00:00:00.000Z",
       "name": "SCN-027 unsafe control action: RESP-1 Schedule or modify a payment",
       "spec_version": "2.1",

@@ -61,7 +61,7 @@ def test_a_semver_renders_and_compares_against_another_semver():
 @pytest.mark.parametrize(
     ("name", "contract", "expected"),
     [
-        ("execution-receipt-v2", "execution-receipt", (2, 0, 0)),
+        ("execution-receipt-v1", "execution-receipt", (1, 0, 0)),
         ("demo-v5", "demo", (5, 0, 0)),
         ("example-v1.1.0", "example", (1, 1, 0)),
         ("attack-flow-2.0.0", "attack-flow", (2, 0, 0)),

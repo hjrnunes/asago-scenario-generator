@@ -124,12 +124,12 @@ qualification. Do not restore the retired command as a second semantic engine.
 
 The producer owns semantic scenario authority: STPA lineage, the selected
 failure criterion, safe alternatives, supported causal hypotheses, and the
-semantics-only `scenario-handoff-v6`. The producer does not publish concrete
+semantics-only `scenario-handoff-v1`. The producer does not publish concrete
 messages, setup instructions, detector expressions, or harness bindings.
 
 The producer also publishes the `tool-call-condition` contract.
 [`data/contracts/tool-call-condition/`](data/contracts/tool-call-condition/)
-holds `tool-call-condition-v2`'s schema, its validate and evaluate vectors and a
+holds `tool-call-condition-v1`'s schema, its validate and evaluate vectors and a
 `CONTRACT.lock` of every digest. Every implementation must agree
 on every vector, and the consumer, MiDojo and the Garak fork each keep a byte
 copy. `scripts/sync_tool_call_condition.py --check` compares a copy with this
@@ -289,7 +289,7 @@ Each generated scenario is published as a versioned **scenario handoff**
 under `scenarios/` (`SCN-*.yaml` plus a matching `.feature` companion): the
 envelope over narrative, attack path, Gherkin and necessary metadata defined
 by [`data/contracts/scenario-handoff/`](data/contracts/scenario-handoff/)
-(schema `scenario-handoff-v6`, described below). `tool_call_condition_status` says whether
+(schema `scenario-handoff-v1`, described below). `tool_call_condition_status` says whether
 Stage 5 bound the discriminating condition to target facts, and, when it did,
 `tool_call_condition` carries the ready-to-evaluate condition. The required
 `attack_shape` key (closed enums, turn count 1-4 and identifiers, never attack
@@ -563,10 +563,10 @@ changes, with the text and with publication marked in place, still load.
 
 `generate` writes its report to `report/index.html`, built on the shared
 report kit, with `report/stage-summary.json` beside it. `policy-coverage.json`
-(`policy-coverage-v2` in `data/contracts/policy-coverage/`) records where each
+(`policy-coverage-v1` in `data/contracts/policy-coverage/`) records where each
 policy risk stopped on its way to a scenario, and lists each hazard with the
 losses loss analysis relates it to and the scenarios that name it. The report
-reads it, and still reads a version 1 file. The report, the stage summary,
+reads it. The report, the stage summary,
 and the coverage file are for people and for the orchestrator's run reports.
 The report's hazard section shows each hazard with the attack paths that reach
 it, and `report/attack-flow/` holds one Attack Flow bundle per reached hazard
@@ -680,7 +680,7 @@ must be different.
 
 The mapping pins have two distinct authorities: `mapping_pins.sssom` retains
 the authoritative taxonomy-context `mapping_set_digest`, while
-`mapping_pins.obligation_edges` uses release `obligation-mapping-bundle-v2` to
+`mapping_pins.obligation_edges` uses release `obligation-mapping-bundle-v1` to
 bind the complete typed LLM-to-pattern and SSSOM edge bundle. Both pins are
 required; the supplied-edge bundle pin cannot substitute for the context pin.
 
@@ -849,8 +849,8 @@ test design, as the handoff flow below describes.
 The normal product `generate` publishes the versioned **scenario handoff**: the envelope over narrative, attack path, Gherkin and
 necessary metadata defined by
 [`data/contracts/scenario-handoff/`](data/contracts/scenario-handoff/)
-(schema `scenario-handoff-v6`, kit in
-`data/contracts/scenario-handoff/scenario-handoff-v6/`), written under `scenarios/`
+(schema `scenario-handoff-v1`, kit in
+`data/contracts/scenario-handoff/scenario-handoff-v1/`), written under `scenarios/`
 with its matching `.feature` companion. Each run builds an AND/OR attack tree
 per scenario and publishes the scenario's `attack_path` (format
 `attack-path-v1`) reduced from it, beside the shared envelope fields and six
@@ -907,12 +907,12 @@ allows one correction, maps the steps to Gherkin keywords, and falls back to the
 code-rendered Gherkin when the reply fails, errors, or is refused. The
 `.feature` file and the handoff YAML come from the same Gherkin, and
 `gherkins.json` records each scenario's source, request count, rejections,
-reason, and reply. The handoff signs its digest under the `scenario-handoff-v6`
+reason, and reply. The handoff signs its digest under the `scenario-handoff-v1`
 domain, and generation fails when a source the six fields need is missing.
-`CONTRACT.lock` pins `scenario-handoff-v6`.
+`CONTRACT.lock` pins `scenario-handoff-v1`.
 
-`generate` writes `ScenarioHandoffV6` (`stpa/scenario_prod/handoff.py`, built by
-`build_scenario_handoff_v6` in the same module). Each handoff file carries the
+`generate` writes `ScenarioHandoff` (`stpa/scenario_prod/handoff.py`, built by
+`build_scenario_handoff` in the same module). Each handoff file carries the
 `contract` envelope its spec requires, and the party field of an indirect attack
 shape is `attack_shape.indirect.party_relation.controlling_party` on the wire,
 though the model and every prompt keep the attribute name `controller`. The

@@ -55,7 +55,7 @@ SYSTEM_TEMPLATE = "stage1a_actionability_system.j2"
 USER_TEMPLATE = "stage1a_actionability_user.j2"
 ARTIFACT_FILENAME = "risk-actionability.yaml"
 # Entries meet the decision/field invariant (see RiskActionabilityRecord).
-SCHEMA_VERSION = "risk-actionability-v2"
+SCHEMA_VERSION = "risk-actionability-v1"
 MAX_CARDS_PER_CALL = 40
 MAX_COMPLETION_TOKENS = 8192
 
@@ -125,7 +125,7 @@ class RiskActionabilityRecord(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal["risk-actionability-v2"] = SCHEMA_VERSION
+    schema_version: Literal["risk-actionability-v1"] = SCHEMA_VERSION
     status: Literal["completed", "partial", "empty"]
     call_count: int = Field(ge=0)
     counts: dict[str, int]

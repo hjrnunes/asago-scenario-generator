@@ -30,7 +30,7 @@ def _handoff(
     statement: str, context: str, criterion: str, condition: dict | None = None
 ) -> dict:
     return {
-        "schema_version": "scenario-handoff-v6",
+        "schema_version": "scenario-handoff-v1",
         "scenario_id": "SCN-001",
         "semantic_failure_criterion": criterion,
         "discriminating_condition": condition,

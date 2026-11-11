@@ -35,8 +35,8 @@ TREES = (
     (CONTRACTS / "scenario-handoff", DATA / "scenario-handoff"),
     (CONTRACTS / "scenario-handoff", TEST_DATA / "scenario-handoff"),
     (
-        CONTRACTS / "tool-call-condition" / "tool-call-condition-v2" / "vectors",
-        TEST_DATA / "tool-call-condition" / "tool-call-condition-v2" / "vectors",
+        CONTRACTS / "tool-call-condition" / "tool-call-condition-v1" / "vectors",
+        TEST_DATA / "tool-call-condition" / "tool-call-condition-v1" / "vectors",
     ),
 )
 

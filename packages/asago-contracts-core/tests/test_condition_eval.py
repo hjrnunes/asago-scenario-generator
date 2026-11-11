@@ -16,7 +16,7 @@ from asago_contracts_core import (
     DETECTED,
     NOT_DETECTED,
     ConditionEvaluation,
-    evaluate_condition_v2,
+    evaluate_condition,
     validate_condition,
 )
 
@@ -24,7 +24,7 @@ VECTORS = (
     Path(__file__).resolve().parent
     / "data"
     / "tool-call-condition"
-    / "tool-call-condition-v2"
+    / "tool-call-condition-v1"
     / "vectors"
 )
 EVALUATE = json.loads((VECTORS / "evaluate.json").read_text(encoding="utf-8"))[
@@ -148,18 +148,18 @@ def test_each_evaluator_difference_pins_the_producer_behaviour(
     condition, calls, complete, expected = case
     if isinstance(expected, type) and issubclass(expected, Exception):
         with pytest.raises(expected):
-            evaluate_condition_v2(condition, calls, complete)
+            evaluate_condition(condition, calls, complete)
         return
-    assert evaluate_condition_v2(condition, calls, complete) == expected
+    assert evaluate_condition(condition, calls, complete) == expected
 
 
 def test_a_plain_condition_still_reads_as_before() -> None:
-    result = evaluate_condition_v2(_CALL, [_call("withdraw", amount=10)], True)
+    result = evaluate_condition(_CALL, [_call("withdraw", amount=10)], True)
     assert result == ("detected", "the condition holds on the captured calls", [0])
     assert isinstance(result, ConditionEvaluation)
     assert result.outcome == "detected"
     assert result.matched_calls == [0]
-    assert evaluate_condition_v2(_CALL, [_call("withdraw", amount=1)], True) == (
+    assert evaluate_condition(_CALL, [_call("withdraw", amount=1)], True) == (
         NOT_DETECTED,
         "the captured calls do not satisfy the condition",
         [],
@@ -174,12 +174,12 @@ def test_a_condition_without_an_argument_operand_is_refused() -> None:
 
 
 @pytest.mark.parametrize("vector", EVALUATE, ids=lambda vector: vector["id"])
-def test_every_v2_evaluate_vector_holds(vector: dict[str, Any]) -> None:
-    assert evaluate_condition_v2(
+def test_every_v1_evaluate_vector_holds(vector: dict[str, Any]) -> None:
+    assert evaluate_condition(
         vector["condition"], vector["calls"], vector["complete"]
     ) == (vector["outcome"], vector["reason"], vector["matched_calls"])
 
 
 @pytest.mark.parametrize("vector", VALIDATE, ids=lambda vector: vector["id"])
-def test_every_v2_validate_vector_holds(vector: dict[str, Any]) -> None:
+def test_every_v1_validate_vector_holds(vector: dict[str, Any]) -> None:
     assert (validate_condition(vector["condition"]) is None) == vector["valid"]

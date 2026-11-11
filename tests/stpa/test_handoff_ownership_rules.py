@@ -4,7 +4,7 @@
 keys and prose patterns. The handoff module reads it, the contract lock pins
 it, and the consumer mirrors it byte for byte, so both sides enforce one list.
 
-``scenario-handoff-v6/cases/conformance-cases.json`` names the cases for the five rules the
+``scenario-handoff-v1/cases/conformance-cases.json`` names the cases for the five rules the
 consumer re-implements: safe-call arguments, the procedure chain, reference
 order, the ownership walker, and the feature companion. Each rule carries at
 least one valid and one invalid case, and the consumer runs the same manifest.
@@ -23,7 +23,7 @@ from asago_scenario_generator.stpa.scenario_prod.handoff import (
     _FORBIDDEN_KEYS,
     _FORBIDDEN_VALUE_PATTERNS,
     HandoffGherkin,
-    ScenarioHandoffV6,
+    ScenarioHandoff,
     handoff_ownership_violations,
     handoff_schema_violations,
     load_ownership_rules,
@@ -33,7 +33,7 @@ RULES = (
     Path(__file__).resolve().parents[2]
     / "data/contracts/scenario-handoff/ownership-rules.json"
 )
-KIT = RULES.parent / "scenario-handoff-v6" / "cases"
+KIT = RULES.parent / "scenario-handoff-v1" / "cases"
 RULE_NAMES = frozenset(
     {
         "safe-call-arguments",
@@ -61,7 +61,7 @@ def _manifest_cases(verdict: str, kind: str) -> list[str]:
 
 def _companion_gherkin(case: dict) -> HandoffGherkin:
     payload = json.loads((KIT / case["handoff"]).read_text(encoding="utf-8"))
-    return ScenarioHandoffV6.model_validate(payload).gherkin
+    return ScenarioHandoff.model_validate(payload).gherkin
 
 
 def test_the_forbidden_keys_are_the_contract_data() -> None:
@@ -129,7 +129,7 @@ def test_the_kit_carries_a_case_for_each_of_the_five_rules() -> None:
     rules = manifest["rules"]
 
     assert manifest["contract"] == "scenario-handoff"
-    assert manifest["kit"] == "scenario-handoff-v6"
+    assert manifest["kit"] == "scenario-handoff-v1"
     assert {rule["name"] for rule in rules} == RULE_NAMES
     assert len(rules) == len(RULE_NAMES)
     for rule in rules:
@@ -152,7 +152,7 @@ def test_a_valid_rule_case_passes_the_producers_checks(relative: str) -> None:
 
     assert handoff_ownership_violations(payload) == []
     assert handoff_schema_violations(payload) == []
-    ScenarioHandoffV6.model_validate(payload)
+    ScenarioHandoff.model_validate(payload)
 
 
 @pytest.mark.parametrize("relative", _manifest_cases("invalid", "handoff"))

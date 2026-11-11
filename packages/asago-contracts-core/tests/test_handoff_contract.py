@@ -35,7 +35,7 @@ from asago_contracts_core import (
 from asago_contracts_core.contract import DATA_DIR
 
 CONTRACT = "scenario-handoff"
-VERSION = "scenario-handoff-v6"
+VERSION = "scenario-handoff-v1"
 _CONTRACT_DIR = Path(__file__).resolve().parent / "data" / CONTRACT
 _VERSION_DIR = _CONTRACT_DIR / VERSION
 

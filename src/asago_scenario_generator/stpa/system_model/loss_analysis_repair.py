@@ -144,7 +144,7 @@ REFERENCE_DROPPED_KIND = "reference_dropped"
 
 # The run-level, cross-stage record of every Stage 1a transformation (R3).
 REPAIR_RECORD_FILENAME = "loss-analysis-repair.yaml"
-REPAIR_RECORD_SCHEMA_VERSION = "loss-analysis-repair-record-v2"
+REPAIR_RECORD_SCHEMA_VERSION = "loss-analysis-repair-record-v1"
 
 # The five provider wire collections; locations at exactly one of these
 # names are container locations, everything beneath them is record-level.

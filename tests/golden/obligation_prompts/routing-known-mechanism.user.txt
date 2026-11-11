@@ -80,7 +80,7 @@ Compact obligation questions:
     label: direct_curated_pair
     meaning: The reviewed risk was linked directly to this attack pattern. This is
       discovery evidence, not proof that the mechanism exists in this system.
-  obligation_handle: ob:v1:eda1366f17a5631363e6e587e33e2f9fa369eefb46610a43189a7429cb04ddca
+  obligation_handle: ob:v1:f9350f05b8868290f19060493bcdf0673ce390b88d69b0414857afcebad99afa
   reviewed_risk:
     consequence: null
     description: A reviewed risk used by planner tests.

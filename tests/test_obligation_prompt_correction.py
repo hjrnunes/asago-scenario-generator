@@ -53,6 +53,7 @@ from asago_scenario_generator.stpa.obligation_aware.prompts import (
 )
 from asago_scenario_generator.stpa.obligation_aware import prompts as prompt_module
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
+from asago_scenario_generator.stpa.obligation_aware.briefs import obligation_order_key
 from asago_scenario_generator.stpa.obligation_aware.routing import (
     build_neutral_briefs,
     route_obligations,
@@ -974,7 +975,8 @@ def test_routing_budget_splits_compact_batches_in_canonical_order() -> None:
         control_structure=_control_structure(),
         controls=controls,
     )
-    assert observed == [(briefs[0].obligation_id,), (briefs[1].obligation_id,)]
+    ordered = sorted(briefs, key=obligation_order_key)
+    assert observed == [(ordered[0].obligation_id,), (ordered[1].obligation_id,)]
     assert [item.obligation_id for item in result.routes] == [
         item.obligation_id for item in briefs
     ]

@@ -64,7 +64,7 @@ from asago_scenario_generator.stpa.scenario_prod.and_or_tree import (
     render_and_or_tree,
 )
 from asago_scenario_generator.stpa.scenario_prod.handoff import (
-    build_scenario_handoff_v6,
+    build_scenario_handoff,
 )
 from asago_scenario_generator.stpa.scenario_prod.deduplication import (
     deduplicate_scenario_specs,
@@ -1009,7 +1009,7 @@ def test_omitted_condition_reason_reaches_the_handoff(tmp_path) -> None:
         gherkin_spec=gherkin,
         gherkin_raw=gherkin.to_feature_text(),
     )
-    handoff = build_scenario_handoff_v6(
+    handoff = build_scenario_handoff(
         envelope,
         loss_analysis=_loss_analysis(),
         observed_operations=("refund_payment",),

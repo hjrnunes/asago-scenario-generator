@@ -49,7 +49,7 @@ from asago_scenario_generator.pipeline.projection_contracts import (
     capture_capability_snapshot,
     PreconditionEvaluationResult,
     ProjectionLimitation,
-    _candidate_v2_id,
+    _candidate_id,
     _verify_chain_identity,
     _verify_canonical_ingress,
     _verify_candidate_identity,
@@ -488,11 +488,11 @@ def test_unlinked_action_resources_and_observations_are_never_inferred(
     )
 
 
-def test_candidate_v2_identity_is_stable_and_sensitive_to_every_identity_axis() -> None:
+def test_candidate_v1_identity_is_stable_and_sensitive_to_every_identity_axis() -> None:
     baseline = _project().candidates
     repeated = _project().candidates
     assert [c.candidate_id for c in baseline] == [c.candidate_id for c in repeated]
-    assert all(c.candidate_id.startswith("cand:v2:") for c in baseline)
+    assert all(c.candidate_id.startswith("cand:v1:") for c in baseline)
 
     changed = _pattern()
     changed["canonical_chain"]["semantic_revision"] = 2
@@ -510,7 +510,7 @@ def test_candidate_v2_identity_is_stable_and_sensitive_to_every_identity_axis() 
     assert len({c.candidate_id for c in baseline}) == 1
 
     forged = baseline[0].model_dump(mode="json")
-    forged["candidate_id"] = "cand:v2:" + "0" * 32
+    forged["candidate_id"] = "cand:v1:" + "0" * 32
     with pytest.raises(ValidationError, match="candidate_id"):
         type(baseline[0]).model_validate(forged)
 
@@ -1278,7 +1278,7 @@ def test_ap_t6_07_catalog_projection_derives_source_influence_activation() -> No
         swapped["projection"]
     )
     swapped_projection = ProjectionSnapshot.model_validate(swapped["projection"])
-    swapped["candidate_id"] = _candidate_v2_id("AP-T6-07", swapped_projection)
+    swapped["candidate_id"] = _candidate_id("AP-T6-07", swapped_projection)
     with pytest.raises(ValueError, match="resource is incompatible with slot"):
         validate_projection_snapshot(swapped["projection"], snapshot)
     requirements = [
@@ -1624,7 +1624,7 @@ class TestCandidateIdentityHelpers:
                 other_ingress if bad else candidate.canonical_ingress,
             ),
             "candidate_identity": lambda bad: _verify_candidate_identity(
-                "cand:v2:" + "0" * 32 if bad else candidate.candidate_id,
+                "cand:v1:" + "0" * 32 if bad else candidate.candidate_id,
                 candidate.pattern_id,
                 candidate.projection,
             ),

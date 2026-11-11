@@ -35,8 +35,8 @@ from asago_scenario_generator.stpa.scenario_prod.tool_call_binding import (
 
 DATA = Path(__file__).resolve().parents[2] / "data/contracts"
 CONTRACT_ROOT = DATA / "tool-call-condition"
-KIT = CONTRACT_ROOT / "tool-call-condition-v2"
-HANDOFF_VALID = DATA / "scenario-handoff/scenario-handoff-v6/cases/valid"
+KIT = CONTRACT_ROOT / "tool-call-condition-v1"
+HANDOFF_VALID = DATA / "scenario-handoff/scenario-handoff-v1/cases/valid"
 
 VALUE_OPS = ("eq", "ne", "gt", "ge", "lt", "le", "in", "not_in")
 OUTCOME_REASONS = {
@@ -54,7 +54,7 @@ SCHEMA = _load(KIT / "schema.json")
 VALIDATOR = Draft202012Validator(SCHEMA)
 VALIDATE = _load(KIT / "vectors/validate.json")["vectors"]
 EVALUATE = _load(KIT / "vectors/evaluate.json")["vectors"]
-CALL_VALIDATOR_V2 = Draft202012Validator(SCHEMA["$defs"]["call"])
+CALL_VALIDATOR = Draft202012Validator(SCHEMA["$defs"]["call"])
 
 
 def _schema_errors(condition: Any, validator: Any = VALIDATOR) -> list[str]:
@@ -127,14 +127,14 @@ def test_evaluate_vectors_cover_every_outcome_with_and_without_completeness() ->
 def test_the_lock_names_the_version_and_pins_only_its_kit() -> None:
     lock = _load(CONTRACT_ROOT / "CONTRACT.lock")
 
-    assert lock["version"] == "tool-call-condition-v2"
-    assert {path.split("/")[0] for path in lock["files"]} == {"tool-call-condition-v2"}
+    assert lock["version"] == "tool-call-condition-v1"
+    assert {path.split("/")[0] for path in lock["files"]} == {"tool-call-condition-v1"}
 
 
 def test_each_vector_file_names_the_garak_revision_that_computed_it() -> None:
     for name in ("validate", "evaluate"):
         document = _load(KIT / f"vectors/{name}.json")
-        assert document["version"] == "tool-call-condition-v2"
+        assert document["version"] == "tool-call-condition-v1"
         assert document["implementation"] == {
             "repository": "garak",
             "revision": GENERATOR.REVISION,
@@ -143,7 +143,7 @@ def test_each_vector_file_names_the_garak_revision_that_computed_it() -> None:
         }
 
 
-def test_v2_readme_states_how_to_vendor_and_verify_a_copy() -> None:
+def test_v1_readme_states_how_to_vendor_and_verify_a_copy() -> None:
     text = (KIT / "README.md").read_text(encoding="utf-8")
 
     assert "Vendor" in text
@@ -152,8 +152,8 @@ def test_v2_readme_states_how_to_vendor_and_verify_a_copy() -> None:
     assert GENERATOR.REVISION in text
 
 
-def test_the_v2_directory_alone_validates_every_vector(tmp_path: Path) -> None:
-    vendored = tmp_path / "tool-call-condition-v2"
+def test_the_v1_directory_alone_validates_every_vector(tmp_path: Path) -> None:
+    vendored = tmp_path / "tool-call-condition-v1"
     shutil.copytree(KIT, vendored)
     assert sorted(path.name for path in vendored.iterdir()) == [
         "README.md",
@@ -182,8 +182,8 @@ def test_the_v2_directory_alone_validates_every_vector(tmp_path: Path) -> None:
         {"name": "a", "arguments": {}, "result": {"ok": True}},
     ],
 )
-def test_v2_call_schema_accepts_a_captured_call(call: dict[str, Any]) -> None:
-    assert _schema_errors(call, CALL_VALIDATOR_V2) == []
+def test_v1_call_schema_accepts_a_captured_call(call: dict[str, Any]) -> None:
+    assert _schema_errors(call, CALL_VALIDATOR) == []
 
 
 @pytest.mark.parametrize(
@@ -196,11 +196,11 @@ def test_v2_call_schema_accepts_a_captured_call(call: dict[str, Any]) -> None:
         {"name": 1, "arguments": {}},
     ],
 )
-def test_v2_call_schema_rejects_a_malformed_call(call: dict[str, Any]) -> None:
-    assert _schema_errors(call, CALL_VALIDATOR_V2) != []
+def test_v1_call_schema_rejects_a_malformed_call(call: dict[str, Any]) -> None:
+    assert _schema_errors(call, CALL_VALIDATOR) != []
 
 
-def test_v2_evaluate_vectors_are_well_formed() -> None:
+def test_v1_evaluate_vectors_are_well_formed() -> None:
     malformed = []
     for vector in EVALUATE:
         calls = vector["calls"]
@@ -209,7 +209,7 @@ def test_v2_evaluate_vectors_are_well_formed() -> None:
             OUTCOME_REASONS.get(vector["outcome"]) == vector["reason"]
             and isinstance(vector["complete"], bool)
             and not _schema_errors(vector["condition"], VALIDATOR)
-            and all(not _schema_errors(call, CALL_VALIDATOR_V2) for call in calls)
+            and all(not _schema_errors(call, CALL_VALIDATOR) for call in calls)
             and all(set(call) <= {"name", "arguments", "blocked"} for call in calls)
             and all(
                 isinstance(index, int) and 0 <= index < len(calls) for index in matched
@@ -437,8 +437,8 @@ def test_generator_formats_the_committed_vector_bytes(path: str) -> None:
 
 
 @pytest.mark.parametrize("vector", EVALUATE, ids=lambda vector: vector["id"])
-def test_reference_evaluator_reproduces_every_v2_vector(vector: dict) -> None:
-    result = GENERATOR.evaluate_condition_v2(
+def test_reference_evaluator_reproduces_every_v1_vector(vector: dict) -> None:
+    result = GENERATOR.evaluate_condition(
         vector["condition"], vector["calls"], vector["complete"]
     )
     assert result == (vector["outcome"], vector["reason"], vector["matched_calls"])
@@ -492,7 +492,7 @@ def test_generator_check_passes_on_the_committed_files(contract_copy: Path) -> N
 def test_generator_check_fails_on_an_edited_expected_value(
     contract_copy: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    path = contract_copy / "tool-call-condition-v2/vectors/evaluate.json"
+    path = contract_copy / "tool-call-condition-v1/vectors/evaluate.json"
     edited = path.read_text(encoding="utf-8").replace(
         '"outcome": "detected"', '"outcome": "x"', 1
     )
@@ -500,13 +500,13 @@ def test_generator_check_fails_on_an_edited_expected_value(
     argv = ["--garak-checkout", "x", "--garak-python", "y", "--check"]
     assert GENERATOR.main(argv) == 1
     out = capsys.readouterr().out
-    assert "DIFFERS tool-call-condition-v2/vectors/evaluate.json" in out
+    assert "DIFFERS tool-call-condition-v1/vectors/evaluate.json" in out
     assert "1 of 3 files differ" in out
     assert path.read_text(encoding="utf-8") == edited, "check mode writes nothing"
 
 
 def _garak_results(**changes: tuple[str, str, list[int]]) -> dict[str, Any]:
-    """The committed v2 results, with the named vectors given other results."""
+    """The committed results, with the named vectors given other results."""
 
     evaluate = []
     for vector in EVALUATE:
@@ -536,7 +536,7 @@ def test_generator_check_fails_when_garak_differs_on_a_vector(
     argv = ["--garak-checkout", "x", "--garak-python", "y", "--check"]
     assert GENERATOR.main(argv) == 1
     assert (
-        "DIFFERS tool-call-condition-v2/vectors/evaluate.json"
+        "DIFFERS tool-call-condition-v1/vectors/evaluate.json"
         in capsys.readouterr().out
     )
 
@@ -552,14 +552,14 @@ def test_generator_stops_when_the_reference_evaluator_disagrees(
 
 
 def test_generator_check_fails_on_a_stale_lock(contract_copy: Path) -> None:
-    readme = contract_copy / "tool-call-condition-v2/README.md"
+    readme = contract_copy / "tool-call-condition-v1/README.md"
     readme.write_text(readme.read_text(encoding="utf-8") + "\nedit\n", encoding="utf-8")
     argv = ["--garak-checkout", "x", "--garak-python", "y", "--check"]
     assert GENERATOR.main(argv) == 1
 
 
 def test_generator_write_mode_restores_vectors_and_lock(contract_copy: Path) -> None:
-    vectors = contract_copy / "tool-call-condition-v2/vectors/validate.json"
+    vectors = contract_copy / "tool-call-condition-v1/vectors/validate.json"
     vectors.write_text("{}\n", encoding="utf-8")
     (contract_copy / "CONTRACT.lock").write_text("{}\n", encoding="utf-8")
     assert GENERATOR.main(["--garak-checkout", "x", "--garak-python", "y"]) == 0
@@ -574,9 +574,9 @@ def test_generator_write_mode_restores_vectors_and_lock(contract_copy: Path) -> 
 def test_generator_write_mode_creates_and_pins_a_missing_vector_file(
     contract_copy: Path,
 ) -> None:
-    (contract_copy / "tool-call-condition-v2/vectors/evaluate.json").unlink()
+    (contract_copy / "tool-call-condition-v1/vectors/evaluate.json").unlink()
     assert GENERATOR.main(["--garak-checkout", "x", "--garak-python", "y"]) == 0
-    for name in ("tool-call-condition-v2/vectors/evaluate.json", "CONTRACT.lock"):
+    for name in ("tool-call-condition-v1/vectors/evaluate.json", "CONTRACT.lock"):
         assert (contract_copy / name).read_bytes() == (
             CONTRACT_ROOT / name
         ).read_bytes()

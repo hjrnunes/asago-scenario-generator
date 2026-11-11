@@ -305,9 +305,9 @@ def _validate_unique_candidate_ids(row: TaxonomyObligation) -> None:
 
 
 class CandidateRecord(_ContractModel):
-    """One concrete candidate-v2 projection detail under an obligation."""
+    """One concrete candidate-v1 projection detail under an obligation."""
 
-    candidate_id: str = Field(pattern=r"^cand:v2:[0-9a-f]{32}$")
+    candidate_id: str = Field(pattern=r"^cand:v1:[0-9a-f]{32}$")
     canonical_ingress: EntryPointResourceReference | None = None
     resource_bindings: tuple[ResourceBinding, ...] = ()
     projection_disposition: ObligationProjectionDisposition = "projectable"

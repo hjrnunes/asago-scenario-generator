@@ -11,10 +11,10 @@ from its source tree; the package depends on the standard library and
 ``jsonschema``, which Garak's interpreter has. A child process started with the
 Garak interpreter runs ``validate_condition`` and ``evaluate_condition`` on the
 inputs. The checkout must be at ``REVISION``,
-where Garak evaluates ``tool-call-condition-v2``; every expected value in the
+where Garak evaluates ``tool-call-condition-v1``; every expected value in the
 vector files comes from that run, and the files record that revision.
 
-The script also runs ``evaluate_condition_v2`` on the same inputs and stops
+The script also runs ``evaluate_condition`` on the same inputs and stops
 when it disagrees with Garak on any vector.
 
 Without ``--check`` the script writes the ``vectors/`` and ``CONTRACT.lock``.
@@ -39,11 +39,11 @@ from typing import Any
 CHECKOUT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(CHECKOUT / "packages/asago-handoff/src"))
 
-from asago_handoff.condition_eval import evaluate_condition_v2  # noqa: E402
+from asago_handoff.condition_eval import evaluate_condition  # noqa: E402
 
 REVISION = "4f4917d666feea947731ec1588739d8427bc15d9"
 CONTRACT = "tool-call-condition"
-VERSION = "tool-call-condition-v2"
+VERSION = "tool-call-condition-v1"
 AUTHORITY = "asago-scenario-generator"
 ROOT = Path(__file__).resolve().parents[1] / "data/contracts" / CONTRACT
 
@@ -1327,12 +1327,12 @@ def run_garak(garak_python: Path, checkout: Path) -> dict[str, Any]:
 
 
 def reference_disagreements(evaluate: list[dict]) -> list[str]:
-    """The ids of the vectors whose result ``evaluate_condition_v2`` differs."""
+    """The ids of the vectors whose result ``evaluate_condition`` differs."""
 
     return [
         vector["id"]
         for vector in evaluate
-        if evaluate_condition_v2(
+        if evaluate_condition(
             vector["condition"], vector["calls"], vector["complete"]
         )
         != (vector["outcome"], vector["reason"], vector["matched_calls"])
@@ -1436,7 +1436,7 @@ def main(argv: list[str] | None = None) -> int:
     disagreements = reference_disagreements(computed["evaluate"])
     if disagreements:
         raise SystemExit(
-            "evaluate_condition_v2 disagrees with Garak on: " + ", ".join(disagreements)
+            "evaluate_condition disagrees with Garak on: " + ", ".join(disagreements)
         )
     planned = planned_files(ROOT, computed)
     stale = stale_files(planned)

@@ -425,7 +425,7 @@ def test_a_run_with_a_risk_extraction_publishes_policy_coverage(tmp_path):
 
     path = result.artifact_paths["policy-coverage.json"]
     document = json.loads(path.read_text())
-    assert document["schema_version"] == "policy-coverage-v2"
+    assert document["schema_version"] == "policy-coverage-v1"
     assert document["policy"]["risk_extraction"] == "risks.json"
 
 
@@ -1241,7 +1241,7 @@ def test_synthesis_manifest_names_each_artifact_digest_once(tmp_path: Path) -> N
     result = run_synthesis(_inputs(tmp_path), SynthesisAdapters.from_object(fake))
 
     manifest = result.manifest
-    assert manifest["schema_version"] == "stpa-synthesis-manifest-v2"
+    assert manifest["schema_version"] == "stpa-synthesis-manifest-v1"
     assert not set(_RETIRED_MANIFEST_KEYS) & set(manifest)
     for artifact in ("use_case", "scenario_collection", "taxonomy_obligation_plan"):
         assert manifest["source_artifacts"][artifact]["semantic_digest"]

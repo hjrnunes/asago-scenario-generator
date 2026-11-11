@@ -37,7 +37,7 @@ from asago_scenario_generator.stpa.scenario_prod.stage5.generate import (
     is_bdi_length_retry_exhausted,
 )
 from asago_scenario_generator.stpa.scenario_prod.handoff import (
-    build_scenario_handoff_v6,
+    build_scenario_handoff,
     handoff_ownership_violations,
 )
 from asago_scenario_generator.stpa.scenario_prod.and_or_tree import (
@@ -567,7 +567,7 @@ def test_normal_draft_publishes_to_handoff_without_execution_content(tmp_path) -
         gherkin_spec=gherkin,
         gherkin_raw=gherkin.to_feature_text(),
     )
-    handoff = build_scenario_handoff_v6(envelope, loss_analysis=_loss_analysis())
+    handoff = build_scenario_handoff(envelope, loss_analysis=_loss_analysis())
     payload = handoff.model_dump(mode="json")
     assert handoff.semantic_failure_criterion == PROPOSITION
     assert handoff.safe_alternative

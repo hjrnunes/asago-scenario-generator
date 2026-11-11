@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from asago_scenario_generator.models.attack_pattern_chain import AttackPattern
 from asago_scenario_generator.stpa.infra.prompt_preflight import estimate_prompt_tokens
+from asago_scenario_generator.stpa.obligation_aware.briefs import obligation_order_key
 from asago_scenario_generator.stpa.obligation_aware.contracts import ObligationRoute
 from asago_scenario_generator.stpa.obligation_aware.prompts import (
     build_synthesis_slot_prompts,
@@ -27,6 +28,7 @@ def _routes_to_first_slot():
         make_plan(risk_ids=("risk-a", "risk-b", "risk-c")), (pattern,)
     )
     slot = create_slots(_control_structure())[0]
+    # The splitter fills parts in obligation_order_key order, not in ID order.
     routes = tuple(
         ObligationRoute(
             obligation_id=brief.obligation_id,
@@ -36,7 +38,7 @@ def _routes_to_first_slot():
             constraint_ids=("SC-1",),
             evidence=(f"route-{index}",),
         )
-        for index, brief in enumerate(briefs)
+        for index, brief in enumerate(sorted(briefs, key=obligation_order_key))
     )
     return briefs, routes, slot
 

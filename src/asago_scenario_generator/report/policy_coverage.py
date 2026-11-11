@@ -1,4 +1,4 @@
-"""The ``policy-coverage-v2`` document: which policy risks reached scenarios.
+"""The ``policy-coverage-v1`` document: which policy risks reached scenarios.
 
 The producer owns the rule that maps a policy risk to its scenarios and
 publishes the result once, so the run reports (this producer's, the
@@ -45,7 +45,7 @@ from asago_scenario_generator.stpa.system_model.risk_actionability import (
     RiskActionabilityRecord,
 )
 
-SCHEMA_VERSION = "policy-coverage-v2"
+SCHEMA_VERSION = "policy-coverage-v1"
 FILENAME = "policy-coverage.json"
 RULE = "loss-source-risk-cards"
 # Best first: a merged risk takes the coverage of its best entry.
@@ -259,7 +259,7 @@ def build_policy_coverage(
     scenario_ids_by_hazard: Mapping[str, Sequence[str]],
     source: Mapping[str, Any] | None,
 ) -> dict[str, Any]:
-    """Return the ``policy-coverage-v2`` document for one generate run.
+    """Return the ``policy-coverage-v1`` document for one generate run.
 
     ``coverage`` follows this order: a loss that cites the risk decides
     (``scenarios`` when a written scenario carries the loss, else

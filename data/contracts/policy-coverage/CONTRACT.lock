@@ -2,9 +2,9 @@
   "authority": "asago-scenario-generator",
   "contract": "policy-coverage",
   "files": {
-    "policy-coverage-v2/README.md": "a25d0eb324590a1a04ea673e5eb5c9f593a0d48692aa3e2cfc2e1db3142d8ef9",
-    "policy-coverage-v2/schema.json": "5c2e9c6f13f6e05bf310035a96fedf9bc695c73c87e8b397a5e872cff330bf3c",
-    "policy-coverage-v2/valid/minimal.json": "5f7188d83614de51fb17f95899390c01cda0585d3d066d2d9a9e3c3b309c273f"
+    "policy-coverage-v1/README.md": "3e4e0ec51b3fb4b8fc254fdc4baf9475f2f9c8905072bbc92dba1b40cc47bc8c",
+    "policy-coverage-v1/schema.json": "0ec7938286875736a738045ba8e86456e271e2824ceba1e91d697e6ace744aa2",
+    "policy-coverage-v1/valid/minimal.json": "f2af43149999b89dba300d35b335fb2bd84e32517662759e68c289ecc47b605b"
   },
-  "schema_version": "policy-coverage-v2"
+  "schema_version": "policy-coverage-v1"
 }

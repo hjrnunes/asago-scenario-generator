@@ -1,6 +1,6 @@
 """The published scenario-handoff schema: the model's shape plus its rules.
 
-``ScenarioHandoffV6`` checks the handoff rules in Pydantic validators, but a
+``ScenarioHandoff`` checks the handoff rules in Pydantic validators, but a
 reader that holds only ``schema.json`` sees the model's shape, not those
 checks.  This module states every rule JSON Schema can express as
 ``allOf``/``if``/``then`` assertions (the form ``json_schema_extra`` adds), and
@@ -26,7 +26,7 @@ from __future__ import annotations
 from typing import Any
 
 from asago_scenario_generator.stpa.observation_contract import _CLAIM_EVIDENCE
-from asago_scenario_generator.stpa.scenario_prod.handoff import ScenarioHandoffV6
+from asago_scenario_generator.stpa.scenario_prod.handoff import ScenarioHandoff
 
 #: The safe-outcome rules JSON Schema can state.  ``SafeObservableOutcome``
 #: enforces the same rules for a Pydantic reader; the published schema carries
@@ -151,7 +151,7 @@ def handoff_schema() -> dict[str, Any]:
     additions never reach the model's own ``model_json_schema()``.
     """
 
-    schema = ScenarioHandoffV6.model_json_schema(by_alias=True)
+    schema = ScenarioHandoff.model_json_schema(by_alias=True)
     safe_outcome = schema["$defs"]["SafeObservableOutcome"]
     safe_outcome["allOf"] = [
         *safe_outcome.get("allOf", []),

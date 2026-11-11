@@ -1,4 +1,4 @@
-schema_version: scenario-handoff-v6
+schema_version: scenario-handoff-v1
 scenario_id: SCN-023
 scenario_version: 1
 kind: adversarial
@@ -184,7 +184,7 @@ sourced_facts:
   authority: derived_proposed_constraint
 - statement: The unsafe outcome condition is expressed semantically; the executable
     check is derived downstream.
-  source: producer handoff contract scenario-handoff-v6
+  source: producer handoff contract scenario-handoff-v1
   authority: producer_contract
 assumptions_and_unknowns:
 - The execution-time target state is captured fresh by the consumer; no producer-supplied
@@ -213,7 +213,7 @@ observation:
     supported_criteria:
     - observation_1
     unsupported_criteria: []
-content_digest: d84d421d322e7c008751acdda52876b4cf5ddfaf6db0e216124c3660ca96f94f
+content_digest: 5fcb3fb432dba2925aa0f434c410333301a6a653ea1cde106c5af8de22aa305b
 condition_omitted_reason: The discriminating condition failed validation after one
   correction (discriminating_condition_check_failed); the scenario is published without
   a condition.
@@ -309,8 +309,8 @@ worst_case_threat: Legal penalties, fines, or operational restrictions resulting
   representation of merchant policies.
 contract:
   id: scenario-handoff
-  version: scenario-handoff-v6
-  spec_digest: sha256:a2f3bfe6fa4e3ee926bada66bc420d55a2ea9989a2dd62981acb705426c2f79a
+  version: scenario-handoff-v1
+  spec_digest: sha256:c7fe26b7e19fa5bf9883c9ebdbb6c7028e1aa11f109ae98a47a0b17903e83f48
   requires: []
   provenance:
     writer: asago_scenario_generator.stpa.scenario_prod.handoff

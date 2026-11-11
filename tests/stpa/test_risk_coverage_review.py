@@ -329,7 +329,7 @@ class TestValidReview:
         assert outcome.call_count == 1
         assert outcome.failure_reason is None
         artifact = yaml.safe_load((tmp_path / ARTIFACT_FILENAME).read_text())
-        assert artifact["schema_version"] == "loss-analysis-risk-coverage-review-v3"
+        assert artifact["schema_version"] == "loss-analysis-risk-coverage-review-v1"
         assert artifact["status"] == "completed"
         assert artifact["call_count"] == 1
         assert artifact["failure_reason"] is None

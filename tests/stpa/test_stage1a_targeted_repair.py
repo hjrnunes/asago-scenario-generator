@@ -1874,7 +1874,7 @@ class TestRepairRecord:
 
         assert len(result.risk_dispositions) == 112
         record = _repair_record(tmp_path)
-        assert record["schema_version"] == "loss-analysis-repair-record-v2"
+        assert record["schema_version"] == "loss-analysis-repair-record-v1"
         assert _record_tuples(record) == [
             ("risk_derivation", "first", "salvage", "SC-1/O1", "removed"),
             ("risk_derivation", "repair", "repair", "SC-1/O1", "repaired"),

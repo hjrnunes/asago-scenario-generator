@@ -44,7 +44,7 @@ def _requirement_id(prefix: str, *components: str) -> str:
     IDs are **unbounded in length**: hex encoding doubles each component's
     byte length, so long step IDs or slot IDs produce long requirement IDs.
     Downstream persistence must use unbounded text columns or establish a
-    future explicit bound.  No bounded consumer exists in candidate-v2.
+    future explicit bound.  No bounded consumer exists in candidate-v1.
     """
     encoded = ":".join(c.encode("utf-8").hex() for c in components)
     return f"{prefix}.{encoded}"

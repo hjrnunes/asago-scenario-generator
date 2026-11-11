@@ -20,7 +20,7 @@ own documents.
   controlled process. Unqualified "controller" belongs to STPA material only.
 - **Control action** — an action a controller issues; the scenario names the
   unsafe one and the context that makes it unsafe.
-- **Scenario** (`scenario-handoff-v6`) — the frozen handoff: narrative, attack
+- **Scenario** (`scenario-handoff-v1`) — the frozen handoff: narrative, attack
   tree, Gherkin, failure criterion, safe alternative and metadata.
 - **Party** — one of `third_party`, `counterparty`, `operator_insider` or
   `unknown`, from `ItemController`.
@@ -144,7 +144,7 @@ with unit tests under `tests/` and prompt text with rows in
 | --- | --- |
 | Entry points and configuration | `README.md`, CLI `--help` |
 | Pipeline or cross-repository contract change | `docs/architecture/overview.md`, applicable schema in `data/contracts/`, current task spec |
-| Handoff rule validation, conformance and the condition-v2 evaluator | `packages/asago-contracts-core/README.md` |
+| Handoff rule validation, conformance and the condition-v1 evaluator | `packages/asago-contracts-core/README.md` |
 | Prompt, response, grounding, or review change | The actual prompt builders and their tests; `tests/phrases/*.yaml` pins prompt text |
 
 `AGENTS.md` is a symlink to this file. Edit `CLAUDE.md`; preserve the symlink.

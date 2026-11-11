@@ -149,7 +149,7 @@ def test_the_rebuilt_plan_keeps_the_recorded_bytes(
     assert hashlib.sha256(text.encode("utf-8")).hexdigest() == expected["plan_sha256"]
     assert yaml.safe_load(text)["semantic_digest"] == expected["plan_semantic_digest"]
     assert (
-        sorted(set(re.findall(r"cand:v2:[0-9a-f]{32}", text)))
+        sorted(set(re.findall(r"cand:v1:[0-9a-f]{32}", text)))
         == expected["candidate_ids"]
     )
 

@@ -26,8 +26,8 @@ from asago_scenario_generator.stpa.scenario_prod.and_or_tree import (
     render_and_or_tree,
 )
 from asago_scenario_generator.stpa.scenario_prod.handoff import (
-    ScenarioHandoffV6,
-    build_scenario_handoff_v6,
+    ScenarioHandoff,
+    build_scenario_handoff,
     handoff_ownership_violations,
     verify_handoff_digest,
 )
@@ -412,7 +412,7 @@ def _handoff(spec: ScenarioSpec, tree: dict[str, Any]) -> dict[str, Any]:
         gherkin_spec=gherkin,
         gherkin_raw=gherkin.to_feature_text(),
     )
-    return build_scenario_handoff_v6(envelope).model_dump(mode="json", by_alias=True)
+    return build_scenario_handoff(envelope).model_dump(mode="json", by_alias=True)
 
 
 @pytest.mark.parametrize(
@@ -424,7 +424,7 @@ def test_an_and_or_handoff_passes_ownership_model_and_schema(make) -> None:
 
     assert handoff_ownership_violations(document) == []
     assert list(Draft202012Validator(SCHEMA).iter_errors(document)) == []
-    verify_handoff_digest(ScenarioHandoffV6.model_validate(document))
+    verify_handoff_digest(ScenarioHandoff.model_validate(document))
 
 
 def test_the_other_scenarios_in_the_tree_leave_the_handoff_unchanged() -> None:
@@ -475,7 +475,7 @@ def test_a_run_renders_trees_that_name_each_other_and_publishes_paths(
         document = _published_handoff(tmp_path, scenario_id)
         assert list(Draft202012Validator(SCHEMA).iter_errors(document)) == []
         assert handoff_ownership_violations(document) == []
-        verify_handoff_digest(ScenarioHandoffV6.model_validate(document))
+        verify_handoff_digest(ScenarioHandoff.model_validate(document))
         assert "attack_tree" not in document
         assert document["attack_path"]["format"] == "attack-path-v1"
 

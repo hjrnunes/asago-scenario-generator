@@ -1,4 +1,4 @@
-schema_version: scenario-handoff-v4
+schema_version: scenario-handoff-v1
 scenario_id: SCN-019
 scenario_version: 1
 kind: functional
@@ -283,7 +283,7 @@ sourced_facts:
   authority: derived_proposed_constraint
 - statement: The unsafe outcome condition is expressed semantically; the executable
     check is derived downstream.
-  source: producer handoff contract scenario-handoff-v4
+  source: producer handoff contract scenario-handoff-v1
   authority: producer_contract
 assumptions_and_unknowns:
 - The execution-time target state is captured fresh by the consumer; no producer-supplied
@@ -313,7 +313,7 @@ observation:
     supported_criteria:
     - observation_1
     unsupported_criteria: []
-content_digest: e98ece7251377a0336b77be013b6c69b9dc63578231bab6c607b757b3b5d79c7
+content_digest: cd54e4820611d430dffaef8dfb9847999d8d34f2402c31e95819415c335915bb
 discriminating_condition:
   statement: The question argument in ask_clinical_question is not grounded in the
     verified conversation content.

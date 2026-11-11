@@ -143,7 +143,7 @@ def test_slot_with_more_routes_than_the_batch_size_is_filled_once() -> None:
         controls=controls,
     )
 
-    assert adapter.parts == [tuple(route.obligation_id for route in routes)]
+    assert adapter.parts == [tuple(sorted(route.obligation_id for route in routes))]
     assert [item.disposition for item in result.considerations] == ["finding"] * 3
     assert not result.result.diagnostics
 

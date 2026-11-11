@@ -1,4 +1,4 @@
-"""Compatibility shim: the condition-v2 evaluator lives in ``asago_handoff``.
+"""Compatibility shim: the condition-v1 evaluator lives in ``asago_handoff``.
 
 ``asago_handoff.condition_eval`` holds the single implementation. The producer,
 the consumer and the orchestrator all evaluate with it, so the producer's Stage
@@ -12,7 +12,7 @@ from asago_handoff.condition_eval import (
     INCONCLUSIVE,
     NOT_DETECTED,
     ConditionEvaluation,
-    evaluate_condition_v2,
+    evaluate_condition,
     validate_condition,
 )
 
@@ -21,6 +21,6 @@ __all__ = [
     "INCONCLUSIVE",
     "NOT_DETECTED",
     "ConditionEvaluation",
-    "evaluate_condition_v2",
+    "evaluate_condition",
     "validate_condition",
 ]

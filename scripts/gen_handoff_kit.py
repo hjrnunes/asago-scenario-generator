@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generate the scenario-handoff contract kit and refresh CONTRACT.lock.
 
-The generator writes ``scenario-handoff-v6``: documents that name the party
+The generator writes ``scenario-handoff-v1``: documents that name the party
 field ``controlling_party``, signed in the version's digest domain, with the
 envelope its spec requires. Run from any directory:
 ``uv run python scripts/gen_handoff_kit.py``.
@@ -30,9 +30,9 @@ from asago_scenario_generator.stpa.scenario_prod.condition_check import (
 )
 from asago_scenario_generator.stpa.models.attack_shape import AttackShape
 from asago_scenario_generator.stpa.scenario_prod.handoff import (
-    HANDOFF_SCHEMA_VERSION_V6,
+    HANDOFF_SCHEMA_VERSION,
     HYPOTHESIS_FRAMING,
-    ScenarioHandoffV6,
+    ScenarioHandoff,
     finalize_handoff,
     handoff_ownership_violations,
     handoff_payload_digest,
@@ -48,7 +48,7 @@ from asago_scenario_generator.stpa.scenario_prod.tool_call_binding import (
 
 ROOT = Path(__file__).resolve().parents[1] / "data/contracts/scenario-handoff"
 CONTRACT_NAME = "scenario-handoff"
-KIT_NAME = HANDOFF_SCHEMA_VERSION_V6
+KIT_NAME = HANDOFF_SCHEMA_VERSION
 CASES_NAME = "cases"
 README_NAME = "README.md"
 
@@ -74,14 +74,14 @@ UNKNOWNS = [
 def contract_fact() -> dict:
     return {
         "authority": "producer_contract",
-        "source": f"producer handoff contract {HANDOFF_SCHEMA_VERSION_V6}",
+        "source": f"producer handoff contract {HANDOFF_SCHEMA_VERSION}",
         "statement": "The unsafe outcome condition is expressed semantically; the executable check is derived downstream.",
     }
 
 
 def base(scenario_id: str, kind: str, *, criterion: str, safe: str) -> dict:
     return {
-        "schema_version": HANDOFF_SCHEMA_VERSION_V6,
+        "schema_version": HANDOFF_SCHEMA_VERSION,
         "scenario_id": scenario_id,
         "scenario_version": 1,
         "kind": kind,
@@ -460,7 +460,7 @@ def analytical() -> dict:
 
 
 def with_binding(payload: dict) -> dict:
-    """Add the v3 tool-call binding Stage 5 would publish for *payload*."""
+    """Add the tool-call binding Stage 5 would publish for *payload*."""
 
     binding = bind_tool_call_condition(
         payload.get("discriminating_condition"),
@@ -813,7 +813,7 @@ def resigned(payload: dict) -> dict:
     """Sign *payload* again so a reader that checks the digest first reaches the
     broken field; a payload of another version keeps its digest."""
 
-    if payload.get("schema_version") == HANDOFF_SCHEMA_VERSION_V6:
+    if payload.get("schema_version") == HANDOFF_SCHEMA_VERSION:
         unsigned = {k: v for k, v in payload.items() if k != "content_digest"}
         payload["content_digest"] = handoff_payload_digest(unsigned)
     return payload
@@ -1325,7 +1325,7 @@ def with_path(relative: str, payload: dict) -> dict:
 
 
 def finalize(payload: dict) -> dict:
-    handoff = finalize_handoff(ScenarioHandoffV6.model_validate(payload))
+    handoff = finalize_handoff(ScenarioHandoff.model_validate(payload))
     return handoff.model_dump(mode="json", exclude_none=True, by_alias=True)
 
 
@@ -1582,7 +1582,7 @@ def _mutated_companion(
 
 def companion_payloads(valid: dict[str, dict]) -> dict[str, dict]:
     """The feature companions: the text the producer writes, and four it refuses."""
-    gherkin = ScenarioHandoffV6.model_validate(valid[CONFORMANCE_HANDOFF]).gherkin
+    gherkin = ScenarioHandoff.model_validate(valid[CONFORMANCE_HANDOFF]).gherkin
     text = gherkin.to_feature_text()
     texts = {"holds": text}
     texts.update(
@@ -1704,7 +1704,7 @@ carries the whole contract directory as byte-identical package data.
 
 ## The document
 
-`scenario-handoff-v6` states one failure: the unsafe outcome, the procedure chain that leads
+`scenario-handoff-v1` states one failure: the unsafe outcome, the procedure chain that leads
 to it, the taxonomy references, the preconditions, the discriminating condition and the tool
 call the failure needs. A document names the party that controls a planted item as
 `attack_shape.indirect.party_relation.controlling_party`. The producer's model keeps
@@ -1738,7 +1738,7 @@ A document written from the self-identifying envelope carries one `contract` blo
 {
   "contract": {
     "id": "scenario-handoff",
-    "version": "scenario-handoff-v6",
+    "version": "scenario-handoff-v1",
     "spec_digest": "sha256:...",
     "requires": [],
     "provenance": {
@@ -1750,7 +1750,7 @@ A document written from the self-identifying envelope carries one `contract` blo
 }
 ```
 
-`scenario-handoff-v6` is published with `"envelope": "required"`, so a document names its
+`scenario-handoff-v1` is published with `"envelope": "required"`, so a document names its
 version before a reader validates it. A reader selects one of its installed specs by the
 document's contract id and version, and rejects:
 
@@ -1769,7 +1769,7 @@ consumer's input adapter keep their existing error wording.
 
 The orchestrator keeps no copy of this contract and validates no handoff against it. Its
 handoff reader reads only `schema_version`: the orchestrator's `HANDOFF_SCHEMA_VERSIONS`
-pins `scenario-handoff-v6`, and a saved generate output whose handoff names any other
+pins `scenario-handoff-v1`, and a saved generate output whose handoff names any other
 version is refused rather than reused, with a message naming the version authoring reads.
 """
 
@@ -1866,7 +1866,7 @@ def write_lock() -> None:
         "authority": previous["authority"],
         "contract": previous["contract"],
         "files": files,
-        "schema_version": HANDOFF_SCHEMA_VERSION_V6,
+        "schema_version": HANDOFF_SCHEMA_VERSION,
     }
     lock_path.write_text(json.dumps(lock, indent=2) + "\n", encoding="utf-8")
 

@@ -938,14 +938,14 @@ def test_backward_ingress_link_on_outside_step_fails_closed() -> None:
 
 def test_absent_ingress_link_validates_but_unsupported() -> None:
     """A chain with no ingress link validates at model level (structurally
-    valid) but is candidate-v2-infeasible: the projection fails closed with
+    valid) but is candidate-v1-infeasible: the projection fails closed with
     a typed unsupported-activation issue rather than a model ValidationError.
     """
     raw = _link_chain()
     raw["steps"][0]["resource_links"] = []
     resign_chain(raw)
     # Model validation succeeds: absence of activation is not a structural
-    # defect, only a candidate-v2 feasibility defect.
+    # defect, only a candidate-v1 feasibility defect.
     pattern = AttackPattern.model_validate({**pattern_data(), "canonical_chain": raw})
     assert pattern.canonical_chain.steps[0].resource_links == ()
 

@@ -23,7 +23,7 @@ SYNC_PATH = Path(__file__).resolve().parents[2] / (
     "scripts/sync_tool_call_condition.py"
 )
 PRODUCER = Path(__file__).resolve().parents[2] / "data/contracts/tool-call-condition"
-VERSION = "tool-call-condition-v2"
+VERSION = "tool-call-condition-v1"
 
 
 def _load_sync() -> Any:

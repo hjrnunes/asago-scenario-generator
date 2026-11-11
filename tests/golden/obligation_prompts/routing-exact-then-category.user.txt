@@ -47,7 +47,7 @@ Compact obligation questions:
     label: exact_then_category_expansion
     meaning: The risk first matched an equivalent taxonomy concept, then expanded
       through a broader category to this pattern. Judge this pair explicitly.
-  obligation_handle: ob:v1:a62b3e4ad2fd3bc2db998fbbb1c050b3f890ee715343784bc3111d6f57f3257e
+  obligation_handle: ob:v1:ee6e64e6e8bd1e6aad0bb6d87cf02d5835583e996ae94db29813e7472a382d0f
   reviewed_risk:
     consequence: null
     description: A reviewed risk used by planner tests.

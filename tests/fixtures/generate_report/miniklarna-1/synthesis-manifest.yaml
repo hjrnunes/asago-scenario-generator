@@ -1,4 +1,4 @@
-schema_version: stpa-synthesis-manifest-v2
+schema_version: stpa-synthesis-manifest-v1
 run_id: synthesis-20261009T235615Z
 created_at: '2026-10-09T23:56:15.608127+00:00'
 run_status: completed

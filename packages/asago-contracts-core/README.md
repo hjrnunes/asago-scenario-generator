@@ -68,7 +68,7 @@ gives a document the envelope its spec's reader accepts.
 A version directory carries the version number in its name. The name is a prefix
 and a semantic version, usually the contract name and `-v`: `<contract>-v<major>`,
 `<contract>-v<major>.<minor>` or `<contract>-v<major>.<minor>.<patch>`. Some
-installed kits keep a historical prefix (`artifact-runtime-contract-v3` belongs
+installed kits keep a historical prefix (`artifact-runtime-contract-v1` belongs
 to `runtime-contract`) or use the bare `<prefix>-<major>.<minor>.<patch>` form
 (`attack-flow-2.0.0`). A missing minor or patch reads as 0, so
 `demo-v5` is 5.0.0 and `example-v1.1.0` is 1.1.0. `v1`, `1.`,
@@ -104,8 +104,8 @@ version by adding its directory and spec, and let the code derive the number.
   an unrelated violation does not hide a broken case. A rule code that ends in
   `:` names a family and matches every violation code that starts with it; any
   other code matches exactly.
-- `evaluate_condition_v2(condition, calls, complete)` evaluates a
-  `tool-call-condition-v2` condition, and `validate_condition(condition)`
+- `evaluate_condition(condition, calls, complete)` evaluates a
+  `tool-call-condition-v1` condition, and `validate_condition(condition)`
   reports a structural problem first. `DETECTED`, `NOT_DETECTED` and
   `INCONCLUSIVE` name its outcomes.
 
@@ -128,7 +128,7 @@ policy combinations the consumer uses for input digests.
 ## Data
 
 `src/asago_contracts_core/data/` is the spec root: it carries the producer's
-whole `scenario-handoff/` contract directory (the `scenario-handoff-v6/` version
+whole `scenario-handoff/` contract directory (the `scenario-handoff-v1/` version
 directory with `spec.json`, `schema.json`, `cases/` and `README.md`, plus
 `ownership-rules.json` and `CONTRACT.lock`) and `envelope-v1.schema.json`, for
 the code to read. `installed_specs()` loads the specs from that root.

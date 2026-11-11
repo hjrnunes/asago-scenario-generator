@@ -1,4 +1,4 @@
-schema_version: loss-analysis-risk-coverage-review-v3
+schema_version: loss-analysis-risk-coverage-review-v1
 reviewed_loss_analysis_digest: 3d2ba465412d4071679b54ce7056383dfced6d58737e0990a9896ee9c50b8a6b
 risk_set_digest: 837decdf2cfbe0833ec48f933b3aeb9034a813de5ed2ce599aafc416bbe2d1e5
 status: partial

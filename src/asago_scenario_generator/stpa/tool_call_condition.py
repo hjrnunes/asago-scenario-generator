@@ -1,6 +1,6 @@
 """Bound tool-call condition and its binding status.
 
-The condition shape is that of ``tool-call-condition-v2``.
+The condition shape is that of ``tool-call-condition-v1``.
 
 A :class:`ToolCallCondition` is the ready-to-evaluate form of a scenario's
 discriminating condition: every observed fact is already resolved, so the

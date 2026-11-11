@@ -14,7 +14,7 @@ from asago_scenario_generator.pipeline.projection_contracts import (
     ProjectionIssue,
     ProjectionLimitation,
     RejectedProjectionCandidate,
-    _rejected_candidate_v2_id,
+    _rejected_candidate_id,
 )
 from asago_scenario_generator.pipeline.projection_allocation import (
     _PatternProjectionState,
@@ -122,9 +122,7 @@ class _AuthoritativeCandidateAllocator:
         )
         self.rejected_candidates.append(
             RejectedProjectionCandidate(
-                candidate_id=_rejected_candidate_v2_id(
-                    state.pattern_id, issue, bindings
-                ),
+                candidate_id=_rejected_candidate_id(state.pattern_id, issue, bindings),
                 pattern_id=state.pattern_id,
                 canonical_ingress=ingress,
                 resource_bindings=bindings,
@@ -137,7 +135,7 @@ class _AuthoritativeCandidateAllocator:
         """Emit a candidate under the identity and budget guards."""
         previous = self.by_identity.get(candidate.candidate_id)
         if previous is not None and previous != candidate:
-            raise ValueError("candidate-v2 identity collision")
+            raise ValueError("candidate-v1 identity collision")
         if previous is None and len(self.by_identity) < self.budget.max_candidates:
             self.by_identity[candidate.candidate_id] = candidate
             self.emitted_by_group[group_index] += 1

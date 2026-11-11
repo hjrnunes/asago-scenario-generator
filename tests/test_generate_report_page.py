@@ -179,7 +179,7 @@ def test_the_handoff_lists_files_with_schema_versions(tmp_path: Path) -> None:
 
     handoff = html.split('<section id="handoff">')[1].split("</section>")[0]
     for text in (
-        "scenario-handoff-v6",
+        "scenario-handoff-v1",
         "scenario-testability-v1",
         "testability.yaml",
         "8 files",

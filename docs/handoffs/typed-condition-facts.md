@@ -9,7 +9,7 @@ them from typed fields, and never from a name, a value, or a description:
 | The record kind of an operation argument (`order_id`, `customer_id`, `patient_id`, `free_text`, ...) | `value_facts.arguments` of `execution-target-profile-v1` | the target's declarations; discover passes them to the scanner |
 | The record kind of a state value or of a state mapping's keys | `value_facts.state_fields` and `value_facts.state_keys` | the target's declarations |
 | That an argument or state value holds a `date` or `date-time` | `format` in the same entries | the target's declarations; for an argument, also a `string` input-schema property with `format: date` or `format: date-time`, which the scanner adds (a declaration with a different format leaves no fact) |
-| Whether the failure criterion is an incorrect call or a missing call, and of which operation | `semantic_failure_call` of `scenario-handoff-v6` (`unsafe_outcome.failure_call` in the Stage 5 response) | the producer (Stage 5) |
+| Whether the failure criterion is an incorrect call or a missing call, and of which operation | `semantic_failure_call` of `scenario-handoff-v1` (`unsafe_outcome.failure_call` in the Stage 5 response) | the producer (Stage 5) |
 
 Without a fact the check reports the case undecidable, as before. With one,
 it decides:

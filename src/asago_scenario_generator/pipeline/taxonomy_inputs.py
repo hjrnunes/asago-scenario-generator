@@ -26,7 +26,7 @@ from asago_scenario_generator.pipeline.obligation_contracts import (
     compute_mapping_bundle_digest,
 )
 
-OBLIGATION_EDGES_RELEASE = "obligation-mapping-bundle-v2"
+OBLIGATION_EDGES_RELEASE = "obligation-mapping-bundle-v1"
 _LLM_PATTERN_EVIDENCE = "llm-to-attack-pattern.yaml"
 
 

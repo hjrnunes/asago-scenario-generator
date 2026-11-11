@@ -1,4 +1,4 @@
-schema_version: scenario-handoff-v4
+schema_version: scenario-handoff-v1
 scenario_id: SCN-026
 scenario_version: 1
 kind: functional
@@ -295,7 +295,7 @@ sourced_facts:
   authority: derived_proposed_constraint
 - statement: The unsafe outcome condition is expressed semantically; the executable
     check is derived downstream.
-  source: producer handoff contract scenario-handoff-v4
+  source: producer handoff contract scenario-handoff-v1
   authority: producer_contract
 assumptions_and_unknowns:
 - The execution-time target state is captured fresh by the consumer; no producer-supplied
@@ -325,7 +325,7 @@ observation:
     supported_criteria:
     - obs_1
     unsupported_criteria: []
-content_digest: b96ea4c9cee6d82d50b2b38d43f38d65692620cc3789db41045eed9b38a00cb2
+content_digest: 605ee039c98cc0198327991be9d63954c13dfeae8c9e739b140c9f0f03ee78e9
 discriminating_condition:
   statement: The operation is called with an inverted or invalid date range.
   comparisons:

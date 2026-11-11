@@ -1701,7 +1701,7 @@ def summarize(
         for row in rows
     )
     return {
-        "schema_version": "conflict-review-pilot-summary-v2",
+        "schema_version": "conflict-review-pilot-summary-v1",
         "profile": profile,
         "controls": list(controls),
         "cases_listed": len(cases),

@@ -14,7 +14,7 @@ from asago_scenario_generator.pipeline.projection_contracts import (
     ProjectionIssue,
     ProjectionQualificationTrace,
     RejectedProjectionCandidate,
-    _rejected_candidate_v2_id,
+    _rejected_candidate_id,
 )
 
 from asago_scenario_generator.pipeline.projection_allocation import (
@@ -42,7 +42,7 @@ def _derived_candidates(
         for candidate in state.generated:
             previous = by_identity.get(candidate.candidate_id)
             if previous is not None and previous != candidate:
-                raise ValueError("candidate-v2 identity collision")
+                raise ValueError("candidate-v1 identity collision")
             by_identity[candidate.candidate_id] = candidate
     return tuple(by_identity[key] for key in sorted(by_identity))
 
@@ -75,7 +75,7 @@ _REJECTED_PROJECTION_CODES = frozenset(
 def _issue_rejected_candidate(issue: ProjectionIssue) -> RejectedProjectionCandidate:
     """Represent an aggregate projection issue as a stable rejected record."""
     return RejectedProjectionCandidate(
-        candidate_id=_rejected_candidate_v2_id(issue.pattern_id, issue),
+        candidate_id=_rejected_candidate_id(issue.pattern_id, issue),
         pattern_id=issue.pattern_id,
         reason=issue.detail,
         issue=issue,
@@ -103,7 +103,7 @@ def _deduplicate_rejected_candidates(
     for candidate in candidates:
         previous = by_identity.get(candidate.candidate_id)
         if previous is not None and previous != candidate:
-            raise ValueError("rejected candidate-v2 identity collision")
+            raise ValueError("rejected candidate-v1 identity collision")
         by_identity[candidate.candidate_id] = candidate
     return tuple(by_identity[key] for key in sorted(by_identity))
 

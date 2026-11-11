@@ -3,7 +3,7 @@
 ``validate_handoff`` is the one scenario-handoff rule reader: the ownership
 walker, the composed schema, and the rules the schema cannot state.
 ``run_conformance`` runs a contract kit's manifest against the same rules,
-``evaluate_condition_v2`` is the one ``tool-call-condition-v2`` evaluator, and
+``evaluate_condition`` is the one ``tool-call-condition-v1`` evaluator, and
 ``canonical_json``, ``framed_digest`` and ``digest_record`` pin the producer
 and consumer canonical-JSON encodings.
 
@@ -41,7 +41,7 @@ from .condition_eval import (
     INCONCLUSIVE,
     NOT_DETECTED,
     ConditionEvaluation,
-    evaluate_condition_v2,
+    evaluate_condition,
     validate_condition,
 )
 from .conformance import (
@@ -54,8 +54,8 @@ from .contract import (
     CASES_NAME,
     CONTRACT,
     CONTRACT_DIR,
-    HANDOFF_SCHEMA_VERSION_V6,
-    KIT_V6,
+    HANDOFF_SCHEMA_VERSION,
+    HANDOFF_KIT,
     VERSION,
     Contract,
     ContractError,
@@ -124,9 +124,9 @@ __all__ = [
     "DETECTED",
     "ENVELOPE_FIELD",
     "ENVELOPE_SCHEMA_ID",
-    "HANDOFF_SCHEMA_VERSION_V6",
+    "HANDOFF_SCHEMA_VERSION",
     "INCONCLUSIVE",
-    "KIT_V6",
+    "HANDOFF_KIT",
     "NFC_ALLOW_NAN_ENCODING",
     "NOT_DETECTED",
     "NO_NAN_ENCODING",
@@ -164,7 +164,7 @@ __all__ = [
     "canonical_json_bytes",
     "digest_record",
     "encoding_for",
-    "evaluate_condition_v2",
+    "evaluate_condition",
     "envelope_schema",
     "feature_violations",
     "framed_digest",

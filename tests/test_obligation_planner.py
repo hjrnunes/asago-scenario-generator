@@ -170,7 +170,7 @@ def test_deferred_observation_rejects_candidate_identity_collisions() -> None:
         )
     )
 
-    with pytest.raises(ValueError, match="candidate-v2 identity collision"):
+    with pytest.raises(ValueError, match="candidate-v1 identity collision"):
         _derived_candidates(allocator)
 
 

@@ -175,7 +175,7 @@ def test_pins_identify_the_catalog_and_the_closed_mapping_bundle(
     assert value.catalog_pins["atlas"].release == release.atlas.release
     assert value.mapping_pins["sssom"].digest == release.mapping_set_digest
     assert value.mapping_pins["obligation_edges"].release == (
-        "obligation-mapping-bundle-v2"
+        "obligation-mapping-bundle-v1"
     )
     assert value.mapping_pins["obligation_edges"].digest == (
         compute_mapping_bundle_digest(

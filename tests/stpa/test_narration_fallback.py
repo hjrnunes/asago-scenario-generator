@@ -34,7 +34,7 @@ from asago_scenario_generator.stpa.models.scenario_context import (
 from asago_scenario_generator.stpa.models.scenario_spec import ScenarioSpec
 from asago_scenario_generator.stpa.scenario_prod.handoff import (
     NARRATIVE_FALLBACK_FACT,
-    build_scenario_handoff_v6,
+    build_scenario_handoff,
     handoff_ownership_violations,
     handoff_schema_violations,
     narrative_fallback_fact,
@@ -703,7 +703,7 @@ def test_the_full_handoff_states_the_failure_in_plain_words(
     client.set_response_for(NarrationReply, [ONE_SENTENCE, ONE_SENTENCE])
 
     published = _narrate(_inputs(client, tmp_path), [spec])
-    handoff = build_scenario_handoff_v6(
+    handoff = build_scenario_handoff(
         _run_stage6_for_spec(spec, published[spec.scenario_id])
     )
 
@@ -732,7 +732,7 @@ def test_a_part_left_out_is_recorded_in_the_report_handoff_and_diagnostics(
     assert entry["fallback_commentary"] == []
     envelope = _run_stage6_for_spec(spec, published[spec.scenario_id])
     assert envelope.narrative_omitted == ("failure",)
-    fact = build_scenario_handoff_v6(envelope).sourced_facts[-1]
+    fact = build_scenario_handoff(envelope).sourced_facts[-1]
     assert fact == narrative_fallback_fact(("failure",))
     assert fact.statement.endswith(
         " It does not fully state the failure: code could not write all of it "
@@ -803,7 +803,7 @@ def test_a_narration_rejected_twice_publishes_the_marked_fallback_in_the_handoff
 
     envelope = _run_stage6_for_spec(spec, published[spec.scenario_id])
     assert envelope.narrative_fallback
-    handoff = build_scenario_handoff_v6(envelope)
+    handoff = build_scenario_handoff(envelope)
     assert handoff.narrative == plain
     assert not _ANALYST_ID.search(handoff.narrative)
     assert handoff.sourced_facts[-1] == NARRATIVE_FALLBACK_FACT
@@ -837,10 +837,10 @@ def test_an_accepted_narration_publishes_the_model_paragraph_unmarked(
     assert published == {spec.scenario_id: PublishedNarrative(paragraph)}
     envelope = _run_stage6_for_spec(spec, published[spec.scenario_id])
     assert not envelope.narrative_fallback
-    handoff = build_scenario_handoff_v6(envelope)
+    handoff = build_scenario_handoff(envelope)
     assert handoff.narrative == paragraph
     assert NARRATIVE_FALLBACK_FACT not in handoff.sourced_facts
     assert (
         NARRATIVE_FALLBACK_FACT
-        not in build_scenario_handoff_v6(_run_stage6_for_spec(spec)).sourced_facts
+        not in build_scenario_handoff(_run_stage6_for_spec(spec)).sourced_facts
     )

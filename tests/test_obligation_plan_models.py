@@ -89,7 +89,7 @@ def test_candidate_record_requires_authoritative_ingress_and_bindings() -> None:
 
 def test_projection_infeasible_record_retains_typed_reason_and_evidence() -> None:
     """Aggregate rejects may omit resources but must retain typed evidence."""
-    candidate_id = "cand:v2:" + "a" * 32
+    candidate_id = "cand:v1:" + "a" * 32
     issue = ProjectionIssue(
         code="missing_compatible_resource",
         pattern_id="AP-T1-01",
@@ -124,7 +124,7 @@ def test_projection_infeasible_record_retains_typed_reason_and_evidence() -> Non
 
 def test_rejected_record_checks_optional_ingress_binding_coherence() -> None:
     """Concrete rejected attempts cannot carry an unbound canonical ingress."""
-    candidate_id = "cand:v2:" + "b" * 32
+    candidate_id = "cand:v1:" + "b" * 32
     ingress = EntryPointResourceReference(
         kind="entry_point", entry_point_id="ep:v1:" + "c" * 32
     )

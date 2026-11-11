@@ -73,7 +73,7 @@ _GOLDEN_ROUTING_SYSTEM = (
 # own attack pattern ID and name, and when each reviewed risk began carrying
 # its class description.
 _GOLDEN_ROUTING_USER = (
-    "9434791a27e636333789d93ca2b3f06608d571357c44c4ae7325021b5f2225d9"
+    "784c2339dad33e72740f40d2ead0f3c268f68beaa02bd0e5a03253bd17655396"
 )
 
 

@@ -317,7 +317,7 @@ def _procedure_chain(steps: list[dict[str, Any]], path: str) -> _Break:
     """Number the steps S00, S01, ... in order and link each to the next.
 
     A step names a tactic exactly when it names a technique. The rules are the
-    producer's ``ScenarioHandoffV6.validate_procedure_chain``.
+    producer's ``ScenarioHandoff.validate_procedure_chain``.
     """
 
     ids = [f"S{index:02d}" for index in range(len(steps))]

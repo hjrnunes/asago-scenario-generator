@@ -47,7 +47,7 @@ from asago_scenario_generator.stpa.tool_call_condition import (
     ToolCallConditionStatus,
 )
 from asago_scenario_generator.stpa.tool_call_condition_eval import (
-    evaluate_condition_v2,
+    evaluate_condition,
 )
 from tests.helpers.sp3_run import _make_ets, _setup_mock_client
 from tests.helpers.stpa_builders import make_cs, make_loss_analysis
@@ -193,7 +193,7 @@ def test_retrieve_then_escalate_is_not_withdrawn_by_an_order_condition() -> None
         {"name": "retrieve_policy", "arguments": {}},
         {"name": "escalate", "arguments": {}},
     ]
-    assert evaluate_condition_v2(condition.model_dump(mode="json"), trace, True)[0] == (
+    assert evaluate_condition(condition.model_dump(mode="json"), trace, True)[0] == (
         "not_detected"
     )
     specs = [
@@ -554,8 +554,8 @@ def test_the_check_and_the_vector_generator_share_one_evaluator() -> None:
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
 
-    assert module.evaluate_condition_v2 is evaluate_condition_v2
-    assert cross_scenario.evaluate_condition_v2 is evaluate_condition_v2
+    assert module.evaluate_condition is evaluate_condition
+    assert cross_scenario.evaluate_condition is evaluate_condition
 
 
 # --- through run_sp3 --------------------------------------------------------

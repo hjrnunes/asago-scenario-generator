@@ -1,4 +1,4 @@
-"""The scenario-handoff-v6 contract kit: fixtures, codes and reproducibility.
+"""The scenario-handoff-v1 contract kit: fixtures, codes and reproducibility.
 
 Every invalid fixture breaks one thing. The table below names the typed codes
 the kit records, the cross-field rule or field error the model reports, and
@@ -19,7 +19,7 @@ from jsonschema import Draft202012Validator
 from pydantic import ValidationError
 
 from asago_scenario_generator.stpa.scenario_prod.handoff import (
-    ScenarioHandoffV6,
+    ScenarioHandoff,
     handoff_ownership_violations,
     handoff_schema_violations,
     verify_handoff_digest,
@@ -27,7 +27,7 @@ from asago_scenario_generator.stpa.scenario_prod.handoff import (
 
 ROOT = Path(__file__).resolve().parents[2]
 CONTRACT_ROOT = ROOT / "data/contracts/scenario-handoff"
-VERSION_DIR = CONTRACT_ROOT / "scenario-handoff-v6"
+VERSION_DIR = CONTRACT_ROOT / "scenario-handoff-v1"
 KIT = VERSION_DIR / "cases"
 
 VALID = {
@@ -178,7 +178,7 @@ def test_the_kit_holds_exactly_the_listed_fixtures() -> None:
     assert {path.name for path in (KIT / "valid").glob("*.json")} == VALID
     # The schema-* cases are listed in test_scenario_handoff_contract_kit.py.
     # The generator names the handoff field and attack path cases, and
-    # test_scenario_handoff_v6.py checks every invalid fixture's codes.
+    # test_scenario_handoff_v1.py checks every invalid fixture's codes.
     generator = _load_generator()
     field_cases = {
         f"{name}.json"
@@ -202,11 +202,11 @@ def test_the_kit_holds_exactly_the_listed_fixtures() -> None:
 def test_valid_fixtures_pass_every_check_and_keep_their_digest(name: str) -> None:
     payload = _load(f"valid/{name}")
 
-    assert payload["schema_version"] == "scenario-handoff-v6"
+    assert payload["schema_version"] == "scenario-handoff-v1"
     assert list(_validator().iter_errors(payload)) == []
     assert handoff_schema_violations(payload) == []
     assert handoff_ownership_violations(payload) == []
-    verify_handoff_digest(ScenarioHandoffV6.model_validate(payload))
+    verify_handoff_digest(ScenarioHandoff.model_validate(payload))
     assert "attack_shape" in payload
 
 
@@ -217,7 +217,7 @@ def test_the_model_refuses_references_repeating_after_stripping(key: str) -> Non
     payload["safe_observable_outcome"][key] = [references[0], f" {references[0]}"]
 
     with pytest.raises(ValidationError, match=rf"\b{key} must be unique\b"):
-        ScenarioHandoffV6.model_validate(payload)
+        ScenarioHandoff.model_validate(payload)
 
 
 def test_valid_fixtures_cover_each_channel_and_the_downgrade_and_null_cases() -> None:
@@ -300,14 +300,14 @@ def test_each_invalid_fixture_is_rejected_with_its_recorded_codes(name: str) -> 
     assert bool(list(_validator().iter_errors(payload))) is schema_rejects
     if rule is not None:
         with pytest.raises(ValidationError, match=rf"\b{rule}\b"):
-            ScenarioHandoffV6.model_validate(payload)
+            ScenarioHandoff.model_validate(payload)
 
 
 def test_every_invalid_fixture_breaks_one_thing_in_a_valid_base() -> None:
     names = {name for name in INVALID if name.startswith("shape-")}
     assert len(names) == 24
     for name in INVALID:
-        assert _load(f"invalid/{name}")["schema_version"] == "scenario-handoff-v6"
+        assert _load(f"invalid/{name}")["schema_version"] == "scenario-handoff-v1"
 
 
 def test_the_ownership_scan_still_catches_prose_in_a_payload() -> None:
