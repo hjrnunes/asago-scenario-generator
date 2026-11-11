@@ -118,7 +118,6 @@
       }
     },
     "source": "stage5_validated",
-    "threat_label": null,
     "turn_count": 2,
     "turn_plan": [
       {
@@ -150,7 +149,7 @@
     ],
     "status": "satisfied"
   },
-  "content_digest": "ddd07f3d0d75891fd210a5583a05e8c6f43d29997720695a66c3e342ad2241c4",
+  "content_digest": "3c135aaa6c453ecac51bab656dbdb7919585bf10a843ddcb12964ccdb96802e2",
   "deduplication": {
     "key": {
       "claim_level": "command_attempt",

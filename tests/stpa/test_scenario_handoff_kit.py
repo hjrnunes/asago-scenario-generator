@@ -229,7 +229,6 @@ def test_valid_fixtures_cover_each_channel_and_the_downgrade_and_null_cases() ->
     operator = shapes["adversarial-indirect-policy-operator.json"]["indirect"]
     assert operator["party_relation"]["controlling_party"] == "operator_insider"
     assert operator["data_item"]["record_ref"] is None
-    assert all(shape["threat_label"] is None for shape in shapes.values() if shape)
 
 
 def test_only_the_failure_call_fixture_carries_a_failure_call() -> None:

@@ -95,7 +95,6 @@
     "downgrade_reason": null,
     "indirect": null,
     "source": "code_default",
-    "threat_label": null,
     "turn_count": 1,
     "turn_plan": [
       {
@@ -122,7 +121,7 @@
     ],
     "status": "satisfied"
   },
-  "content_digest": "1b36d7f0011e0e9b1738480ae2cb939381582806f5372536f9be449701b8d6c8",
+  "content_digest": "316689a806a0bae975617c4efeed7c79531f4ba2eeea7c28d04c3e4b3c9103e3",
   "deduplication": {
     "key": "k",
     "scenario_id": "SCN-101",

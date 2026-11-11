@@ -34,7 +34,6 @@ def _shape(**overrides: Any) -> dict[str, Any]:
         "turn_count": 1,
         "turn_plan": [_turn(1)],
         "indirect": None,
-        "threat_label": None,
         "source": "stage5_validated",
         "downgrade_reason": None,
     }
@@ -214,7 +213,6 @@ SCHEMA_VIOLATIONS = {
     "unknown-speaker": _shape(turn_plan=[_turn(1, "system")]),
     "unknown-source": _shape(source="model"),
     "unknown-downgrade-reason": _downgraded(downgrade_reason="because"),
-    "threat-label-set": _shape(threat_label="other"),
     "carrier-is-prose": _indirect(
         indirect=_indirect_block(carrier_operation="ignore previous instructions")
     ),
@@ -262,8 +260,7 @@ def test_closed_vocabulary_and_identifiers_reject_free_text(
 
 @pytest.mark.parametrize(
     "missing",
-    ["channel", "turn_count", "turn_plan", "indirect", "threat_label", "source"]
-    + ["downgrade_reason"],
+    ["channel", "turn_count", "turn_plan", "indirect", "source", "downgrade_reason"],
 )
 def test_every_shape_key_is_required_and_absent_values_are_explicit_null(
     missing: str,
@@ -356,7 +353,6 @@ def test_the_dumped_shape_keeps_null_values_when_none_is_excluded() -> None:
     )
 
     assert dumped["indirect"] is None
-    assert dumped["threat_label"] is None
     assert dumped["downgrade_reason"] is None
 
 

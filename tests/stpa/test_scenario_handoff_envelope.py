@@ -48,7 +48,6 @@ DIRECT_SHAPE: dict[str, Any] = {
         {"position": 1, "speaker": "attacker_user", "purpose": "request_action"}
     ],
     "indirect": None,
-    "threat_label": None,
     "source": "code_default",
     "downgrade_reason": None,
 }
@@ -68,7 +67,6 @@ INDIRECT_SHAPE: dict[str, Any] = {
             "benign_user_actor_ref": None,
         },
     },
-    "threat_label": None,
     "source": "stage5_validated",
     "downgrade_reason": None,
 }

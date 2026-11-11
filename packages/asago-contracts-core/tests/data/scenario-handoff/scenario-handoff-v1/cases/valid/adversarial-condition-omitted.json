@@ -95,7 +95,6 @@
     "downgrade_reason": null,
     "indirect": null,
     "source": "stage5_validated",
-    "threat_label": null,
     "turn_count": 1,
     "turn_plan": [
       {
@@ -113,7 +112,7 @@
     }
   ],
   "condition_omitted_reason": "The discriminating condition failed validation after one correction (discriminating_condition_check_failed); the scenario is published without a condition.",
-  "content_digest": "f906c67eacc4564dc4578858d8281520db5ca1e2165c74ef4c93634abac187cf",
+  "content_digest": "0911db24f80f034ece72c70dd1a78ae27d8616d5f9a7bf9e97585893039fcac6",
   "documented_operations": [],
   "gherkin": {
     "feature": "Selected semantic behavior for SCN-005",

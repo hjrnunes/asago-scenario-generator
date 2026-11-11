@@ -493,7 +493,6 @@ def attack_shape(
         "turn_count": len(turns),
         "turn_plan": turns,
         "indirect": indirect,
-        "threat_label": None,
         "source": source,
         "downgrade_reason": downgrade_reason,
     }

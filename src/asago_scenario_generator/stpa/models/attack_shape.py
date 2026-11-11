@@ -204,7 +204,6 @@ class AttackShape(_ShapeModel):
     turn_count: StrictInt = Field(ge=1, le=MAX_TURNS)
     turn_plan: list[TurnShape] = Field(min_length=1, max_length=MAX_TURNS)
     indirect: IndirectShape | None
-    threat_label: None
     source: ShapeSource
     downgrade_reason: ShapeDowngradeReason | None
 
@@ -310,7 +309,6 @@ def default_attack_shape(reason: ShapeDowngradeReason | None) -> AttackShape:
             )
         ],
         indirect=None,
-        threat_label=None,
         source=ShapeSource.CODE_DEFAULT,
         downgrade_reason=reason,
     )

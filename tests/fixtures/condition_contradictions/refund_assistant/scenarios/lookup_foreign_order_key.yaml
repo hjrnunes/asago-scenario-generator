@@ -351,7 +351,7 @@ observation:
     supported_criteria:
     - unauthorized_order_access
     unsupported_criteria: []
-content_digest: 380f76ae15743523f819a31838d1ac9169391b39b54adfcd54454e67231c9415
+content_digest: 82de50a74c84971e8d76f520c78360098a74eadf964238651e136ddc5457a23e
 discriminating_condition:
   statement: The order being looked up belongs to a customer other than the authenticated
     user.
@@ -411,6 +411,5 @@ attack_shape:
     party_relation:
       controller: third_party
       benign_user_actor_ref: null
-  threat_label: null
   source: stage5_validated
   downgrade_reason: null

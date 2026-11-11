@@ -224,7 +224,7 @@ observation:
     supported_criteria:
     - observation_1
     unsupported_criteria: []
-content_digest: d9479de62b3db3b2898e410ad1e51fdadba2a8b0201d4c3063e70d93cb60b336
+content_digest: 1c6023edb1a34fe51873a182ab47b66faf425d5d6c78968d4c0a1e1cb6821e16
 discriminating_condition:
   statement: The order ID used in a refund or payment operation belongs to a customer
     other than the authenticated session customer.
@@ -277,7 +277,6 @@ attack_shape:
     speaker: attacker_user
     purpose: request_action
   indirect: null
-  threat_label: null
   source: stage5_validated
   downgrade_reason: null
 uca:
@@ -338,7 +337,7 @@ worst_case_threat: Incorrect financial transactions or unauthorized handling of 
 contract:
   id: scenario-handoff
   version: scenario-handoff-v1
-  spec_digest: sha256:7daa981741a4eac49eb7ef52a59d67c5877ec8a7557bea1ea9ecc2ec6c9374f6
+  spec_digest: sha256:c9e6e401ca6f1448ebb0031a9479127e43fcd7c9d7b83132352276c06a3e7c6e
   requires: []
   provenance:
     writer: asago_scenario_generator.stpa.scenario_prod.handoff

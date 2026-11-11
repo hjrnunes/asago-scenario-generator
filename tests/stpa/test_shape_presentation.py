@@ -81,7 +81,6 @@ INDIRECT = AttackShape.model_validate(
                 "benign_user_actor_ref": None,
             },
         },
-        "threat_label": None,
         "source": "stage5_validated",
         "downgrade_reason": None,
     }
@@ -97,7 +96,6 @@ DIRECT_THREE = AttackShape.model_validate(
             {"position": 3, "speaker": "attacker_user", "purpose": "request_action"},
         ],
         "indirect": None,
-        "threat_label": None,
         "source": "stage5_validated",
         "downgrade_reason": None,
     }

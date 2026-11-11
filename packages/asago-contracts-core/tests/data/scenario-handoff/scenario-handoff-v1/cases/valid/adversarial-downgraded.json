@@ -95,7 +95,6 @@
     "downgrade_reason": "no_attacker_influenced_operation",
     "indirect": null,
     "source": "code_default",
-    "threat_label": null,
     "turn_count": 1,
     "turn_plan": [
       {
@@ -122,7 +121,7 @@
     ],
     "status": "satisfied"
   },
-  "content_digest": "a8e1dc55a8aaeee3ac3981c84578a084d6da2ef7ebd85fb91edb8d8cfc32b5e3",
+  "content_digest": "50af207aa8269a82143df12d34ed1955eb0702f26cf4ed2c6968e414da8ef8f6",
   "deduplication": {
     "key": {
       "claim_level": "command_attempt",

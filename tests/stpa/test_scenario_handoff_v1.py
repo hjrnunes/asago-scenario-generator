@@ -112,7 +112,6 @@ DIRECT_INJECTION = {"id": "AML.T0051.000", "name": "LLM Prompt Injection: Direct
 DIRECT = AttackShape.model_validate(
     {
         **DIRECT_REPLY,
-        "threat_label": None,
         "source": "stage5_validated",
         "downgrade_reason": None,
     }
@@ -541,7 +540,7 @@ LLM01 = HandoffTaxonomyRef(
 )
 #: The content digest of ``build_scenario_handoff(_envelope(adversarial()))``
 #: with no taxonomy block, as the writer signs it in the handoff digest domain.
-BLOCKLESS_DIGEST = "063f1c4113e03b44cd39d7ccf47f8e8b7298e10b83d824de84386ddc95af7d73"
+BLOCKLESS_DIGEST = "3c82fd287c61b09108a11fddf663af22e03559e79f097de31e0ca961131743da"
 
 
 def _two_losses(spec: ScenarioSpec) -> ScenarioSpec:

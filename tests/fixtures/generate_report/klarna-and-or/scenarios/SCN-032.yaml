@@ -235,7 +235,7 @@ worst_case_threat: Violations of financial services regulations, leading to lega
 contract:
   id: scenario-handoff
   version: scenario-handoff-v1
-  spec_digest: sha256:7daa981741a4eac49eb7ef52a59d67c5877ec8a7557bea1ea9ecc2ec6c9374f6
+  spec_digest: sha256:c9e6e401ca6f1448ebb0031a9479127e43fcd7c9d7b83132352276c06a3e7c6e
   requires: []
   provenance:
     writer: asago_scenario_generator.stpa.scenario_prod.handoff

@@ -95,7 +95,6 @@
     "downgrade_reason": null,
     "indirect": null,
     "source": "stage5_validated",
-    "threat_label": null,
     "turn_count": 1,
     "turn_plan": [
       {
@@ -112,7 +111,7 @@
       "source_id": "PM-1-1"
     }
   ],
-  "content_digest": "4fba75fd5ce86ae4ca4f7b2ab9de717a4b813d86cb89888c894ad0052ac900ac",
+  "content_digest": "127867abd58b1e5b8be65178c959157c31c129b7588371e30db7934d8575c241",
   "deduplication": {
     "key": {
       "claim_level": "unknown",

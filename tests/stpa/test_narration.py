@@ -55,7 +55,6 @@ INDIRECT = AttackShape.model_validate(
                 "benign_user_actor_ref": None,
             },
         },
-        "threat_label": None,
         "source": "stage5_validated",
         "downgrade_reason": None,
     }

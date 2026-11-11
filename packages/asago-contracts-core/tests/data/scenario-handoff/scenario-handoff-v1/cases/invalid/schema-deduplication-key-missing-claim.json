@@ -95,7 +95,6 @@
     "downgrade_reason": null,
     "indirect": null,
     "source": "code_default",
-    "threat_label": null,
     "turn_count": 1,
     "turn_plan": [
       {
@@ -122,7 +121,7 @@
     ],
     "status": "satisfied"
   },
-  "content_digest": "b91b1c04a9fa8338f8dea12d9c56bbc27b33d7dcd19213dcde6b5dd3ddceeb39",
+  "content_digest": "daa75c087627bc6004b65e8ed5caece379ae2f5f0fe7d56cbac4ff39bc491a61",
   "deduplication": {
     "key": {
       "condition": "[{\"kind\":\"value\",\"left\":{\"path\":\"TARGET-STATE.items.ITEM-1.owner_id\",\"source\":\"fact\"},\"op\":\"ne\",\"right\":{\"path\":\"TARGET-STATE.authenticated_user_id\",\"source\":\"fact\"}}]",

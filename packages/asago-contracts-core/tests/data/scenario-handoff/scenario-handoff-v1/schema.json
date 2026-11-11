@@ -605,10 +605,6 @@
             }
           ]
         },
-        "threat_label": {
-          "title": "Threat Label",
-          "type": "null"
-        },
         "source": {
           "$ref": "#/$defs/ShapeSource"
         },
@@ -628,7 +624,6 @@
         "turn_count",
         "turn_plan",
         "indirect",
-        "threat_label",
         "source",
         "downgrade_reason"
       ],

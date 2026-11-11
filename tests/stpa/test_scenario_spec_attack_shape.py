@@ -26,7 +26,6 @@ def _shape() -> AttackShape:
                 {"position": 1, "speaker": "attacker_user", "purpose": "request_action"}
             ],
             "indirect": None,
-            "threat_label": None,
             "source": "code_default",
             "downgrade_reason": "shape_call_failed",
         }

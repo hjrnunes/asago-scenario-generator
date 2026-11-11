@@ -52,7 +52,6 @@ def _validated_shape() -> AttackShape:
             ),
         ],
         indirect=None,
-        threat_label=None,
         source=ShapeSource.STAGE5_VALIDATED,
         downgrade_reason=None,
     )
@@ -352,7 +351,6 @@ def _indirect_shape(carrier_operation: str = "read_order_note") -> AttackShape:
                 controller=ItemController.THIRD_PARTY, benign_user_actor_ref=None
             ),
         ),
-        threat_label=None,
         source=ShapeSource.STAGE5_VALIDATED,
         downgrade_reason=None,
     )

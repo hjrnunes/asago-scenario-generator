@@ -116,7 +116,6 @@
     "downgrade_reason": null,
     "indirect": null,
     "source": "stage5_validated",
-    "threat_label": null,
     "turn_count": 2,
     "turn_plan": [
       {
@@ -153,7 +152,7 @@
     ],
     "status": "satisfied"
   },
-  "content_digest": "1e6fbfc655d4363520e224d7494fbbe430cf4565e1982bfa8791c1f7b5d21568",
+  "content_digest": "f4c81c24648139213fbcff7e3898ebd066f1f53fbb3884c5d2a88c7ecbb30590",
   "deduplication": {
     "key": {
       "claim_level": "command_attempt",

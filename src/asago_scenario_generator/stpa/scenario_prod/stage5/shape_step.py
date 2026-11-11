@@ -180,7 +180,6 @@ def _shape_fields(proposal: ShapeProposal) -> dict[str, object]:
             for turn in proposal.turn_plan
         ],
         indirect=_indirect_shape(proposal),
-        threat_label=None,
         source=ShapeSource.STAGE5_VALIDATED,
         downgrade_reason=None,
     )

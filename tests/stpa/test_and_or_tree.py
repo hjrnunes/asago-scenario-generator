@@ -68,7 +68,6 @@ SCHEMA = handoff_schema()
 DIRECT = AttackShape.model_validate(
     {
         **DIRECT_REPLY,
-        "threat_label": None,
         "source": "stage5_validated",
         "downgrade_reason": None,
     }

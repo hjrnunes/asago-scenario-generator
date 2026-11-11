@@ -131,7 +131,6 @@ def test_a_valid_direct_proposal_becomes_a_stage5_validated_shape() -> None:
     assert shape.source is ShapeSource.STAGE5_VALIDATED
     assert shape.downgrade_reason is None
     assert shape.channel is AttackChannel.DIRECT
-    assert shape.threat_label is None
 
 
 def test_a_multi_turn_direct_proposal_keeps_its_plan() -> None:

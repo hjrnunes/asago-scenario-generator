@@ -191,7 +191,7 @@ observation:
     supported_criteria:
     - obs_plan_mismatch
     unsupported_criteria: []
-content_digest: 6f712794025609174357cf2e6264c29b5e53ef469ea49d5f73c6d220f1a44d24
+content_digest: b5d24395ad1975d60d5bc94ec396d4b325fa0bb1ee0310fbd7d7162bab10124b
 discriminating_condition:
   statement: The plan_id used in schedule_payment belongs to an order owned by a customer
     other than the authenticated user.
@@ -251,7 +251,6 @@ attack_shape:
     party_relation:
       controlling_party: third_party
       benign_user_actor_ref: null
-  threat_label: null
   source: stage5_validated
   downgrade_reason: null
 uca:
@@ -319,7 +318,7 @@ worst_case_threat: Unauthorized or incorrect modification of customer payment sc
 contract:
   id: scenario-handoff
   version: scenario-handoff-v1
-  spec_digest: sha256:7daa981741a4eac49eb7ef52a59d67c5877ec8a7557bea1ea9ecc2ec6c9374f6
+  spec_digest: sha256:c9e6e401ca6f1448ebb0031a9479127e43fcd7c9d7b83132352276c06a3e7c6e
   requires: []
   provenance:
     writer: asago_scenario_generator.stpa.scenario_prod.handoff

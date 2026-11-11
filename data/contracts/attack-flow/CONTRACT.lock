@@ -4,7 +4,7 @@
   "files": {
     "attack-flow-2.0.0/README.md": "657f3f8bbfdc2e4a1227061df74b2bc4021e3d6c0ebed321d8b2f46366aeb2b3",
     "attack-flow-2.0.0/schema.json": "6b4239490d51e3d99721a8fb665424ded18b213fa0cb8b82dcc8bc7355a321dd",
-    "attack-flow-2.0.0/valid/hazard.json": "0085d8e897493ec4e52f3f846c8743ab0eb218936ebee90a3819a93409435b08"
+    "attack-flow-2.0.0/valid/hazard.json": "ac8e7d26803ac16e658d02f658f563ac7177150fa631378e24fa7b03cf32c48b"
   },
   "schema_version": "attack-flow-2.0.0"
 }
