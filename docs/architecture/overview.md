@@ -731,10 +731,9 @@ After Stage 5 compiles the specs and before the handoff builder runs,
 `stage5_shape` (`stpa.scenario_prod.stage5.shape_step`) makes one model request
 per adversarial scenario. A functional scenario (`adversary.kind: none`) gets
 `attack_shape: null` and no request. The request asks for structure only: the
-`channel` (`direct`, `indirect`, and `forged_transcript` only when the run
-enables it), the `turn_count`, a `turn_plan` of speaker and purpose per turn,
-and for an indirect attack the carrier operation, content kind, record
-reference and controller. Every value comes from a closed list or is a short
+`channel` (`direct` or `indirect`), the `turn_count`, a `turn_plan` of speaker
+and purpose per turn, and for an indirect attack the carrier operation, content
+kind, record reference and controller. Every value comes from a closed list or is a short
 identifier with no whitespace, so the response model has no free-text field and
 attack words cannot appear in it. The prompts are
 `stage5_shape_system.j2` and `stage5_shape_user.j2`.
@@ -746,7 +745,7 @@ records why in `downgrade_reason`:
 | Reason | Trigger |
 | --- | --- |
 | `shape_call_failed` | The request failed, returned undecodable output, or returned a reply outside the response model. A recorded-response replay with no recorded reply also lands here. |
-| `shape_validation_failed` | The reply breaks a cross-field rule (R1 to R6) or uses a channel the adversary kind does not allow. |
+| `shape_validation_failed` | The reply breaks a cross-field rule (R1 to R4 or R6) or uses a channel the adversary kind does not allow. |
 | `carrier_not_observed` | The indirect carrier is not an operation in the target profile's inventory, or the run has no profile (R8). |
 | `no_attacker_influenced_operation` | No profile resource for the carrier operation marks `attacker_influence: indirect`. |
 

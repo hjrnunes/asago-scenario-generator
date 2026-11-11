@@ -298,13 +298,12 @@ one. The `stage5_shape` step fills it: after Stage 5 compiles an adversarial
 scenario, one closed-vocabulary model request proposes the channel, the planned
 turns and, for an attack through content, the carrier operation. Code validates
 the proposal and replaces any failure with a single direct request that carries
-the reason. The forged-transcript channel stays out of the request unless
-`run_sp3` receives `ShapeStepConfig(allow_forged_transcript=True)`. The handoff retains the semantic failure
-criterion, the safe alternative, lineage, identity, and hypothesis framing,
-and publishes no prepared message, prepared history, delivery route, oracle
-selection, detector expression, judge prompt, or executable setup. The
-consumer's artifact-design path reads the handoff plus an explicit environment
-and owns the concrete test design.
+the reason. The handoff retains the semantic failure criterion, the safe
+alternative, lineage, identity, and hypothesis framing, and publishes no
+prepared message, prepared history, delivery route, oracle selection, detector
+expression, judge prompt, or executable setup. The consumer's artifact-design
+path reads the handoff plus an explicit environment and owns the concrete test
+design.
 
 ### Execution meaning and target profiles
 
@@ -876,8 +875,8 @@ fields are:
 - `preconditions`: the planted item, the benign user's actor, and the
   attacker's beliefs; empty for a functional scenario.
 - `procedure`: one step per attack-shape step (`S00`, `S01`, ...), each with
-  its ATLAS tactic and technique and its channel (`tool_data`, `user_turn`,
-  `forged_history`); empty for a functional scenario.
+  its ATLAS tactic and technique and its channel (`tool_data`, `user_turn`);
+  empty for a functional scenario.
 - `worst_case_threat`: the scenario's losses.
 
 A handoff may also carry an optional `taxonomy` block: `atlas_release`, the

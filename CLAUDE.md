@@ -28,8 +28,7 @@ own documents.
   item; `PartyRelation.controller` states it.
 - **Planted item** — the data item an indirect attack carries, with its carrier
   operation and record (`PlantedItem`).
-- **Attack channel** — how the attack reaches the agent: direct, indirect or
-  forged transcript.
+- **Attack channel** — how the attack reaches the agent: direct or indirect.
 - **Turn shape** — the planned user turns; `TurnShape` holds them and pairs the
   count with the plan.
 
