@@ -34,12 +34,12 @@ A document carries the envelope:
 ```json
 {
   "contract": {
-    "id": "midojo-delivery",
-    "version": "midojo-delivery-v1",
+    "id": "demo",
+    "version": "demo-v1",
     "spec_digest": "sha256:...",
     "requires": ["feature-a"],
     "provenance": {
-      "writer": "asago-orch.qualification.midojo_episode_runner",
+      "writer": "example-writer",
       "writer_version": "0.1.0",
       "validator_version": "asago-contracts-core 0.1.0"
     }

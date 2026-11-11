@@ -437,4 +437,4 @@ def test_a_spec_set_without_the_contract_names_the_installed_ones(kit: Path) -> 
     specs: SpecSet = load_specs(kit)
 
     with pytest.raises(UnknownContractError, match="demo"):
-        specs.spec("midojo-delivery", "midojo-delivery-v1")
+        specs.spec("absent", "absent-v1")
