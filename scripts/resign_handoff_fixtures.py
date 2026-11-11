@@ -15,8 +15,11 @@ Usage:
 without writing. ``--write`` rewrites those fixtures.
 
 The script covers the enveloped report fixtures only. The bare handoffs under
-``tests/fixtures/condition_contradictions`` are recorded documents that the
-condition-contradiction sweep reads raw, and they stay as recorded.
+``tests/fixtures/condition_contradictions`` carry no envelope. Their
+``content_digest`` is ``handoff_payload_digest`` over the whole document, the
+condition contradiction sweep reads them raw, and this script leaves them alone.
+A digest tool that frames the whole document would sign the report fixtures
+wrongly, because the writer frames the payload without the envelope.
 """
 
 from __future__ import annotations
