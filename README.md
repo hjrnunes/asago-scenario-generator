@@ -940,6 +940,25 @@ The unit suite is deterministic and does not require an LLM endpoint. Unit
 tests pin behavior, and the phrase tables in `tests/phrases/*.yaml` pin prompt
 text. Pipeline output and harness state are ignored.
 
+### Contract copies
+
+`data/contracts/` is the only maintained source of each contract. These tests fail
+when a copy differs from it, and CI runs them with the rest of `tests/`:
+
+- `tests/test_contracts_core_data.py` checks the scenario-handoff copies in
+  `asago-contracts-core` (its package data and its test data) with
+  `scripts/sync_handoff_package_data.py --check`.
+- `tests/test_built_wheels.py` builds every wheel, installs them into a fresh
+  environment and reads each contract from a directory outside the checkout. It
+  compares what the wheels carry with `data/contracts` and names each missing file.
+- `tests/test_consumer_independence.py` fails when a requirement, the lock or an
+  import names a consumer package.
+
+The consumer repository checks its copies of `model-profile`, `target-profile` and
+`tool-call-condition` against this checkout, because it resolves this checkout by path.
+Run `scripts/sync_tool_call_condition.py --check --garak ../garak` to check the Garak
+copy of `tool-call-condition`.
+
 See the [architecture overview](docs/architecture/overview.md).
 
 ## License
